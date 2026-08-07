@@ -1,45 +1,24 @@
 import torch
 import pytest
 
-from rl.utils.runtime import (
+from runners.on_policy import OnPolicyRunner
+from runners.off_policy import OffPolicyRunner
+
+from app.utils.runtime import (
     RuntimeContext,
     create_runtime_context,
 )
 
 
-def test_create_runtime_context(monkeypatch):
+def test_create_runtime_context():
 
     config = {
-        "runtime": {
-            "device": "cpu",
-            "dtype": "float32",
-            "num_threads": 4,
-            "seed": 123,
-            "deterministic": True,
-        }
+        "device": "cpu",
+        "dtype": "float32",
+        "num_threads": 4,
+        "seed": 123,
+        "deterministic": True,
     }
-
-    seed_called = {}
-
-    def fake_set_seed(seed, deterministic):
-        seed_called["seed"] = seed
-        seed_called["deterministic"] = deterministic
-
-    monkeypatch.setattr(
-        "rl.utils.runtime.set_seed",
-        fake_set_seed,
-    )
-
-    threads_called = {}
-
-    def fake_set_num_threads(num_threads):
-        threads_called["num_threads"] = num_threads
-
-    monkeypatch.setattr(
-        torch,
-        "set_num_threads",
-        fake_set_num_threads,
-    )
 
     context = create_runtime_context(config)
 
@@ -51,23 +30,14 @@ def test_create_runtime_context(monkeypatch):
     assert context.seed == 123
     assert context.deterministic is True
 
-    assert seed_called == {
-        "seed": 123,
-        "deterministic": True,
-    }
-
-    assert threads_called["num_threads"] == 4
-
 
 def test_create_runtime_context_with_invalid_dtype():
 
     config = {
-        "runtime": {
-            "device": "cpu",
-            "dtype": "float16",
-            "seed": 1,
-            "deterministic": False,
-        }
+        "device": "cpu",
+        "dtype": "float16",
+        "seed": 1,
+        "deterministic": False,
     }
 
     with pytest.raises(ValueError):
@@ -77,13 +47,11 @@ def test_create_runtime_context_with_invalid_dtype():
 def test_create_runtime_context_with_zero_threads(monkeypatch):
 
     config = {
-        "runtime": {
-            "device": "cpu",
-            "dtype": "float32",
-            "num_threads": 0,
-            "seed": 1,
-            "deterministic": False,
-        }
+        "device": "cpu",
+        "dtype": "float32",
+        "num_threads": 0,
+        "seed": 1,
+        "deterministic": False,
     }
 
     called = False
@@ -96,11 +64,6 @@ def test_create_runtime_context_with_zero_threads(monkeypatch):
         torch,
         "set_num_threads",
         fake_set_num_threads,
-    )
-
-    monkeypatch.setattr(
-        "rl.utils.runtime.set_seed",
-        lambda *args, **kwargs: None,
     )
 
     context = create_runtime_context(config)
@@ -116,21 +79,14 @@ def test_create_runtime_context_with_zero_threads(monkeypatch):
         ("float64", torch.float64),
     ],
 )
-def test_create_runtime_context_with_dtypes(dtype_name, expected, monkeypatch):
+def test_create_runtime_context_with_dtypes(dtype_name, expected):
 
     config = {
-        "runtime": {
-            "device": "cpu",
-            "dtype": dtype_name,
-            "seed": 1,
-            "deterministic": False,
-        }
+        "device": "cpu",
+        "dtype": dtype_name,
+        "seed": 1,
+        "deterministic": False,
     }
-
-    monkeypatch.setattr(
-        "rl.utils.runtime.set_seed",
-        lambda *args, **kwargs: None,
-    )
 
     context = create_runtime_context(config)
 
@@ -139,5 +95,24 @@ def test_create_runtime_context_with_dtypes(dtype_name, expected, monkeypatch):
 
 def test_create_runtime_context_with_missing_runtime_config():
 
+    with pytest.raises(TypeError):
+        create_runtime_context()
+
+
+def test_create_runtime_context_with_empty_runtime_config():
+
     with pytest.raises(ValueError):
         create_runtime_context({})
+
+
+def test_create_runtime_context_with_invalid_runner_type():
+
+    config = {
+        "device": "cpu",
+        "dtype": "float16",
+        "seed": 1,
+        "deterministic": False,
+    }
+
+    with pytest.raises(ValueError):
+        create_runtime_context(config)

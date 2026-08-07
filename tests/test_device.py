@@ -1,6 +1,6 @@
 import pytest
 import torch
-from rl.utils.device import resolve_device
+from app.utils.device import resolve_device
 
 @pytest.mark.parametrize(
     "device_name, expected_type",

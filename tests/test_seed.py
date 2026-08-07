@@ -1,6 +1,6 @@
 import pytest
 import torch
-from rl.utils.seed import set_seed
+from app.utils.seed import set_seed
 
 
 @pytest.mark.parametrize(

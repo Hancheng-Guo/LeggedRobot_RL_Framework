@@ -1,6 +1,6 @@
 import pytest
 import yaml
-from rl.utils.config import load_yaml
+from utils.config import load_yaml
 
 
 def test_load_yaml_success(tmp_path):

@@ -1,0 +1,7 @@
+config_dir: ./configs/
+stage_manager_config_dir: ./configs/stages/
+env_config_dir: ./configs/envs/
+alg_config_dir: ./configs/algorithms/
+# model_config_dir_default: ./configs/models/
+# simulator_config_dir_default: ./configs/simulators/
+# task_config_dir_default: ./configs/tasks/

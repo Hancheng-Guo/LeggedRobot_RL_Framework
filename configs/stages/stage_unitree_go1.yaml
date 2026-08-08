@@ -1,0 +1,55 @@
+initial_stage: 0
+
+stages:
+
+  - name: stand
+    max_iterations: 1000
+
+    environment:
+      command:
+        velocity:
+          x: [0.0, 0.0]
+          y: [0.0, 0.0]
+          yaw: [0.0, 0.0]
+
+      terrain:
+        type: flat
+
+    transition:
+      metric: episode_success_rate
+      threshold: 0.9
+      window_size: 100
+
+
+  - name: walk
+
+    environment:
+      command:
+        velocity:
+          x: [-1.0, 1.0]
+          y: [-0.5, 0.5]
+          yaw: [-1.0, 1.0]
+
+      terrain:
+        type: flat
+
+    transition:
+      metric: episode_success_rate
+      threshold: 0.9
+      window_size: 100
+
+
+  - name: rough_terrain
+
+    environment:
+      terrain:
+        type: rough
+
+      disturbance:
+        enabled: true
+        force_range: [0, 50]
+
+    transition:
+      metric: episode_success_rate
+      threshold: 0.85
+      window_size: 200

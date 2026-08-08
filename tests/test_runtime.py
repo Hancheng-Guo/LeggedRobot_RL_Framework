@@ -1,13 +1,7 @@
 import torch
 import pytest
 
-from runners.on_policy import OnPolicyRunner
-from runners.off_policy import OffPolicyRunner
-
-from app.utils.runtime import (
-    RuntimeContext,
-    create_runtime_context,
-)
+from app.utils.context import RuntimeContext, create_runtime_context
 
 
 def test_create_runtime_context():

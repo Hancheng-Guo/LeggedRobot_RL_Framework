@@ -4,8 +4,9 @@ from pathlib import Path
 from typing import Any
 
 from runners.base import BaseRunner
-from runners.utils.stage import StageManager
+# from app.utils.stage import StageManager
 from runners.callbacks.registry import CALLBACK_TYPE_MAP
+from utils.component import Component
 from envs.registry import ENV_TYPE_MAP
 from rl.algorithms.registry import ALG_TYPE_MAP
 from utils.config import load_yaml, get_yaml_value
@@ -17,16 +18,12 @@ class OnPolicyRunner(BaseRunner):
         self,
         max_iterations: int,
         rollout_length: int,
-        stage_manager: str,
         callback_names: list[str],
-        component_detail: dict, 
-        **kwargs
+        component: Component, 
     ) -> None:
         self.max_iterations = max_iterations
+        self.current_iteration = None
         self.rollout_length = rollout_length
-        self.stage_manager = StageManager(
-            config_name=stage_manager
-        )
 
         self.callbacks = None
         self._build_callbacks(
@@ -35,9 +32,9 @@ class OnPolicyRunner(BaseRunner):
             rollout_length=rollout_length,
         )
 
-        environment_detail = component_detail.get("environment")
-        simulator_detail = component_detail.get("simulator")
-        task_detail = component_detail.get("task")
+        environment_detail = component.get("environment")
+        simulator_detail = component.get("simulator")
+        task_detail = component.get("task")
         self.environment = None
         self._build_environment(
             environment_detail=environment_detail,
@@ -45,8 +42,8 @@ class OnPolicyRunner(BaseRunner):
             task_detail=task_detail,
         )
 
-        algorithm_detail = component_detail.get("algorithm")
-        model_detail = component_detail.get("model")
+        algorithm_detail = component.get("algorithm")
+        model_detail = component.get("model")
         self.algorithm = None
         self._build_algorithm(
             algorithm_detail=algorithm_detail,
@@ -153,16 +150,18 @@ class OnPolicyRunner(BaseRunner):
 
     def train(self) -> None:
 
-        obs = self.env.reset()
+        obs = self.environment.reset()
 
-        self._run_callbacks("on_train_start")
+        self._run_callbacks("_on_train_start")
 
         for iteration in range(self.max_iterations):
 
             self.current_iteration = iteration
-            self._run_callbacks("on_iteration_start")
+            self._run_callbacks("_on_iteration_start")
 
             for _ in range(self.rollout_length):
+
+                self._run_callbacks("_on_step_start")
                 
                 with torch.no_grad():
                     policy_output = self.algorithm.act(obs)
@@ -174,7 +173,7 @@ class OnPolicyRunner(BaseRunner):
                     terminated,
                     truncated,
                     info,
-                ) = self.env.step(policy_output.action)
+                ) = self.environment.step(policy_output.action)
 
                 self.algorithm.process_transition(
                     obs=obs,
@@ -188,6 +187,8 @@ class OnPolicyRunner(BaseRunner):
 
                 obs = next_obs
 
+                self._run_callbacks("_on_step_end")
+
             # Bootstrap the final observation and compute
             # returns / advantages inside the algorithm.
             with torch.no_grad():
@@ -195,9 +196,9 @@ class OnPolicyRunner(BaseRunner):
 
             update_info = self.algorithm.update()
 
-            self._run_callbacks("on_iteration_end", info=update_info)
+            self._run_callbacks("_on_iteration_end", info=update_info)
 
-        self._run_callbacks("on_train_end")
+        self._run_callbacks("_on_train_end")
 
 
     def test(self) -> None:
@@ -217,4 +218,14 @@ class OnPolicyRunner(BaseRunner):
 
 
     def close(self) -> None:
+        pass
+
+
+    def config_update(
+        self,
+        max_iterations: int,
+        rollout_length: int,
+        callback_names: list[str],
+        component: dict, 
+    ) -> None:
         pass

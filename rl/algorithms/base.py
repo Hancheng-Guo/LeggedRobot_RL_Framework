@@ -1,5 +1,15 @@
 from abc import ABC, abstractmethod
 from typing import Any
+from dataclasses import dataclass
+from torch import Tensor
+
+
+@dataclass
+class PolicyOutput:
+
+    action: Tensor
+    log_prob: Tensor | None = None
+    value: Tensor | None = None
 
 
 class BaseAlgorithm(ABC):

@@ -9,7 +9,7 @@ class BaseCallback(ABC):
         pass
 
 
-    def _on_train_begin(self) -> None:
+    def _on_train_start(self) -> None:
         pass
 
 
@@ -17,11 +17,7 @@ class BaseCallback(ABC):
         pass
 
 
-    def _on_close(self) -> None:
-        pass
-
-
-    def _on_iteration_begin(self) -> None:
+    def _on_iteration_start(self) -> None:
         pass
 
 
@@ -29,10 +25,13 @@ class BaseCallback(ABC):
         pass
 
 
-    def _on_step_begin(self) -> None:
+    def _on_step_start(self) -> None:
         pass
 
 
     def _on_step_end(self) -> None:
         pass
 
+    
+    def _on_close(self) -> None:
+        pass

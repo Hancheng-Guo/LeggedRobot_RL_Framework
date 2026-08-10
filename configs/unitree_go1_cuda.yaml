@@ -6,45 +6,33 @@ runtime:
   deterministic: true
 
 
-runner:
-  runner_type: "on_policy"
-  max_iterations: 2000
-  rollout_length: 48
-  stage_manager: "stage_unitree_go1"
-  callback_names:
-    - progress_bar
-    - checkpoint
-    - tensorboard
-    - early_stopping
-    - logging
-
-
 component:
 
+  runner:
+    - type: "on_policy"
+      config: "rl_unitree_go1"
+
   algorithm:
-    type_name: "ppo"
-    config_names:
-      - "ppo_unitree_go1_stage1"
+    - type: "ppo"
+      config: "ppo_unitree_go1_stage1"
 
   model:
-    type_name: ""
-    config_names:
-      - "tmp"
+    - type: ""
+      config: "tmp"
+    - type: ""
+      config: "tmp2"
 
   environment:
-    type_name: "vector_env"
-    config_names:
-      - "mujoco_unitree_go1_stage1"
+    - type: "vector_env"
+      config: "mujoco_unitree_go1_stage1"
       
   simulator:
-    type_name: ""
-    config_names:
-      - "tmp"
+    - type: ""
+      config: "tmp"
       
   task:
-    type_name: ""
-    config_names:
-      - "tmp"
+    - type: ""
+      config: "tmp"
 
 
 

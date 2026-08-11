@@ -14,12 +14,12 @@ class ComponentInfo:
 
 @dataclass(frozen=True)
 class Component:
-    runner: ComponentInfo
-    algorithm: ComponentInfo
-    model: ComponentInfo
-    environment: ComponentInfo
-    simulator: ComponentInfo
-    task: ComponentInfo
+    runner: ComponentInfo | None
+    algorithm: ComponentInfo | None
+    model: ComponentInfo | None
+    environment: ComponentInfo | None
+    simulator: ComponentInfo | None
+    task: ComponentInfo | None
 
 
 def _create_component_info(
@@ -27,7 +27,10 @@ def _create_component_info(
         component_name: str,
     ) -> ComponentInfo:
 
-    component = component_dict[component_name]
+    component = component_dict.get(component_name, None)
+
+    if component is None:
+        return None
 
     config_name = component.get("config", None)
     config_dir = component.get(

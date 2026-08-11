@@ -1,6 +1,5 @@
 max_iterations: 2000
 rollout_length: 48
-stage_manager: "stage_unitree_go1"
 callback_names:
   - progress_bar
   - checkpoint

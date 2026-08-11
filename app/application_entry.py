@@ -1,4 +1,3 @@
-import warnings
 from pathlib import Path
 from datetime import datetime
 
@@ -35,6 +34,7 @@ class ApplicationEntry:
         self.stage_manager = StageManager(
             component=self.config.get("component"),
             context=self.context,
+            stage_detail=self.config.get("stage"),
         )
 
 

@@ -1,17 +1,74 @@
 import torch
 
+from utils.component import Component
+from app.utils.context import RuntimeContext
 from rl.algorithms.base import OnPolicyAlgorithm, PolicyOutput
+from utils.param import update_attributes
 
 
 class PPO(OnPolicyAlgorithm):
 
     def __init__(
         self,
-        model_detail: dict,
-        configs: list[dict],
+        context: RuntimeContext,
+    ) -> None:
+
+        self.context = context
+
+        self.model = None
+        self.storage = None
+
+        self.gamma = None
+        self.gae_lambda = None
+        self.clip_range = None
+        self.entropy_coef = None
+        self.value_coef = None
+        self.max_grad_norm = None
+        self.num_epochs = None
+        self.num_mini_batches = None
+
+
+    def config_update(
+        self,
+        component: Component,
+        gamma: float,
+        gae_lambda: float,
+        clip_range: float,
+        entropy_coef: float,
+        value_coef: float,
+        max_grad_norm: float,
+        num_epochs: int,
+        num_mini_batches: int,
+    ) -> None:
+
+        update_attributes(
+            self,
+            gamma=gamma,
+            gae_lambda=gae_lambda,
+            clip_range=clip_range,
+            entropy_coef=entropy_coef,
+            value_coef=value_coef,
+            max_grad_norm=max_grad_norm,
+            num_epochs=num_epochs,
+            num_mini_batches=num_mini_batches,
+        )
+        self._build_model(component=component)
+        self._build_storage(component=component)
+        
+
+    def _build_model(
+        self,
+        component: Component
     ) -> None:
         pass
 
+
+    def _build_storage(
+        self,
+        component: Component
+    ) -> None:
+        pass
+        
 
     def act(
         self,

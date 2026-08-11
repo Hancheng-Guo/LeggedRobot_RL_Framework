@@ -6,6 +6,19 @@ runtime:
   deterministic: true
 
 
+stage:
+
+  - mean_reward:
+      operator: ">="
+      threshold: 10.0
+      window: 100
+
+  - mean_reward:
+      operator: ">="
+      threshold: 100.0
+      window: 100
+
+
 component:
 
   runner:
@@ -19,8 +32,6 @@ component:
   model:
     - type: ""
       config: "tmp"
-    - type: ""
-      config: "tmp2"
 
   environment:
     - type: "vector_env"
@@ -33,6 +44,3 @@ component:
   task:
     - type: ""
       config: "tmp"
-
-
-

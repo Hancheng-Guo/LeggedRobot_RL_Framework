@@ -4,137 +4,136 @@ from pathlib import Path
 from typing import Any
 
 from runners.base import BaseRunner
-# from app.utils.stage import StageManager
+from runners.callbacks.stage import StageCallback
 from runners.callbacks.registry import CALLBACK_TYPE_MAP
 from utils.component import Component
+from app.utils.context import RuntimeContext
 from envs.registry import ENV_TYPE_MAP
 from rl.algorithms.registry import ALG_TYPE_MAP
 from utils.config import load_yaml, get_yaml_value
+from utils.param import update_attributes
 
 
 class OnPolicyRunner(BaseRunner):
 
     def __init__(
         self,
-        max_iterations: int,
-        rollout_length: int,
-        callback_names: list[str],
-        component: Component, 
+        context: RuntimeContext,
     ) -> None:
-        self.max_iterations = max_iterations
-        self.current_iteration = None
-        self.rollout_length = rollout_length
 
-        self.callbacks = None
-        self._build_callbacks(
-            callback_names=callback_names,
+        self.context = context
+        self.environment = None
+        self.algorithm = None
+        
+        self.current_iteration = None
+
+        self.max_iterations = None
+        self.rollout_length = None
+        self.callbacks = []
+
+
+    def config_update(
+        self,
+        component: Component, 
+        max_iterations: int | None = None,
+        rollout_length: int | None = None,
+        callback_names: list[str] | None = None,
+    ) -> None:
+
+        update_attributes(
+            self,
             max_iterations=max_iterations,
             rollout_length=rollout_length,
         )
-
-        environment_detail = component.get("environment")
-        simulator_detail = component.get("simulator")
-        task_detail = component.get("task")
-        self.environment = None
-        self._build_environment(
-            environment_detail=environment_detail,
-            simulator_detail=simulator_detail,
-            task_detail=task_detail,
-        )
-
-        algorithm_detail = component.get("algorithm")
-        model_detail = component.get("model")
-        self.algorithm = None
-        self._build_algorithm(
-            algorithm_detail=algorithm_detail,
-            model_detail=model_detail,
-        )
+        self._build_callbacks(callback_names=callback_names)
+        self._build_environment(component=component)
+        self._build_algorithm(component=component)
 
 
     def _build_callbacks(
         self,
         callback_names: list[str],
-        **kwargs
     ) -> None:
-        
-        self.callbacks = []
 
-        for callback_name in callback_names:
-            if callback_name not in CALLBACK_TYPE_MAP:
-                warnings.warn(
-                    f"Unknown callback type: '{callback_name}'. "
-                )
-            else:
-                self.callbacks.append(
-                    CALLBACK_TYPE_MAP[callback_name](
-                        runner=self,
-                        **kwargs
+        if callback_names is not None:
+            self.callbacks = []
+
+            for callback_name in callback_names:
+                if callback_name not in CALLBACK_TYPE_MAP:
+                    warnings.warn(
+                        f"Unknown callback type: '{callback_name}'. "
                     )
-                )
+                else:
+                    self.callbacks.append(
+                        CALLBACK_TYPE_MAP[callback_name](
+                            runner=self,
+                            max_iterations=self.max_iterations,
+                            rollout_length=self.rollout_length,
+                            context=self.context,
+                        )
+                    )
 
 
     def _build_environment(
         self,
-        environment_detail: dict,
-        simulator_detail: dict,
-        task_detail: dict,
+        component: Component
     ) -> None:
+        
+        if component.environment is None:
+            if self.environment is None:
+                raise RuntimeError(
+                    f"environment instance is required."
+                )
+            self.environment.config_update(component=component)
 
-        env_type_name = environment_detail.get("type_name")
-        if env_type_name not in ENV_TYPE_MAP:
-            raise(
-                f"Unknown environment type: '{env_type_name}'. "
+        else:
+            env_type_name = component.environment.type
+            if env_type_name not in ENV_TYPE_MAP:
+                raise ValueError(
+                    f"Invalid environment type: {env_type_name!r}. "
+                )
+            
+            env_type = ENV_TYPE_MAP[env_type_name]
+            env_config = load_yaml(component.environment.config)
+            if not isinstance(self.environment, env_type):
+                self.environment = env_type(
+                    context=self.context
+                )
+            self.environment.config_update(
+                component=component,
+                **env_config
             )
-
-        env_config_names = environment_detail.get("config_names")
-        env_config_dirs = [
-            (
-                Path(get_yaml_value("configs/base.yaml", "env_config_dir")) 
-                / env_config_name
-            )
-            for env_config_name in env_config_names
-        ]
-        env_configs = [
-            load_yaml(env_config_dir)
-            for env_config_dir in env_config_dirs
-        ]
-
-        self.environment = ENV_TYPE_MAP[env_type_name](
-            simulator_detail=simulator_detail,
-            task_detail=task_detail,
-            configs=env_configs,
-        )
 
 
     def _build_algorithm(
         self,
-        algorithm_detail: dict,
-        model_detail: dict,
+        component: Component
     ) -> None:
         
-        alg_type_name = algorithm_detail.get("type_name")
-        if alg_type_name not in ALG_TYPE_MAP:
-            raise(
-                f"Unknown algorithm type: '{alg_type_name}'. "
-            )
+        if component.algorithm is None:
+            if self.algorithm is None:
+                raise RuntimeError(
+                    f"algorithm instance is required."
+                )
+            self.algorithm.config_update(component=component)
 
-        alg_config_names = algorithm_detail.get("config_names")
-        alg_config_dirs = [
-            (
-                Path(get_yaml_value("configs/base.yaml", "alg_config_dir")) 
-                / alg_config_name
+        else:
+            alg_type_name = component.algorithm.type
+            if alg_type_name not in ALG_TYPE_MAP:
+                raise ValueError(
+                    f"Invalid algorithm type: {alg_type_name!r}. "
+                )
+            
+            alg_type = ALG_TYPE_MAP[alg_type_name]
+            alg_config = load_yaml(component.algorithm.config)
+            if not isinstance(self.algorithm, alg_type):
+                self.algorithm = alg_type(
+                    context=self.context,
+                )
+            self.algorithm.config_update(
+                component=component,
+                **alg_config
             )
-            for alg_config_name in alg_config_names
-        ]
-        alg_configs = [
-            load_yaml(alg_config_dir)
-            for alg_config_dir in alg_config_dirs
-        ]
-
-        self.algorithm = ALG_TYPE_MAP[alg_type_name](
-            model_detail=model_detail,
-            configs=alg_configs,
-        )
 
 
     def _run_callbacks(self, hook: str, *args, **kwargs) -> None:
@@ -221,11 +220,13 @@ class OnPolicyRunner(BaseRunner):
         pass
 
 
-    def config_update(
+    def stage_update(
         self,
-        max_iterations: int,
-        rollout_length: int,
-        callback_names: list[str],
-        component: dict, 
-    ) -> None:
-        pass
+        stage_callback: StageCallback
+    ):
+
+        for callback in self.callbacks:
+            if isinstance(callback, StageCallback):
+                self.callbacks.remove(callback)
+
+        self.callbacks.append(stage_callback)

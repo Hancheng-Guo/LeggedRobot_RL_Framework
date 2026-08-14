@@ -3,6 +3,8 @@ from typing import Any
 from dataclasses import dataclass
 from torch import Tensor
 
+from app.utils.context import RuntimeContext
+
 
 @dataclass
 class PolicyOutput:
@@ -14,12 +16,25 @@ class PolicyOutput:
 
 class BaseAlgorithm(ABC):
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        context: RuntimeContext
+    ) -> None:
+        self.context = context
         self.model = None
 
 
     @abstractmethod
-    def act(self, observation: Any) -> Any:
+    def config_update(self, *args, **kwargs):
+        pass
+
+
+    @abstractmethod
+    def act(
+        self,
+        observation: Any,
+        deterministic: bool | None = None
+    ) -> Any:
         pass
 
 
@@ -36,7 +51,24 @@ class BaseAlgorithm(ABC):
 class OnPolicyAlgorithm(BaseAlgorithm):
 
     @abstractmethod
-    def compute_returns(self) -> None:
+    def compute_returns(
+        self,
+        last_obs,
+    ) -> None:
+        pass
+
+
+    @abstractmethod
+    def process_transition(
+        self,
+        obs,
+        policy_output,
+        reward,
+        terminated,
+        truncated,
+        next_obs,
+        info,
+    ) -> None:
         pass
 
 

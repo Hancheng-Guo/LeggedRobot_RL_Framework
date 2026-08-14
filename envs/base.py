@@ -1,24 +1,27 @@
 import torch
+from typing import Any
 from abc import ABC, abstractmethod
+
+from app.utils.context import RuntimeContext
 
 
 class BaseEnv(ABC):
 
     def __init__(
         self,
-        num_envs: int,
-        device: torch.device,
+        context: RuntimeContext,
     ):
-        self.num_envs = num_envs
-        self.device = device
+        self.num_envs: int
+        self.context = context
+
+
+    @abstractmethod
+    def config_update(self, *args, **kwargs):
+        pass
 
 
     @abstractmethod
     def reset(self):
-        """
-        Returns:
-            observation
-        """
         pass
 
 
@@ -26,16 +29,25 @@ class BaseEnv(ABC):
     def step(
         self,
         actions: torch.Tensor,
-    ):
+    ) -> tuple[
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        dict[str, Any]
+    ]:
         """
-        Args:
-            actions:
-                [num_envs, action_dim]
-
         Returns:
-            observation,
+            next_obs,
+            transition_next_obs,
             reward,
             terminated,
-            info
+            truncated,
+            info,
         """
+        pass
+
+    @abstractmethod
+    def close(self) -> None:
         pass

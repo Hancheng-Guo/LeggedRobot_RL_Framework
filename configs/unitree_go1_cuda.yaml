@@ -35,12 +35,12 @@ component:
 
   environment:
     - type: "vector_env"
-      config: "mujoco_unitree_go1_stage1"
+      config: "vector_env_1_unitree_go1"
       
   simulator:
-    - type: ""
-      config: "tmp"
+    - type: "mujoco"
+      config: "mujoco_unitree_go1_stage1"
       
   task:
-    - type: ""
-      config: "tmp"
+    - type: "locomotion"
+      config: "locomotion_unitree_go1"

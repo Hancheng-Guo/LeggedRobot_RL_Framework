@@ -5,6 +5,8 @@ from utils.component import create_component
 
 def test_create_component():
 
+    load_dir = Path(".")
+
     component_config = {
         "runner": {
             "type": "on_policy",
@@ -32,7 +34,7 @@ def test_create_component():
         },
     }
 
-    component = create_component(component_config)
+    component = create_component(component_config, load_dir)
 
     assert component.runner.type == "on_policy"
     assert component.algorithm.type == "ppo"
@@ -54,7 +56,7 @@ def test_create_component():
     )
 
     assert component.environment.config == Path(
-        "./configs/envs/vector_env.yaml"
+        "./configs/environments/vector_env.yaml"
     )
 
     assert component.simulator.config == Path(
@@ -68,69 +70,96 @@ def test_create_component():
 
 def test_component_use_config_path():
 
+    load_dir = Path(".")
+
     component_config = {
         "runner": {
             "type": "on_policy",
             "config_path": "./abc/custom.yaml",
         },
-        "algorithm": {
-            "type": "ppo",
-            "config": "ppo",
-        },
-        "model": {
-            "type": "actor_critic",
-            "config": "actor_critic",
-        },
-        "environment": {
-            "type": "vector_env",
-            "config": "vector_env",
-        },
-        "simulator": {
-            "type": "mujoco",
-            "config": "mujoco",
-        },
-        "task": {
-            "type": "locomotion",
-            "config": "locomotion",
-        },
     }
 
-    component = create_component(component_config)
+    component = create_component(component_config, load_dir)
 
-    assert component.runner.config == Path(
-        "./abc/custom.yaml"
-    )
+    assert component.runner is not None
+    assert component.runner.config == Path("abc/custom.yaml")
 
 
 def test_append_yaml_suffix():
 
+    load_dir = Path(".")
+
     component_config = {
         "runner": {
             "type": "on_policy",
-            "config_path": "./configs/runner/on_policy",
+            "config": "on_policy",
         },
+    }
+
+    component = create_component(component_config, load_dir)
+
+    assert component.runner is not None
+    assert component.runner.config == Path(
+        "configs/runners/on_policy.yaml"
+    )
+    assert component.runner.config.suffix == ".yaml"
+
+
+def test_missing_component_is_none():
+
+    load_dir = Path(".")
+
+    component_config = {
+        "runner": {
+            "type": "on_policy",
+            "config": "on_policy",
+        },
+    }
+
+    component = create_component(component_config, load_dir)
+
+    assert component.runner is not None
+    assert component.algorithm is None
+    assert component.model is None
+    assert component.environment is None
+    assert component.simulator is None
+    assert component.task is None
+
+
+def test_component_use_config_dir():
+
+    load_dir = Path(".")
+
+    component_config = {
+        "runner": {
+            "type": "on_policy",
+            "config": "custom",
+            "config_dir": "custom_configs",
+        },
+    }
+
+    component = create_component(component_config, load_dir)
+
+    assert component.runner is not None
+    assert component.runner.config == Path(
+        "custom_configs/custom.yaml"
+    )
+
+
+def test_load_dir_is_used_for_default_config_dir():
+
+    load_dir = Path("experiment")
+
+    component_config = {
         "algorithm": {
             "type": "ppo",
             "config": "ppo",
         },
-        "model": {
-            "type": "actor_critic",
-            "config": "actor_critic",
-        },
-        "environment": {
-            "type": "vector_env",
-            "config": "vector_env",
-        },
-        "simulator": {
-            "type": "mujoco",
-            "config": "mujoco",
-        },
-        "task": {
-            "type": "locomotion",
-            "config": "locomotion",
-        },
     }
 
-    component = create_component(component_config)
+    component = create_component(component_config, load_dir)
 
-    assert component.runner.config.suffix == ".yaml"
+    assert component.algorithm is not None
+    assert component.algorithm.config == Path(
+        "experiment/configs/algorithms/ppo.yaml"
+    )

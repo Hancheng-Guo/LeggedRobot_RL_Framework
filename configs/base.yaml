@@ -1,7 +1,0 @@
-config_dir: ./configs/
-runner_config_dir: ./configs/runners/
-algorithm_config_dir: ./configs/algorithms/
-model_config_dir: ./configs/models/
-environment_config_dir: ./configs/envs/
-simulator_config_dir: ./configs/simulators/
-task_config_dir: ./configs/tasks/

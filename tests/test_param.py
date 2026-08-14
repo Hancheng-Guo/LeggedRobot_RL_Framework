@@ -3,7 +3,7 @@ import pytest
 from utils.param import update_attributes
 
 
-class TestInstance:
+class InstanceForTest:
 
     def __init__(self):
         self.name = "old"
@@ -13,7 +13,7 @@ class TestInstance:
 
 def test_update_attributes():
 
-    instance = TestInstance()
+    instance = InstanceForTest()
 
     update_attributes(
         instance,
@@ -27,7 +27,7 @@ def test_update_attributes():
 
 def test_update_attributes_keep_existing_value():
 
-    instance = TestInstance()
+    instance = InstanceForTest()
 
     update_attributes(
         instance,
@@ -41,7 +41,7 @@ def test_update_attributes_keep_existing_value():
 
 def test_update_attributes_missing_value():
 
-    instance = TestInstance()
+    instance = InstanceForTest()
 
     with pytest.raises(ValueError):
         update_attributes(
@@ -52,7 +52,7 @@ def test_update_attributes_missing_value():
 
 def test_update_attributes_missing_attribute():
 
-    instance = TestInstance()
+    instance = InstanceForTest()
 
     with pytest.raises(ValueError):
         update_attributes(

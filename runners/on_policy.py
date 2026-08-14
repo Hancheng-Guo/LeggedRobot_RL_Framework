@@ -1,17 +1,22 @@
 import warnings
 import torch
+from numbers import Number
 from pathlib import Path
 from typing import Any
 
+from app.utils.context import RuntimeContext
 from runners.base import BaseRunner
 from runners.callbacks.stage import StageCallback
 from runners.callbacks.registry import CALLBACK_TYPE_MAP
-from utils.component import Component
-from app.utils.context import RuntimeContext
+from envs.base import BaseEnv
 from envs.registry import ENV_TYPE_MAP
+from rl.algorithms.base import OnPolicyAlgorithm
 from rl.algorithms.registry import ALG_TYPE_MAP
-from utils.config import load_yaml, get_yaml_value
+from utils.component import Component
+from utils.config import load_yaml
 from utils.param import update_attributes
+
+
 
 
 class OnPolicyRunner(BaseRunner):
@@ -22,14 +27,14 @@ class OnPolicyRunner(BaseRunner):
     ) -> None:
 
         self.context = context
-        self.environment = None
-        self.algorithm = None
+        self.environment: BaseEnv | None = None
+        self.algorithm: OnPolicyAlgorithm | None = None
         
-        self.current_iteration = None
+        self.current_iteration: int
 
-        self.max_iterations = None
-        self.rollout_length = None
-        self.callbacks = []
+        self.max_iterations: int | None = None
+        self.rollout_length: int | None = None
+        self.callbacks: list = []
 
 
     def config_update(
@@ -52,7 +57,7 @@ class OnPolicyRunner(BaseRunner):
 
     def _build_callbacks(
         self,
-        callback_names: list[str],
+        callback_names: list[str] | None,
     ) -> None:
 
         if callback_names is not None:
@@ -149,8 +154,19 @@ class OnPolicyRunner(BaseRunner):
 
     def train(self) -> None:
 
-        obs = self.environment.reset()
+        if self.environment is None:
+            raise RuntimeError("environment is not instantiated.")
 
+        if self.algorithm is None:
+            raise RuntimeError("algorithm is not instantiated.")
+
+        if self.max_iterations is None:
+            raise RuntimeError("'max_iterations' is missing.")
+
+        if self.rollout_length is None:
+            raise RuntimeError("'rollout_length' is missing.")
+        
+        obs = self.environment.reset()
         self._run_callbacks("_on_train_start")
 
         for iteration in range(self.max_iterations):
@@ -200,24 +216,139 @@ class OnPolicyRunner(BaseRunner):
         self._run_callbacks("_on_train_end")
 
 
-    def test(self) -> None:
-        # obs = self.env.reset()
+    def test(
+        self,
+        num_episodes: int = 1000
+    ) -> None:
 
-        # while True:
-        #     action = self.algorithm.act(obs, deterministic=True)
-        #     obs, reward, done, info = self.env.step(action)
+        if self.environment is None:
+            raise RuntimeError("environment is not instantiated.")
 
-        #     if done:
-        #         break
-        pass
+        if self.algorithm is None:
+            raise RuntimeError("algorithm is not instantiated.")
+
+        obs = self.environment.reset()
+
+        self._run_callbacks("_on_test_start")
+
+        episode_rewards = torch.zeros(
+            self.environment.num_envs,
+            device=self.context.device,
+        )
+
+        episode_lengths = torch.zeros(
+            self.environment.num_envs,
+            device=self.context.device,
+        )
+
+        completed_rewards: list[float] = []
+        completed_lengths: list[int] = []
+
+        while len(completed_rewards) < num_episodes:
+
+            self._run_callbacks("_on_step_start")
+
+            with torch.no_grad():
+                policy_output = self.algorithm.act(
+                    obs,
+                    deterministic=True,
+                )
+
+            (
+                next_obs,
+                _,
+                reward,
+                terminated,
+                truncated,
+                info,
+            ) = self.environment.step(policy_output.action)
+
+            episode_rewards += reward
+            episode_lengths += 1
+
+            done = terminated | truncated
+
+            done_ids = done.nonzero(as_tuple=False).flatten()
+
+            for env_id in done_ids:
+
+                completed_rewards.append(
+                    episode_rewards[env_id].item()
+                )
+
+                completed_lengths.append(
+                    int(episode_lengths[env_id].item())
+                )
+
+                episode_rewards[env_id] = 0.0
+                episode_lengths[env_id] = 0
+
+                if len(completed_rewards) >= num_episodes:
+                    break
+
+            obs = next_obs
+
+            self._run_callbacks("_on_step_end", info=info)
+
+        test_info = {
+            "mean_reward": sum(completed_rewards) / len(completed_rewards),
+            "mean_episode_length": (
+                sum(completed_lengths) / len(completed_lengths)
+            ),
+            "episode_rewards": completed_rewards,
+            "episode_lengths": completed_lengths,
+            "num_episodes": len(completed_rewards),
+        }
+
+        self._run_callbacks("_on_test_end", info=test_info)
 
 
-    def play(self) -> None:
-        pass
+    def play(
+        self,
+        num_steps: int = 5000
+    ) -> None:
+        if self.environment is None:
+            raise RuntimeError("environment is not instantiated.")
+
+        if self.algorithm is None:
+            raise RuntimeError("algorithm is not instantiated.")
+
+        if not isinstance(num_steps, Number) or num_steps <= 0:
+            raise ValueError("'num_steps' must be a number greater than 0.")
+
+        obs = self.environment.reset()
+
+        self._run_callbacks("_on_play_start")
+
+        step = 0
+        while step < num_steps:
+
+            self._run_callbacks("_on_step_start")
+
+            with torch.no_grad():
+                policy_output = self.algorithm.act(
+                    obs,
+                    deterministic=True,
+                )
+
+            (
+                next_obs, _, _, _, _, info,
+            ) = self.environment.step(policy_output.action)
+
+            obs = next_obs
+
+            self._run_callbacks("_on_step_end", info=info)
+            step += 1
+
+        self._run_callbacks("_on_play_end")
 
 
     def close(self) -> None:
-        pass
+
+        self._run_callbacks("_on_close")
+
+        if self.environment is not None:
+            self.environment.close()
 
 
     def stage_update(

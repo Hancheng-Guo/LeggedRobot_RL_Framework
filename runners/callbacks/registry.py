@@ -6,7 +6,7 @@ from runners.callbacks.early_stopping import EarlystoppingCallback
 from runners.callbacks.logging import LoggingCallback
 
 
-CALLBACK_TYPE_MAP: dict[str, BaseCallback] = {
+CALLBACK_TYPE_MAP: dict[str, type[BaseCallback]] = {
     "progress_bar": ProgressBarCallback,
     "checkpoint": CheckpointCallback,
     "tensorboard": TensorboardCallback,

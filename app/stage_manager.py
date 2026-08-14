@@ -140,7 +140,7 @@ class StageManager:
                 self.runner.stage_update(stage_callback)
         
 
-    def test(self) -> None:
+    def test(self, *args, **kwargs) -> None:
     
         if self.continue_training:
             warnings.warn("Model is not trained completely.")
@@ -148,10 +148,10 @@ class StageManager:
         self._build_runner(
             component=current_component
         )
-        self.runner.test()
+        self.runner.test(*args, **kwargs)
 
 
-    def play(self) -> None:
+    def play(self, *args, **kwargs) -> None:
 
         if self.continue_training:
             warnings.warn("Model is not trained completely.")
@@ -159,7 +159,7 @@ class StageManager:
         self._build_runner(
             component=current_component
         )
-        self.runner.play()
+        self.runner.play(*args, **kwargs)
 
 
     def save(self) -> None:

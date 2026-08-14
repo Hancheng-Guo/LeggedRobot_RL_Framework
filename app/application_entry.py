@@ -103,14 +103,14 @@ class ApplicationEntry:
         self.train_time = train_time
 
 
-    def test(self) -> None:
+    def test(self, *args, **kwargs) -> None:
 
-        self.stage_manager.test()
+        self.stage_manager.test(*args, **kwargs)
 
 
-    def play(self) -> None:
+    def play(self, *args, **kwargs) -> None:
 
-        self.stage_manager.play()
+        self.stage_manager.play(*args, **kwargs)
 
 
     def save(self) -> None:

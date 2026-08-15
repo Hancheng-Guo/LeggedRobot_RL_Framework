@@ -1,4 +1,3 @@
-from typing import Any
 from abc import ABC, abstractmethod
 
 from app.utils.context import RuntimeContext
@@ -11,16 +10,24 @@ class BaseRunner(ABC):
         self,
         context: RuntimeContext,
     ) -> None:
+
+        self.context = context
+        self.environment = None
+        self.algorithm = None
+
         self.max_iterations = None
         self.rollout_length = None
-        self.algorithm = None
-        self.environment = None
-        self.stage_manager = None
         self.callbacks = []
 
 
     @abstractmethod
-    def config_update(self, *args, **kwargs) -> None:
+    def config_update(
+        self,
+        max_iterations: int | None = None,
+        rollout_length: int | None = None,
+        callback_names: list[str] | None = None,
+        *args, **kwargs
+    ) -> None:
         pass
 
     @abstractmethod
@@ -36,15 +43,26 @@ class BaseRunner(ABC):
 
 
     @abstractmethod
-    def test(self) -> None:
+    def test(
+        self,
+        num_episodes: int = 1000,
+    ) -> None:
         pass
 
 
     @abstractmethod
-    def play(self) -> None:
+    def play(
+        self,
+        num_steps: int = 5000
+    ) -> None:
         pass
 
 
     @abstractmethod
     def close(self) -> None:
+        pass
+
+
+    @abstractmethod
+    def save(self) -> None:
         pass

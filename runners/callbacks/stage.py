@@ -1,5 +1,4 @@
 from runners.callbacks.base import BaseCallback
-from runners.base import BaseRunner
 
 
 class StageCallback(BaseCallback):
@@ -16,6 +15,6 @@ class StageCallback(BaseCallback):
 
     def set_runner(
         self,
-        runner: BaseRunner,
+        runner,
     ) -> None:
         self.runner = runner

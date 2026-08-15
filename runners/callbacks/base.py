@@ -1,7 +1,4 @@
-from typing import Any
 from abc import ABC, abstractmethod
-
-from runners.base import BaseRunner
 
 
 class BaseCallback(ABC):
@@ -9,9 +6,10 @@ class BaseCallback(ABC):
     @abstractmethod
     def __init__(
         self,
-        runner: BaseRunner,
+        runner,
         *args, **kwargs,
     ) -> None:
+        self.runner = runner
         pass
 
 

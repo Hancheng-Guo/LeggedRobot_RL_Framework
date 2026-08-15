@@ -3,59 +3,45 @@ import pytest
 from utils.param import update_attributes
 
 
-class InstanceForTest:
+class DummyInstance:
 
-    def __init__(self):
-        self.name = "old"
-        self.value = 10
-        self.empty = None
+    def __init__(self) -> None:
+        self.a = 1
+        self.b = 2
+        self.c = None
 
 
 def test_update_attributes():
 
-    instance = InstanceForTest()
+    instance = DummyInstance()
 
     update_attributes(
         instance,
-        name="new",
-        value=20,
+        a=10,
+        b=None,
     )
 
-    assert instance.name == "new"
-    assert instance.value == 20
-
-
-def test_update_attributes_keep_existing_value():
-
-    instance = InstanceForTest()
-
-    update_attributes(
-        instance,
-        name=None,
-        value=None,
-    )
-
-    assert instance.name == "old"
-    assert instance.value == 10
+    assert instance.a == 10
+    assert instance.b == 2
 
 
 def test_update_attributes_missing_value():
 
-    instance = InstanceForTest()
+    instance = DummyInstance()
 
     with pytest.raises(ValueError):
         update_attributes(
             instance,
-            empty=None,
+            c=None,
         )
 
 
-def test_update_attributes_missing_attribute():
+def test_update_attributes_unknown_attribute():
 
-    instance = InstanceForTest()
+    instance = DummyInstance()
 
     with pytest.raises(ValueError):
         update_attributes(
             instance,
-            unknown=10,
+            unknown=None,
         )

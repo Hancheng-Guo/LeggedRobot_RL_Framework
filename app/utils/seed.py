@@ -8,7 +8,7 @@ import numpy as np
 def set_seed(
     seed: int | str | None = None,
     deterministic: bool = False,
-) -> {int, bool}:
+) -> tuple[int, bool]:
 
     if seed is None:
         seed = secrets.randbits(32)

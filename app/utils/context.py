@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import Any
+from pathlib import Path
 
 import torch
 
@@ -20,9 +21,15 @@ class RuntimeContext:
     num_threads: int
     seed: int
     deterministic: bool
+    load_dir: Path
+    save_dir: Path
 
 
-def create_runtime_context(runtime_config: dict[str, Any]) -> RuntimeContext:
+def create_runtime_context(
+    runtime_config: dict[str, Any],
+    load_dir: Path,
+    save_dir: Path,
+) -> RuntimeContext:
     """setup runtime context according to config."""
 
     if runtime_config is None:
@@ -61,6 +68,8 @@ def create_runtime_context(runtime_config: dict[str, Any]) -> RuntimeContext:
             num_threads=num_threads,
             seed=seed,
             deterministic=deterministic,
+            load_dir=load_dir,
+            save_dir=save_dir,
         )
 
     return context

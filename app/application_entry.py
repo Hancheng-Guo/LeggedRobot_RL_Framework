@@ -1,7 +1,6 @@
 import warnings
 from pathlib import Path
 from datetime import datetime
-from typing import Any
 
 from app.stage_manager import StageManager
 from app.utils.context import create_runtime_context, RuntimeContext
@@ -49,7 +48,7 @@ class ApplicationEntry:
                 )
                 self.train_time = None
             
-        self.load_dir = self._get_load_dir()
+        self.load_dir, self.save_dir = self._get_runtime_dir()
 
         self.config = load_yaml(
             self.load_dir / "configs" / f"{self.app_name}.yaml"
@@ -59,7 +58,9 @@ class ApplicationEntry:
         if not isinstance(runtime_config, dict):
             raise ValueError("runtime config is not a instance of 'dict'")
         self.context = create_runtime_context(
-            runtime_config=runtime_config
+            runtime_config=runtime_config,
+            load_dir=self.load_dir,
+            save_dir=self.save_dir,
         )
 
         component = self.config.get("component")
@@ -76,24 +77,24 @@ class ApplicationEntry:
         )
 
 
-    def _get_load_dir(self) -> Path:
+    def _get_runtime_dir(self) -> tuple[Path, Path]:
 
         if self.train_time is not None:
 
-            load_dir = Path(
+            runtime_dir = Path(
                 f"./checkpoints"
                 f"/{self.app_name}_{
                     self.train_time.strftime("%Y-%m-%d_%H-%M-%S")
                 }"
             )
-            base_config_file = load_dir / "configs" / f"{self.app_name}.yaml"
+            base_config_file = runtime_dir / "configs" / f"{self.app_name}.yaml"
 
             if base_config_file.is_file():
-                return load_dir
+                return runtime_dir, runtime_dir     # load_dir, save_dir
 
-            warnings.warn(f"checkpoint directory '{load_dir}' is incomplete.")
+            warnings.warn(f"checkpoint directory '{runtime_dir}' is incomplete.")
 
-        return Path(".")
+        return Path("."), runtime_dir   # load_dir, save_dir
 
 
     def train(self) -> None:

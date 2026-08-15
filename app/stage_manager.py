@@ -126,7 +126,10 @@ class StageManager:
 
             runner_type = RUNNER_TYPE_MAP[runner_type_name]
             runner_config = load_yaml(component.runner.config)
-            if not isinstance(self.runner, runner_type):
+            if(
+                not hasattr(self, "runner")
+                or not isinstance(self.runner, runner_type)
+            ):
                 self.runner = runner_type(
                     context=self.context
                 )
@@ -171,5 +174,3 @@ class StageManager:
 
         if self.runner is not None:
             self.runner.close()
-        else:
-            warnings.warn("Runner is not instantiated.")

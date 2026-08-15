@@ -1,13 +1,13 @@
 import warnings
 import torch
+import numpy as np
 from numbers import Number
-from pathlib import Path
-from typing import Any
 
 from app.utils.context import RuntimeContext
 from runners.base import BaseRunner
 from runners.callbacks.stage import StageCallback
 from runners.callbacks.registry import CALLBACK_TYPE_MAP
+from runners.utils.frames import save_frames_to_video
 from envs.base import BaseEnv
 from envs.registry import ENV_TYPE_MAP
 from rl.algorithms.base import OnPolicyAlgorithm
@@ -15,8 +15,6 @@ from rl.algorithms.registry import ALG_TYPE_MAP
 from utils.component import Component
 from utils.config import load_yaml
 from utils.param import update_attributes
-
-
 
 
 class OnPolicyRunner(BaseRunner):
@@ -53,6 +51,18 @@ class OnPolicyRunner(BaseRunner):
         self._build_callbacks(callback_names=callback_names)
         self._build_environment(component=component)
         self._build_algorithm(component=component)
+
+
+    def stage_update(
+        self,
+        stage_callback: StageCallback
+    ):
+    
+        for callback in self.callbacks:
+            if isinstance(callback, StageCallback):
+                self.callbacks.remove(callback)
+
+        self.callbacks.append(stage_callback)
 
 
     def _build_callbacks(
@@ -218,7 +228,7 @@ class OnPolicyRunner(BaseRunner):
 
     def test(
         self,
-        num_episodes: int = 1000
+        num_episodes: int = 1000,
     ) -> None:
 
         if self.environment is None:
@@ -320,6 +330,7 @@ class OnPolicyRunner(BaseRunner):
 
         self._run_callbacks("_on_play_start")
 
+        frames: list[np.ndarray] = []
         step = 0
         while step < num_steps:
 
@@ -335,10 +346,17 @@ class OnPolicyRunner(BaseRunner):
                 next_obs, _, _, _, _, info,
             ) = self.environment.step(policy_output.action)
 
+            frame = self.environment.render()
+            if frame is not None:
+                frames.append(frame)
+
             obs = next_obs
 
             self._run_callbacks("_on_step_end", info=info)
             step += 1
+
+        if len(frames):
+            save_frames_to_video(frames)
 
         self._run_callbacks("_on_play_end")
 
@@ -350,14 +368,9 @@ class OnPolicyRunner(BaseRunner):
         if self.environment is not None:
             self.environment.close()
 
+        if self.algorithm is not None:
+            self.algorithm.close()
 
-    def stage_update(
-        self,
-        stage_callback: StageCallback
-    ):
 
-        for callback in self.callbacks:
-            if isinstance(callback, StageCallback):
-                self.callbacks.remove(callback)
-
-        self.callbacks.append(stage_callback)
+    def save(self) -> None:
+        pass

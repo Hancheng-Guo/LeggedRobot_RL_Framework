@@ -1,42 +1,62 @@
+import torch
+import numpy as np
+from pathlib import Path
 from abc import ABC, abstractmethod
-from typing import Any
 
 
 class BaseSimulator(ABC):
 
     def __init__(self) -> None:
+
+        self.num_envs: int
+        self.model_path: Path
+        self.sim_dt: float
+        self.frame_skip: int
+        self.render_mode: str | None
+
+
+    @abstractmethod
+    def config_update(
+        self,
+        num_envs: int | None = None,
+        model_path: Path | str | None = None,
+        sim_dt: float | None = None,
+        frame_skip: int | None = None,
+        render_mode: str | None = None,
+        *args, **kwargs
+    ) -> None:
         pass
+
+
+    @property
+    def control_dt(self) -> float:
+
+        return (
+            self.sim_dt *
+            self.frame_skip
+        )
 
 
     @abstractmethod
     def reset(
         self,
-        env_ids: Any = None,
+        env_ids: torch.Tensor | None = None,
     ) -> None:
-        """
-        Reset simulator state.
-        """
         pass
 
 
     @abstractmethod
     def step(
         self,
-        action,
+        action: torch.Tensor,
     ) -> None:
-        """
-        Advance simulation by one environment step.
-        """
         pass
 
 
     @abstractmethod
     def render(
         self,
-    ) -> None:
-        """
-        Render simulation.
-        """
+    ) -> np.ndarray | None:
         pass
 
 
@@ -44,70 +64,11 @@ class BaseSimulator(ABC):
     def close(
         self,
     ) -> None:
-        """
-        Release simulator resources.
-        """
         pass
 
-
-# class BatchProxy:
-
-#     def __init__(self, objects: Iterable[Any]) -> None:
-#         object.__setattr__(
-#             self,
-#             "_objects",
-#             list(objects),
-#         )
-
-
-#     def __getattr__(self, name: str):
-
-#         values = [
-#             getattr(obj, name)
-#             for obj in self._objects
-#         ]
-
-#         if all(callable(value) for value in values):
-
-#             def method(*args, **kwargs):
-#                 return [
-#                     value(*args, **kwargs)
-#                     for value in values
-#                 ]
-
-#             return method
-
-#         return BatchProxy(values)
-
-
-#     def __setattr__(
-#         self,
-#         name: str,
-#         value: Any,
-#     ) -> None:
-
-#         if name == "_objects":
-#             object.__setattr__(
-#                 self,
-#                 name,
-#                 value,
-#             )
-#             return
-
-#         for obj in self._objects:
-#             setattr(obj, name, value)
-
-
-#     def __getitem__(
-#         self,
-#         index,
-#     ):
-#         return self._objects[index]
-
-
-#     def __len__(self) -> int:
-#         return len(self._objects)
-
-
-#     def __iter__(self):
-#         return iter(self._objects)
+    @abstractmethod
+    def get_state(
+        self,
+        env_ids: torch.Tensor | None = None,
+    ) -> dict[str, torch.Tensor]:
+        pass

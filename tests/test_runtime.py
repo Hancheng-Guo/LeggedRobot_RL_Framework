@@ -1,5 +1,6 @@
 import torch
 import pytest
+from typing import Any
 from pathlib import Path
 
 from app.utils.context import RuntimeContext, create_runtime_context
@@ -111,7 +112,7 @@ def test_create_runtime_context_with_dtypes(dtype_name, expected):
 def test_create_runtime_context_with_missing_runtime_config():
 
     with pytest.raises(TypeError):
-        create_runtime_context()
+        create_runtime_context()    # pyright: ignore[reportCallIssue]
 
 
 def test_create_runtime_context_with_empty_runtime_config():
@@ -134,10 +135,12 @@ def test_create_runtime_context_with_invalid_load_dir():
         "deterministic": True,
     }
 
+    invalid_dir: Any = "./a/b"
+
     with pytest.raises(ValueError):
         create_runtime_context(
             config,
-            load_dir="./a/b",
+            load_dir=invalid_dir,
             save_dir=Path("./c/d"),
         )
 
@@ -152,9 +155,11 @@ def test_create_runtime_context_with_invalid_save_dir():
         "deterministic": True,
     }
 
+    invalid_dir: Any = "./c/d"
+
     with pytest.raises(ValueError):
         create_runtime_context(
             config,
             load_dir=Path("./a/b"),
-            save_dir="./c/d",
+            save_dir=invalid_dir,
         )

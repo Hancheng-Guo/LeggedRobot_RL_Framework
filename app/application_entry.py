@@ -34,21 +34,27 @@ class ApplicationEntry:
         self.app_name = app_name
 
         if train_time is None:
-            self.train_time = None
+            self.train_time = datetime.now()
+            skip_check = True
 
         else:
+
             try:
                 self.train_time = datetime.strptime(
                     train_time, "%Y-%m-%d_%H-%M-%S"
                 )
+                skip_check = False
 
-            except ValueError as e:
+            except ValueError:
                 warnings.warn(
-                    f"{str(e)}, 'train_time' field will be remove."
+                    f"Invalid train_time '{train_time}', using the current time instead."
                 )
-                self.train_time = None
-            
-        self.load_dir, self.save_dir = self._get_runtime_dir()
+                self.train_time = datetime.now()
+                skip_check = True
+
+        self.load_dir, self.save_dir = self._get_runtime_dir(
+            skip_check=skip_check
+        )
 
         self.config = load_yaml(
             self.load_dir / "configs" / f"{self.app_name}.yaml"
@@ -77,31 +83,34 @@ class ApplicationEntry:
         )
 
 
-    def _get_runtime_dir(self) -> tuple[Path, Path]:
+    def _get_runtime_dir(
+        self,
+        skip_check: bool,
+    ) -> tuple[Path, Path]:
 
-        if self.train_time is not None:
+        runtime_dir = Path(
+            f"./checkpoints"
+            f"/{self.app_name}_{
+                self.train_time.strftime("%Y-%m-%d_%H-%M-%S")
+            }"
+        )
 
-            runtime_dir = Path(
-                f"./checkpoints"
-                f"/{self.app_name}_{
-                    self.train_time.strftime("%Y-%m-%d_%H-%M-%S")
-                }"
-            )
-            base_config_file = runtime_dir / "configs" / f"{self.app_name}.yaml"
+        if skip_check:
+            return Path("."), runtime_dir       # load_dir, save_dir
 
-            if base_config_file.is_file():
-                return runtime_dir, runtime_dir     # load_dir, save_dir
+        base_config_file = runtime_dir / "configs" / f"{self.app_name}.yaml"
 
-            warnings.warn(f"checkpoint directory '{runtime_dir}' is incomplete.")
+        if base_config_file.is_file():
+            return runtime_dir, runtime_dir     # load_dir, save_dir
 
-        return Path("."), runtime_dir   # load_dir, save_dir
+        warnings.warn(f"checkpoint directory '{runtime_dir}' is incomplete.")
+
+        return Path("."), runtime_dir           # load_dir, save_dir
 
 
     def train(self) -> None:
 
-        train_time = datetime.now()
         self.stage_manager.train()
-        self.train_time = train_time
 
 
     def test(self, *args, **kwargs) -> None:

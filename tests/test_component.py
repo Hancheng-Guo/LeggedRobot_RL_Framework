@@ -36,6 +36,13 @@ def test_create_component():
 
     component = create_component(component_config, load_dir)
 
+    assert component.runner is not None
+    assert component.algorithm is not None
+    assert component.model is not None
+    assert component.environment is not None
+    assert component.simulator is not None
+    assert component.task is not None
+
     assert component.runner.type == "on_policy"
     assert component.algorithm.type == "ppo"
     assert component.model.type == "actor_critic"

@@ -1,5 +1,5 @@
 max_iterations: 2000
-rollout_length: 48
+rollout_length: 64
 callback_names:
   - progress_bar
   - checkpoint

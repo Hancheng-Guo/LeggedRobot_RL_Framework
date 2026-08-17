@@ -5,8 +5,9 @@ from typing import Any
 from app.utils.context import RuntimeContext
 from envs.base import BaseEnv
 from envs.simulators.base import BaseSimulator
+from envs.simulators.utils.context import ModelContext
 from envs.simulators.registry import SIM_TYPE_MAP
-from envs.tasks.base import BaseTaskLogic, TaskContext
+from envs.tasks.base import BaseTaskLogic
 from envs.tasks.registry import TASK_TYPE_MAP
 from utils.component import Component
 from utils.config import load_yaml
@@ -47,7 +48,11 @@ class VectorEnv(BaseEnv):
             device=self.context.device,
         )
         self._build_simulator(component=component)
-        self._build_task(component=component)
+        model_context = self.simulator.model_context
+        self._build_task(
+            component=component,
+            model_context=model_context,
+        )
 
 
     def _build_simulator(
@@ -88,7 +93,8 @@ class VectorEnv(BaseEnv):
 
     def _build_task(
         self,
-        component: Component, 
+        component: Component,
+        model_context: ModelContext,
     ) -> None:
         
         if component.task is None:
@@ -99,6 +105,7 @@ class VectorEnv(BaseEnv):
             self.task.config_update(
                 component=component,
                 num_envs=self.num_envs,
+                model_context=model_context,
             )
 
         else:
@@ -118,6 +125,7 @@ class VectorEnv(BaseEnv):
             self.task.config_update(
                 component=component,
                 num_envs=self.num_envs,
+                model_context=model_context,
                 **task_config
             )
 
@@ -132,7 +140,7 @@ class VectorEnv(BaseEnv):
             state=state,
             episode_step=self.current_episode_steps,
         )
-        obs = self.task.compute_observation(task_context)
+        obs, _ = self.task.compute_observation(task_context)
 
         return obs
 
@@ -164,7 +172,7 @@ class VectorEnv(BaseEnv):
             episode_step=self.current_episode_steps,
             env_ids=env_ids,
         )
-        reset_obs = self.task.compute_observation(
+        reset_obs, _ = self.task.compute_observation(
             task_context,
             env_ids=env_ids,
         )
@@ -187,9 +195,9 @@ class VectorEnv(BaseEnv):
         dict[str, Any],
     ]:
 
-        self.task.pre_step(action)
+        pre_step_info = self.task.pre_step(action)
 
-        control = self.task.process_action(action)
+        control, action_info = self.task.process_action(action)
         self.simulator.step(control)
         self.current_episode_steps += 1
 
@@ -199,19 +207,15 @@ class VectorEnv(BaseEnv):
             episode_step=self.current_episode_steps,
         )
 
-        self.task.post_step(task_context)
+        post_step_info = self.task.post_step(task_context)
 
-        obs = self.task.compute_observation(task_context)
-        reward = self.task.compute_reward(task_context)
-        terminated = self.task.check_terminated(task_context)
+        obs, obs_info = self.task.compute_observation(task_context)
+        reward, reward_info = self.task.compute_reward(task_context)
+        terminated, terminated_info = self.task.check_terminated(task_context)
         truncated = (
             self.current_episode_steps
             >= self.max_episode_steps
         )
-
-        info = {
-            "reward": reward,
-        }
 
         transition_next_obs = obs
 
@@ -219,6 +223,16 @@ class VectorEnv(BaseEnv):
             obs,
             terminated,
             truncated,
+        )
+
+        info = (
+            pre_step_info
+            | action_info
+            | post_step_info
+            | obs_info
+            | reward_info
+            | terminated_info
+            | state
         )
 
         return (

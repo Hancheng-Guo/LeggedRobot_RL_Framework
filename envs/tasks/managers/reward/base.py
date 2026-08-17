@@ -4,6 +4,8 @@ from collections.abc import Callable
 from typing import Any
 
 from app.utils.context import RuntimeContext
+from envs.simulators.utils.context import ModelContext
+from envs.tasks.base import TaskContext
 from envs.tasks.managers.reward.terms.registry import get_reward_function
 
 
@@ -23,14 +25,17 @@ class RewardManager:
         self,
         num_envs: int,
         context: RuntimeContext,
+        model_context: ModelContext,
         terms: dict[str, dict[str, Any]],
         *args, **kwargs,
     ) -> None:
 
         self.num_envs = num_envs
         self.context = context
+        self.model_context = model_context
 
         self.terms: dict[str, RewardTerm] = {}
+        self.term_rewards: dict[str, torch.Tensor] = {}
         self._build_terms(terms)
 
 
@@ -46,6 +51,9 @@ class RewardManager:
             weight: float = config.get("weight", 1.0)
             params: dict = config.get("params", {})
 
+            if params is None or not isinstance(params, dict):
+                params = {}
+
             self._add_term(
                 name=name,
                 function=function,
@@ -59,7 +67,7 @@ class RewardManager:
         name: str,
         function: RewardFunction,
         weight: float,
-        params: dict[str, Any] | None = None,
+        params: dict[str, Any],
     ) -> None:
 
         if name in self.terms:
@@ -68,71 +76,50 @@ class RewardManager:
             )
 
         self.terms[name] = RewardTerm(
-            name=name,
             function=function,
             weight=weight,
-            params=params or {},
+            params=params,
+        )
+        self.term_rewards[name] = torch.zeros(
+            self.num_envs,
+            device=self.context.device,
         )
 
-
-
-    def remove_term(
-        self,
-        name: str,
-    ) -> None:
-
-        if name not in self.terms:
-            raise KeyError(
-                f"Reward term '{name}' does not exist."
-            )
-
-        del self.terms[name]
-
-        self.term_rewards.pop(
-            name,
-            None,
-        )
 
     def compute(
         self,
-        context: Any,
-    ) -> torch.Tensor:
+        task_context: TaskContext,
+    ) -> tuple[torch.Tensor, dict]:
 
-        self.reward.zero_()
         self.term_rewards.clear()
+        weighted_reward_sum: torch.Tensor = torch.zeros(
+            self.num_envs,
+            device=self.context.device,
+        )
+        weighted_reward_mean = dict[str, torch.Tensor] = {}
 
         for name, term in self.terms.items():
 
-            value = term.function(
-                context,
+            reward = term.function(
+                task_context,
+                self.model_context,
                 **term.params,
             )
+            weighted_reward = reward * term.weight
+            self.term_rewards[name].copy_(weighted_reward)
+            weighted_reward_sum += weighted_reward
+            weighted_reward_mean[name] = weighted_reward.mean()
+            
+        return weighted_reward_sum, weighted_reward_mean
 
-            if value.shape != (self.num_envs,):
-                raise ValueError(
-                    f"Reward term '{name}' must return shape "
-                    f"({self.num_envs},), but got {value.shape}."
-                )
-
-            weighted_reward = value * term.weight
-
-            self.term_rewards[name] = weighted_reward
-
-            self.reward += weighted_reward
-
-        return self.reward
 
     def get_term_reward(
         self,
         name: str,
     ) -> torch.Tensor:
 
-        if name not in self.term_rewards:
-            raise KeyError(
-                f"Reward term '{name}' has not been computed."
-            )
-
         return self.term_rewards[name]
+    
 
     def reset(
         self,
@@ -140,14 +127,10 @@ class RewardManager:
     ) -> None:
 
         if env_ids is None:
-            self.reward.zero_()
-
             for value in self.term_rewards.values():
                 value.zero_()
 
             return
-
-        self.reward[env_ids] = 0.0
 
         for value in self.term_rewards.values():
             value[env_ids] = 0.0

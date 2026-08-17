@@ -31,25 +31,8 @@ observation_manager_config:
 
 reward_manager_config:
   terms:
-    # term_name:
-    #   term_weight:
-    #   term_params:
-
-    tracking_lin_vel:
-      weight: 1.0
-      params: {}
-
-    tracking_ang_vel:
-      weight: 1.0
-      params: {}
-
-    joint_torque:
-      weight: 1.0
-      params: {}
-
-    action_rate:
-      weight: 1.0
-      params: {}
+    # action_diff_l2: {weight: 1.0, params: {sigma: 0.25}}
+    action_diff_l2: {weight: 1.0}
 
 
 termination_manager_config:

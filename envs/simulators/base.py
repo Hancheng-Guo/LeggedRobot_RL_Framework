@@ -3,6 +3,8 @@ import numpy as np
 from pathlib import Path
 from abc import ABC, abstractmethod
 
+from envs.simulators.utils.context import ModelContext
+
 
 class BaseSimulator(ABC):
 
@@ -13,6 +15,7 @@ class BaseSimulator(ABC):
         self.sim_dt: float
         self.frame_skip: int
         self.render_mode: str | None
+        self.model_context: ModelContext
 
 
     @abstractmethod
@@ -25,6 +28,11 @@ class BaseSimulator(ABC):
         render_mode: str | None = None,
         *args, **kwargs
     ) -> None:
+        pass
+
+
+    @abstractmethod
+    def _build_model_context(self) -> ModelContext:
         pass
 
 

@@ -48,9 +48,7 @@ class LocomotionTaskLogic(BaseTaskLogic):
     ) -> None:
 
         super().reset(env_ids)
-        
-        resolved_env_ids = self._resolve_env_ids(env_ids)
 
-        # self.curriculum_manager.reset(resolved_env_ids)
-        # self.event_manager.reset(resolved_env_ids)
-        # self.randomization_manager.reset(resolved_env_ids)
+        # self.curriculum_manager.reset(env_ids)
+        # self.event_manager.reset(env_ids)
+        # self.randomization_manager.reset(env_ids)

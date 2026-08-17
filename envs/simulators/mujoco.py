@@ -7,6 +7,7 @@ from pathlib import Path
 from collections.abc import Callable
 
 from envs.simulators.base import BaseSimulator
+from envs.simulators.utils.context import ModelContext
 from utils.component import Component
 from app.utils.context import RuntimeContext
 from utils.param import update_attributes
@@ -85,6 +86,29 @@ class MujocoSimulator(BaseSimulator):
             mujoco.MjData(model)    # pyright: ignore[reportAttributeAccessIssue]
             for model in self.models
         ]
+        self._build_model_context()
+
+
+    def _build_model_context(self) -> None:
+
+        model = self.models[0]
+
+        def names(object_type, count: int) -> tuple[str | None, ...]:
+            return tuple(
+                mujoco.mj_id2name(model, object_type, index)  # pyright: ignore[reportAttributeAccessIssue]
+                for index in range(count)
+            )
+
+        self.model_context = ModelContext(
+            models=tuple(self.models),
+            nq=model.nq,
+            nv=model.nv,
+            nu=model.nu,
+            na=model.na,
+            body_names=names(mujoco.mjtObj.mjOBJ_BODY, model.nbody),  # pyright: ignore[reportAttributeAccessIssue]
+            joint_names=names(mujoco.mjtObj.mjOBJ_JOINT, model.njnt),  # pyright: ignore[reportAttributeAccessIssue]
+            actuator_names=names(mujoco.mjtObj.mjOBJ_ACTUATOR, model.nu),  # pyright: ignore[reportAttributeAccessIssue]
+        )
 
 
     def reset(

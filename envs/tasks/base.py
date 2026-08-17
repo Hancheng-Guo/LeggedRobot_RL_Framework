@@ -1,19 +1,12 @@
 import torch
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 
 from app.utils.context import RuntimeContext
+from envs.simulators.utils.context import ModelContext
+from envs.tasks.utils.context import TaskContext
 from envs.tasks.managers.reward.base import RewardManager
 from utils.component import Component
-
-
-@dataclass
-class TaskContext:
-    state: dict[str, torch.Tensor]
-    command: dict[str, torch.Tensor]
-    action: torch.Tensor
-    last_action: torch.Tensor
-    episode_step: torch.Tensor
+from utils.param import update_attributes
 
 
 class BaseTaskLogic(ABC):
@@ -25,6 +18,7 @@ class BaseTaskLogic(ABC):
         self.context = context
 
         self.num_envs: int
+        self.model_context: ModelContext
 
         # self.action_manager: ActionManager
         # self.command_manager: CommandManager
@@ -37,9 +31,14 @@ class BaseTaskLogic(ABC):
         self,
         component: Component,
         num_envs: int,
+        model_context: ModelContext,
         *args, **kwargs,
     ) -> None:
-        self.num_envs = num_envs
+        update_attributes(
+            self,
+            num_envs=num_envs,
+            model_context=model_context,
+        )
         self._build_managers(*args, **kwargs)
 
 
@@ -73,6 +72,7 @@ class BaseTaskLogic(ABC):
         self.reward_manager = RewardManager(
             num_envs=self.num_envs,
             context=self.context,
+            model_context=self.model_context,
             **reward_manager_config,
         )
 
@@ -87,29 +87,12 @@ class BaseTaskLogic(ABC):
         self,
         env_ids: torch.Tensor | None = None,
     ) -> None:
-        
-        resolved_env_ids = self._resolve_env_ids(env_ids)
 
-        self.action_manager.reset(resolved_env_ids)
-        self.command_manager.reset(resolved_env_ids)
-        self.observation_manager.reset(resolved_env_ids)
-        self.reward_manager.reset(resolved_env_ids)
-        self.termination_manager.reset(resolved_env_ids)
-
-
-    def pre_step(
-        self,
-        action: torch.Tensor,
-    ) -> None:
-        self.action_manager.update(action)
-        self.command_manager.update()
-
-
-    def post_step(
-        self,
-        task_context: TaskContext,
-    ) -> None:
-        pass
+        # self.action_manager.reset(env_ids)
+        # self.command_manager.reset(env_ids)
+        # self.observation_manager.reset(env_ids)
+        self.reward_manager.reset(env_ids)
+        # self.termination_manager.reset(env_ids)
 
 
     def build_task_context(
@@ -142,11 +125,30 @@ class BaseTaskLogic(ABC):
             episode_step=episode_step,
         )
 
+    
+    def pre_step(
+        self,
+        action: torch.Tensor,
+    ) -> dict:
+        
+        action_update_info = self.action_manager.update(action)
+        command_update_info = self.command_manager.update()
+
+        return action_update_info | command_update_info
+
+
+    def post_step(
+        self,
+        task_context: TaskContext,
+    ) -> dict:
+
+        return {}
+
 
     def process_action(
         self,
         action: torch.Tensor,
-    ) -> torch.Tensor:
+    ) -> tuple[torch.Tensor, dict]:
 
         return self.action_manager.process(action)
     
@@ -155,53 +157,36 @@ class BaseTaskLogic(ABC):
         self,
         task_context: TaskContext,
         env_ids: torch.Tensor | None = None,
-    ) -> torch.Tensor:
-
-        resolved_env_ids = self._resolve_env_ids(env_ids)
+    ) -> tuple[torch.Tensor, dict]:
 
         return self.observation_manager.compute(
             task_context=task_context,
-            env_ids=resolved_env_ids,
+            env_ids=env_ids,
         )
 
 
     def compute_reward(
         self,
         task_context: TaskContext,
-    ) -> torch.Tensor:
+    ) -> tuple[torch.Tensor, dict]:
 
         return self.reward_manager.compute(
             task_context=task_context,
-            command=self.command,
         )
 
 
     def check_terminated(
         self,
         task_context: TaskContext,
-    ) -> torch.Tensor:
+    ) -> tuple[torch.Tensor, dict]:
 
         return self.termination_manager.compute_terminated(
             task_context=task_context,
         )
 
 
-    def _resolve_env_ids(
-        self,
-        env_ids: torch.Tensor | None = None,
-    ) -> torch.Tensor:
-
-        if env_ids is None:
-            return torch.arange(
-                self.num_envs,
-                device=self.device,
-            )
-
-        return env_ids
-        
-
     @property
-    def command(self) -> torch.Tensor:
+    def command(self) -> dict[str, torch.Tensor]:
         return self.command_manager.command
 
 

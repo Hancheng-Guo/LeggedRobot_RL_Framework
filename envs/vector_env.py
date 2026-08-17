@@ -2,13 +2,13 @@ import torch
 import numpy as np
 from typing import Any
 
+from app.utils.context import RuntimeContext
 from envs.base import BaseEnv
 from envs.simulators.base import BaseSimulator
 from envs.simulators.registry import SIM_TYPE_MAP
-from envs.tasks.base import BaseTaskLogic
+from envs.tasks.base import BaseTaskLogic, TaskContext
 from envs.tasks.registry import TASK_TYPE_MAP
 from utils.component import Component
-from app.utils.context import RuntimeContext
 from utils.config import load_yaml
 from utils.param import update_attributes
 
@@ -25,17 +25,26 @@ class VectorEnv(BaseEnv):
         self.task: BaseTaskLogic
 
         self.num_envs: int
+        self.max_episode_steps: int
+        self.current_episode_steps: torch.Tensor
 
 
     def config_update(
         self,
         component: Component,
-        num_envs: int = 1,
+        num_envs: int,
+        max_episode_steps: int,
     ) -> None:
 
         update_attributes(
             self,
             num_envs=num_envs,
+            max_episode_steps=max_episode_steps,
+        )
+        self.current_episode_steps = torch.zeros(
+            self.num_envs,
+            dtype=torch.long,
+            device=self.context.device,
         )
         self._build_simulator(component=component)
         self._build_task(component=component)
@@ -117,8 +126,13 @@ class VectorEnv(BaseEnv):
 
         self.simulator.reset()
         self.task.reset()
+        self.current_episode_steps.zero_()
         state = self.simulator.get_state()
-        obs = self.task.compute_observation(state)
+        task_context = self.task.build_task_context(
+            state=state,
+            episode_step=self.current_episode_steps,
+        )
+        obs = self.task.compute_observation(task_context)
 
         return obs
 
@@ -142,10 +156,16 @@ class VectorEnv(BaseEnv):
 
         self.simulator.reset(env_ids)
         self.task.reset(env_ids)
+        self.current_episode_steps[env_ids] = 0
 
         state = self.simulator.get_state(env_ids)
+        task_context = self.task.build_task_context(
+            state=state,
+            episode_step=self.current_episode_steps,
+            env_ids=env_ids,
+        )
         reset_obs = self.task.compute_observation(
-            state,
+            task_context,
             env_ids=env_ids,
         )
 
@@ -167,12 +187,27 @@ class VectorEnv(BaseEnv):
         dict[str, Any],
     ]:
 
-        self.simulator.step(action)
+        self.task.pre_step(action)
+
+        control = self.task.process_action(action)
+        self.simulator.step(control)
+        self.current_episode_steps += 1
+
         state = self.simulator.get_state()
-        obs = self.task.compute_observation(state)
-        reward = self.task.compute_reward(state)
-        terminated = self.task.check_terminated(state)
-        truncated = self.task.check_truncated(state)
+        task_context = self.task.build_task_context(
+            state=state,
+            episode_step=self.current_episode_steps,
+        )
+
+        self.task.post_step(task_context)
+
+        obs = self.task.compute_observation(task_context)
+        reward = self.task.compute_reward(task_context)
+        terminated = self.task.check_terminated(task_context)
+        truncated = (
+            self.current_episode_steps
+            >= self.max_episode_steps
+        )
 
         info = {
             "reward": reward,

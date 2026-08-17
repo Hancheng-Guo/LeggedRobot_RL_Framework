@@ -1,204 +1,225 @@
 import torch
 from abc import ABC, abstractmethod
-from typing import Any, Iterable
+from dataclasses import dataclass
+
+from app.utils.context import RuntimeContext
+from envs.tasks.managers.reward.base import RewardManager
+from utils.component import Component
+
+
+@dataclass
+class TaskContext:
+    state: dict[str, torch.Tensor]
+    command: dict[str, torch.Tensor]
+    action: torch.Tensor
+    last_action: torch.Tensor
+    episode_step: torch.Tensor
 
 
 class BaseTaskLogic(ABC):
 
     def __init__(
         self,
+        context: RuntimeContext,
+    ) -> None:
+        self.context = context
+
+        self.num_envs: int
+
+        # self.action_manager: ActionManager
+        # self.command_manager: CommandManager
+        # self.observation_manager: ObservationManager
+        self.reward_manager: RewardManager
+        # self.termination_manager: TerminationManager
+
+
+    def config_update(
+        self,
+        component: Component,
         num_envs: int,
-        device: torch.device,
-        dtype: torch.dtype,
+        *args, **kwargs,
+    ) -> None:
+        self.num_envs = num_envs
+        self._build_managers(*args, **kwargs)
+
+
+    def _build_managers(
+        self,
+        action_manager_config: dict,
+        command_manager_config: dict,
+        observation_manager_config: dict,
+        reward_manager_config: dict,
+        termination_manager_config: dict,
     ) -> None:
 
-        self.num_envs = num_envs
-        self.device = device
-        self.dtype = dtype
+        # self.action_manager = ActionManager(
+        #     num_envs=self.num_envs,
+        #     context=self.context,
+        #     **action_manager_config,
+        # )
 
-        # Managers
-        self.command_manager = None
-        self.observation_manager = None
-        self.reward_manager = None
-        self.termination_manager = None
-        self.curriculum_manager = None
+        # self.command_manager = CommandManager(
+        #     num_envs=self.num_envs,
+        #     context=self.context,
+        #     **command_manager_config,
+        # )
 
-        # Task states
-        self.episode_length = torch.zeros(
-            self.num_envs,
-            dtype=torch.long,
-            device=self.device,
+        # self.observation_manager = ObservationManager(
+        #     num_envs=self.num_envs,
+        #     context=self.context,
+        #     **observation_manager_config,
+        # )
+
+        self.reward_manager = RewardManager(
+            num_envs=self.num_envs,
+            context=self.context,
+            **reward_manager_config,
         )
 
-        self._setup()
+        # self.termination_manager = TerminationManager(
+        #     num_envs=self.num_envs,
+        #     device=self.device,
+        #     **termination_manager_config,
+        # )
 
-    def _setup(self) -> None:
-        self._build_managers()
-
-    @abstractmethod
-    def _build_managers(self) -> None:
-        """Create task-specific managers."""
-        raise NotImplementedError
 
     def reset(
         self,
-        env_ids: Iterable[int] | torch.Tensor | None = None,
+        env_ids: torch.Tensor | None = None,
     ) -> None:
+        
+        resolved_env_ids = self._resolve_env_ids(env_ids)
 
-        env_ids = self._resolve_env_ids(
-            env_ids
+        self.action_manager.reset(resolved_env_ids)
+        self.command_manager.reset(resolved_env_ids)
+        self.observation_manager.reset(resolved_env_ids)
+        self.reward_manager.reset(resolved_env_ids)
+        self.termination_manager.reset(resolved_env_ids)
+
+
+    def pre_step(
+        self,
+        action: torch.Tensor,
+    ) -> None:
+        self.action_manager.update(action)
+        self.command_manager.update()
+
+
+    def post_step(
+        self,
+        task_context: TaskContext,
+    ) -> None:
+        pass
+
+
+    def build_task_context(
+        self,
+        state: dict[str, torch.Tensor],
+        episode_step: torch.Tensor,
+        env_ids: torch.Tensor | None = None,
+    ) -> TaskContext:
+    
+        if env_ids is None:
+            command = self.command
+            action = self.action
+            last_action = self.last_action
+
+        else:
+            command = {
+                name: value[env_ids]
+                for name, value
+                in self.command.items()
+            }
+
+            action = self.action[env_ids]
+            last_action = self.last_action[env_ids]
+
+        return TaskContext(
+            state=state,
+            command=command,
+            action=action,
+            last_action=last_action,
+            episode_step=episode_step,
         )
 
-        self.episode_length[env_ids] = 0
-
-        if self.command_manager is not None:
-            self.command_manager.reset(env_ids)
-
-        if self.observation_manager is not None:
-            self.observation_manager.reset(env_ids)
-
-        if self.reward_manager is not None:
-            self.reward_manager.reset(env_ids)
-
-        if self.termination_manager is not None:
-            self.termination_manager.reset(env_ids)
-
-        if self.curriculum_manager is not None:
-            self.curriculum_manager.reset(env_ids)
 
     def process_action(
         self,
         action: torch.Tensor,
-        state: Any,
     ) -> torch.Tensor:
-        """
-        Convert policy action into simulator control.
 
-        Example:
-            normalized action [-1, 1]
-                ->
-            target joint position / torque / velocity
-        """
-
-        return action
+        return self.action_manager.process(action)
+    
 
     def compute_observation(
         self,
-        state: Any,
+        task_context: TaskContext,
+        env_ids: torch.Tensor | None = None,
     ) -> torch.Tensor:
 
-        if self.observation_manager is None:
-            raise RuntimeError(
-                "observation_manager is not initialized."
-            )
+        resolved_env_ids = self._resolve_env_ids(env_ids)
 
         return self.observation_manager.compute(
-            state=state,
-            command=self.command,
+            task_context=task_context,
+            env_ids=resolved_env_ids,
         )
+
 
     def compute_reward(
         self,
-        state: Any,
+        task_context: TaskContext,
     ) -> torch.Tensor:
 
-        if self.reward_manager is None:
-            raise RuntimeError(
-                "reward_manager is not initialized."
-            )
-
         return self.reward_manager.compute(
-            state=state,
+            task_context=task_context,
             command=self.command,
         )
 
-    def compute_terminated(
-        self,
-        state: Any,
-    ) -> torch.Tensor:
 
-        if self.termination_manager is None:
-            return torch.zeros(
-                self.num_envs,
-                dtype=torch.bool,
-                device=self.device,
-            )
+    def check_terminated(
+        self,
+        task_context: TaskContext,
+    ) -> torch.Tensor:
 
         return self.termination_manager.compute_terminated(
-            state=state,
+            task_context=task_context,
         )
 
-    def compute_truncated(
-        self,
-        state: Any,
-    ) -> torch.Tensor:
-
-        if self.termination_manager is None:
-            return torch.zeros(
-                self.num_envs,
-                dtype=torch.bool,
-                device=self.device,
-            )
-
-        return self.termination_manager.compute_truncated(
-            state=state,
-            episode_length=self.episode_length,
-        )
-
-    def step(
-        self,
-    ) -> None:
-        """
-        Update task-side states once per environment step.
-        """
-
-        self.episode_length += 1
-
-        if self.command_manager is not None:
-            self.command_manager.update()
-
-        if self.curriculum_manager is not None:
-            self.curriculum_manager.update()
-
-    @property
-    def command(self) -> torch.Tensor | None:
-
-        if self.command_manager is None:
-            return None
-
-        return self.command_manager.command
-
-    def get_info(self) -> dict[str, Any]:
-
-        info = {
-            "episode_length": self.episode_length,
-        }
-
-        if self.command_manager is not None:
-            info["command"] = self.command
-
-        return info
 
     def _resolve_env_ids(
         self,
-        env_ids: Iterable[int] | torch.Tensor | None,
+        env_ids: torch.Tensor | None = None,
     ) -> torch.Tensor:
 
         if env_ids is None:
             return torch.arange(
                 self.num_envs,
                 device=self.device,
-                dtype=torch.long,
             )
 
-        if isinstance(env_ids, torch.Tensor):
-            return env_ids.to(
-                device=self.device,
-                dtype=torch.long,
-            )
+        return env_ids
+        
 
-        return torch.tensor(
-            list(env_ids),
-            device=self.device,
-            dtype=torch.long,
-        )
+    @property
+    def command(self) -> torch.Tensor:
+        return self.command_manager.command
+
+
+    @property
+    def action(self) -> torch.Tensor:
+        return self.action_manager.action
+
+
+    @property
+    def last_action(self) -> torch.Tensor:
+        return self.action_manager.last_action
+        
+
+    @property
+    def control(self) -> torch.Tensor:
+        return self.action_manager.control
+
+
+    @property
+    def last_control(self) -> torch.Tensor:
+        return self.action_manager.last_control

@@ -1,0 +1,87 @@
+action_manager_config:
+  type: JointPositionActionManager
+  config:
+    clip: 1.0
+    scale: 0.25
+    use_default_joint_pos: true
+
+
+command_manager_config:
+  type: VelocityCommandManager
+  config:
+    resampling_time: 10.0
+    ranges:
+      lin_vel_x: [-1.0, 1.0]
+      lin_vel_y: [-0.5, 0.5]
+      ang_vel_z: [-1.0, 1.0]
+
+
+observation_manager_config:
+  type: LocomotionObservationManager
+  config:
+    clip: 100.0
+    observations:
+      - base_ang_vel
+      - projected_gravity
+      - command
+      - joint_pos
+      - joint_vel
+      - last_action
+
+
+reward_manager_config:
+  terms:
+    # term_name:
+    #   term_weight:
+    #   term_params:
+
+    tracking_lin_vel:
+      weight: 1.0
+      params: {}
+
+    tracking_ang_vel:
+      weight: 1.0
+      params: {}
+
+    joint_torque:
+      weight: 1.0
+      params: {}
+
+    action_rate:
+      weight: 1.0
+      params: {}
+
+
+termination_manager_config:
+  type: LocomotionTerminationManager
+  config:
+    terms:
+      illegal_contact:
+        enabled: true
+
+      base_height:
+        enabled: true
+        min_height: 0.20
+
+      episode_timeout:
+        enabled: true
+        max_episode_steps: 1000
+
+
+curriculum_manager_config:
+  type: LocomotionCurriculumManager
+  config:
+    enabled: true
+
+    terms:
+      command_range:
+        type: CommandRangeCurriculum
+
+      terrain_level:
+        type: TerrainCurriculum
+
+
+event_manager_config:
+
+
+randomization_manager_config:

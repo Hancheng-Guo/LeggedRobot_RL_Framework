@@ -195,7 +195,7 @@ class VectorEnv(BaseEnv):
         dict[str, Any],
     ]:
 
-        pre_step_info = self.task.pre_step(action)
+        pre_step_info = self.task.pre_step()
 
         control, action_info = self.task.process_action(action)
         self.simulator.step(control)

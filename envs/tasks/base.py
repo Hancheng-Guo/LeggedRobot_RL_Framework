@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from app.utils.context import RuntimeContext
 from envs.simulators.utils.context import ModelContext
 from envs.tasks.utils.context import TaskContext
+from envs.tasks.managers.action.base import ActionManager
 from envs.tasks.managers.reward.base import RewardManager
 from utils.component import Component
 from utils.param import update_attributes
@@ -20,7 +21,7 @@ class BaseTaskLogic(ABC):
         self.num_envs: int
         self.model_context: ModelContext
 
-        # self.action_manager: ActionManager
+        self.action_manager: ActionManager
         # self.command_manager: CommandManager
         # self.observation_manager: ObservationManager
         self.reward_manager: RewardManager
@@ -51,11 +52,12 @@ class BaseTaskLogic(ABC):
         termination_manager_config: dict,
     ) -> None:
 
-        # self.action_manager = ActionManager(
-        #     num_envs=self.num_envs,
-        #     context=self.context,
-        #     **action_manager_config,
-        # )
+        self.action_manager = ActionManager(
+            num_envs=self.num_envs,
+            context=self.context,
+            model_context=self.model_context,
+            **action_manager_config,
+        )
 
         # self.command_manager = CommandManager(
         #     num_envs=self.num_envs,
@@ -88,7 +90,7 @@ class BaseTaskLogic(ABC):
         env_ids: torch.Tensor | None = None,
     ) -> None:
 
-        # self.action_manager.reset(env_ids)
+        self.action_manager.reset(env_ids)
         # self.command_manager.reset(env_ids)
         # self.observation_manager.reset(env_ids)
         self.reward_manager.reset(env_ids)
@@ -128,13 +130,9 @@ class BaseTaskLogic(ABC):
     
     def pre_step(
         self,
-        action: torch.Tensor,
     ) -> dict:
-        
-        action_update_info = self.action_manager.update(action)
-        command_update_info = self.command_manager.update()
 
-        return action_update_info | command_update_info
+        return {}
 
 
     def post_step(
@@ -142,7 +140,9 @@ class BaseTaskLogic(ABC):
         task_context: TaskContext,
     ) -> dict:
 
-        return {}
+        command_update_info = self.command_manager.update()
+
+        return command_update_info
 
 
     def process_action(

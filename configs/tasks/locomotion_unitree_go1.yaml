@@ -1,9 +1,7 @@
 action_manager_config:
-  type: JointPositionActionManager
-  config:
-    clip: 1.0
-    scale: 0.25
-    use_default_joint_pos: true
+  terms:
+    HardClamp: {min_value: -1.0, max_value: 1.0}
+    LinearMap: {}
 
 
 command_manager_config:

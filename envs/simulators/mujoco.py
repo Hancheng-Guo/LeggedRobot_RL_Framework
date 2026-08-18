@@ -99,15 +99,22 @@ class MujocoSimulator(BaseSimulator):
                 for index in range(count)
             )
 
+        def tensors(object_type: np.ndarray) -> torch.Tensor:
+            return torch.as_tensor(
+                object_type,
+                dtype=self.context.dtype,
+                device=self.context.device,
+            )
+
         self.model_context = ModelContext(
-            models=tuple(self.models),
-            nq=model.nq,
-            nv=model.nv,
-            nu=model.nu,
-            na=model.na,
-            body_names=names(mujoco.mjtObj.mjOBJ_BODY, model.nbody),  # pyright: ignore[reportAttributeAccessIssue]
-            joint_names=names(mujoco.mjtObj.mjOBJ_JOINT, model.njnt),  # pyright: ignore[reportAttributeAccessIssue]
-            actuator_names=names(mujoco.mjtObj.mjOBJ_ACTUATOR, model.nu),  # pyright: ignore[reportAttributeAccessIssue]
+            nq = model.nq,
+            nv = model.nv,
+            nu = model.nu,
+            na = model.na,
+            # body_names=names(mujoco.mjtObj.mjOBJ_BODY, model.nbody),  # pyright: ignore[reportAttributeAccessIssue]
+            # joint_names=names(mujoco.mjtObj.mjOBJ_JOINT, model.njnt),  # pyright: ignore[reportAttributeAccessIssue]
+            # actuator_names=names(mujoco.mjtObj.mjOBJ_ACTUATOR, model.nu),  # pyright: ignore[reportAttributeAccessIssue]
+            actuator_ctrl_range = tensors(model.actuator_ctrlrange),
         )
 
 

@@ -6,10 +6,7 @@ from typing import Any
 from app.utils.context import RuntimeContext
 from envs.simulators.utils.context import ModelContext
 from envs.tasks.base import TaskContext
-from envs.tasks.managers.reward.terms.registry import get_reward_function
-
-
-RewardFunction = Callable[..., torch.Tensor]
+from envs.tasks.managers.reward.terms.registry import RewardFunction, get_reward_function
 
 
 @dataclass

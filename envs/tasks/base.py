@@ -5,6 +5,7 @@ from app.utils.context import RuntimeContext
 from envs.simulators.utils.context import ModelContext
 from envs.tasks.utils.context import TaskContext
 from envs.tasks.managers.action.base import ActionManager
+from envs.tasks.managers.command.base import CommandManager
 from envs.tasks.managers.reward.base import RewardManager
 from utils.component import Component
 from utils.param import update_attributes
@@ -22,7 +23,7 @@ class BaseTaskLogic(ABC):
         self.model_context: ModelContext
 
         self.action_manager: ActionManager
-        # self.command_manager: CommandManager
+        self.command_manager: CommandManager
         # self.observation_manager: ObservationManager
         self.reward_manager: RewardManager
         # self.termination_manager: TerminationManager
@@ -59,11 +60,12 @@ class BaseTaskLogic(ABC):
             **action_manager_config,
         )
 
-        # self.command_manager = CommandManager(
-        #     num_envs=self.num_envs,
-        #     context=self.context,
-        #     **command_manager_config,
-        # )
+        self.command_manager = CommandManager(
+            num_envs=self.num_envs,
+            context=self.context,
+            model_context=self.model_context,
+            **command_manager_config,
+        )
 
         # self.observation_manager = ObservationManager(
         #     num_envs=self.num_envs,
@@ -91,7 +93,7 @@ class BaseTaskLogic(ABC):
     ) -> None:
 
         self.action_manager.reset(env_ids)
-        # self.command_manager.reset(env_ids)
+        self.command_manager.reset(env_ids)
         # self.observation_manager.reset(env_ids)
         self.reward_manager.reset(env_ids)
         # self.termination_manager.reset(env_ids)
@@ -140,7 +142,7 @@ class BaseTaskLogic(ABC):
         task_context: TaskContext,
     ) -> dict:
 
-        command_update_info = self.command_manager.update()
+        command_update_info = self.command_manager.update(task_context)
 
         return command_update_info
 

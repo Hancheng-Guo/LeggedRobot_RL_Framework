@@ -207,8 +207,6 @@ class VectorEnv(BaseEnv):
             episode_step=self.current_episode_steps,
         )
 
-        post_step_info = self.task.post_step(task_context)
-
         obs, obs_info = self.task.compute_observation(task_context)
         reward, reward_info = self.task.compute_reward(task_context)
         terminated, terminated_info = self.task.check_terminated(task_context)
@@ -216,6 +214,8 @@ class VectorEnv(BaseEnv):
             self.current_episode_steps
             >= self.max_episode_steps
         )
+
+        post_step_info = self.task.post_step(task_context)
 
         transition_next_obs = obs
 

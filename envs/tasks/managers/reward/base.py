@@ -93,7 +93,7 @@ class RewardManager:
             self.num_envs,
             device=self.context.device,
         )
-        weighted_reward_mean = dict[str, torch.Tensor] = {}
+        weighted_reward_mean: dict[str, torch.Tensor] = {}
 
         for name, term in self.terms.items():
 

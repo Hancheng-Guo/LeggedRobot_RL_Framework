@@ -16,7 +16,7 @@ class ApplicationEntry:
     ) -> None:
         
         self.app_name: str
-        self.train_time: datetime | None
+        self.train_time: datetime
         self.load_dir: Path
         self.config: dict
         self.context: RuntimeContext

@@ -22,3 +22,10 @@ class BaseActionTerm(ABC):
         value: torch.Tensor,
     ) -> torch.Tensor:
         pass
+
+
+    def reset(
+        self,
+        env_ids: torch.Tensor | None = None,
+    ) -> None:
+        pass

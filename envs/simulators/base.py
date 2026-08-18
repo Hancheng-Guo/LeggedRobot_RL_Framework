@@ -32,7 +32,7 @@ class BaseSimulator(ABC):
 
 
     @abstractmethod
-    def _build_model_context(self) -> ModelContext:
+    def _build_model_context(self) -> None:
         pass
 
 

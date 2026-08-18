@@ -3,7 +3,6 @@ from typing import Any
 
 from app.utils.context import RuntimeContext
 from envs.simulators.utils.context import ModelContext
-from envs.tasks.base import TaskContext
 from envs.tasks.managers.action.terms.base import BaseActionTerm
 from envs.tasks.managers.action.terms.registry import get_action_class
 
@@ -33,7 +32,7 @@ class ActionManager:
         )
 
         self.action = torch.zeros(
-            (num_envs, self.input_dim),
+            (self.num_envs, self.input_dim),
             dtype=self.context.dtype,
             device=self.context.device,
         )
@@ -110,6 +109,9 @@ class ActionManager:
         self,
         env_ids: torch.Tensor | None = None,
     ) -> None:
+
+        for term in self.terms.values():
+            term.reset(env_ids)
         
         if env_ids is None:
             self.action.zero_()

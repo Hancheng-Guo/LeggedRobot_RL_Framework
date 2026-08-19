@@ -1,42 +1,29 @@
-import torch
 from collections.abc import Callable
 
+from envs.tasks.managers.reward.terms.base import BaseRewardTerm
 
-RewardFunction = Callable[..., torch.Tensor]
 
-
-REWARD_FUNCTION_MAP: dict[str, RewardFunction] = {}
+REWARD_CLASS_MAP: dict[str, type[BaseRewardTerm]] = {}
 
 
 def register_reward(
-    function: RewardFunction,
-) -> RewardFunction:
+    cls: type[BaseRewardTerm]
+) -> type[BaseRewardTerm]:
 
-    name = function.__name__
+    name = cls.__name__
 
-    if name in REWARD_FUNCTION_MAP:
+    if name in REWARD_CLASS_MAP:
         raise ValueError(
-            f"Reward function '{name}' already registered."
+            f"Reward term '{name}' is already registered."
         )
 
-    REWARD_FUNCTION_MAP[name] = function
+    REWARD_CLASS_MAP[name] = cls
+    return cls
 
-    return function
 
+def get_reward_class(name: str) -> type[BaseRewardTerm]:
 
-def get_reward_function(reward_name: str):
+    if name not in REWARD_CLASS_MAP:
+        raise ValueError(f"Unknown reward term '{name}'.")
 
-    function = REWARD_FUNCTION_MAP.get(reward_name, None)
-
-    if function is None:
-        raise ValueError(
-            f"Unknown reward function: '{reward_name}'."
-        )
-
-    if not callable(function):
-        raise TypeError(
-            f"Reward function '{reward_name}' is not callable."
-        )
-
-    return function
-
+    return REWARD_CLASS_MAP[name]

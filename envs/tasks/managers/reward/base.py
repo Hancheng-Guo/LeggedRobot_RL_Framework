@@ -1,19 +1,11 @@
 import torch
-from dataclasses import dataclass
-from collections.abc import Callable
 from typing import Any
 
 from app.utils.context import RuntimeContext
 from envs.simulators.utils.context import ModelContext
-from envs.tasks.base import TaskContext
-from envs.tasks.managers.reward.terms.registry import RewardFunction, get_reward_function
-
-
-@dataclass
-class RewardTerm:
-    function: RewardFunction
-    weight: float
-    params: dict[str, Any]
+from envs.tasks.utils.context import TaskContext
+from envs.tasks.managers.reward.terms.base import BaseRewardTerm
+from envs.tasks.managers.reward.terms.registry import get_reward_class
 
 
 class RewardManager:
@@ -31,7 +23,7 @@ class RewardManager:
         self.context = context
         self.model_context = model_context
 
-        self.terms: dict[str, RewardTerm] = {}
+        self.terms: dict[str, BaseRewardTerm] = {}
         self.term_rewards: dict[str, torch.Tensor] = {}
         self._build_terms(terms)
 
@@ -43,17 +35,16 @@ class RewardManager:
 
         for name, config in terms.items():
 
-            function = get_reward_function(name)
-
             weight: float = config.get("weight", 1.0)
             params: dict = config.get("params", {})
 
             if params is None or not isinstance(params, dict):
                 params = {}
 
+            cls = get_reward_class(name)
             self._add_term(
                 name=name,
-                function=function,
+                cls=cls,
                 weight=weight,
                 params=params,
             )
@@ -62,7 +53,7 @@ class RewardManager:
     def _add_term(
         self,
         name: str,
-        function: RewardFunction,
+        cls: type[BaseRewardTerm],
         weight: float,
         params: dict[str, Any],
     ) -> None:
@@ -72,13 +63,14 @@ class RewardManager:
                 f"Reward term '{name}' already exists."
             )
 
-        self.terms[name] = RewardTerm(
-            function=function,
+        self.terms[name] = cls(
             weight=weight,
-            params=params,
+            model_context=self.model_context,
+            **params,
         )
         self.term_rewards[name] = torch.zeros(
             self.num_envs,
+            dtype=self.context.dtype,
             device=self.context.device,
         )
 
@@ -88,20 +80,16 @@ class RewardManager:
         task_context: TaskContext,
     ) -> tuple[torch.Tensor, dict]:
 
-        self.term_rewards.clear()
         weighted_reward_sum: torch.Tensor = torch.zeros(
             self.num_envs,
+            dtype=self.context.dtype,
             device=self.context.device,
         )
         weighted_reward_mean: dict[str, torch.Tensor] = {}
 
         for name, term in self.terms.items():
 
-            reward = term.function(
-                task_context,
-                self.model_context,
-                **term.params,
-            )
+            reward = term.compute(task_context)
             weighted_reward = reward * term.weight
             self.term_rewards[name].copy_(weighted_reward)
             weighted_reward_sum += weighted_reward
@@ -122,6 +110,9 @@ class RewardManager:
         self,
         env_ids: torch.Tensor | None = None,
     ) -> None:
+
+        for term in self.terms.values():
+            term.reset(env_ids)
 
         if env_ids is None:
             for value in self.term_rewards.values():

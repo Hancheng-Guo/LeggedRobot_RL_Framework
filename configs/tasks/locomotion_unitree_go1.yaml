@@ -28,8 +28,8 @@ observation_manager_config:
 
 reward_manager_config:
   terms:
-    # action_diff_l2: {weight: 1.0, params: {sigma: 0.25}}
-    action_diff_l2: {weight: 1.0}
+    # ActionDiffL2: {weight: 1.0, params: {sigma: 0.25}}
+    ActionDiffL2: {weight: 1.0}
 
 
 termination_manager_config:

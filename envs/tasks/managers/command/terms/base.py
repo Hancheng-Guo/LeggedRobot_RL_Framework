@@ -27,7 +27,6 @@ class BaseCommandTerm(ABC):
             dtype=self.context.dtype,
             device=self.context.device,
         )
-        self.last_command = torch.zeros_like(self.command)
 
 
     @abstractmethod

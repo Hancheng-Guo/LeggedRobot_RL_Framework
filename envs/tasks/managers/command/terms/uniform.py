@@ -31,8 +31,7 @@ class UniformOnReset(BaseCommandTerm):
         self,
         task_context: TaskContext,
     ) -> None:
-
-        self.last_command.copy_(self.command)
+        pass
 
 
     def reset(
@@ -42,7 +41,6 @@ class UniformOnReset(BaseCommandTerm):
 
         if env_ids is None:
 
-            self.last_command.zero_()
             self.command.uniform_(
                 self.min_value,
                 self.max_value,
@@ -50,7 +48,6 @@ class UniformOnReset(BaseCommandTerm):
 
             return
 
-        self.last_command[env_ids] = 0.0
         self.command[env_ids] = (
             torch.rand(
                 (env_ids.numel(), 1),

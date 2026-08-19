@@ -9,6 +9,8 @@ command_manager_config:
     lin_vel_x: {type: UniformOnReset, params: {min_value: -0.5, max_value: 0.5}}
     lin_vel_y: {type: UniformOnReset, params: {min_value: -0.5, max_value: 0.5}}
     ang_vel_z: {type: UniformOnReset, params: {min_value: -1.0, max_value: 1.0}}
+  constraints:
+    ang_vel_z: {operator: "<=", expression: "0.5 * (1.0 - abs({lin_vel_x}))"}
 
 
 observation_manager_config:

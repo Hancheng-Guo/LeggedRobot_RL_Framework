@@ -1,7 +1,7 @@
 action_manager_config:
   terms:
-    HardClamp: {min_value: -1.0, max_value: 1.0}
-    LinearMap: {}
+    hard_clamp: {min_value: -1.0, max_value: 1.0}
+    linear_map: {}
 
 
 command_manager_config:
@@ -14,22 +14,20 @@ command_manager_config:
 
 
 observation_manager_config:
-  type: LocomotionObservationManager
-  config:
-    clip: 100.0
-    observations:
-      - base_ang_vel
-      - projected_gravity
-      - command
-      - joint_pos
-      - joint_vel
-      - last_action
+  clip: 100.0
+  terms:
+    base_angular_velocity: {scale: 0.25}
+    projected_gravity: {scale: 1.0}
+    command: {scale: 1.0}
+    joint_position: {scale: 1.0}
+    joint_velocity: {scale: 0.05}
+    last_action: {scale: 1.0}
 
 
 reward_manager_config:
   terms:
-    # ActionDiffL2: {weight: 1.0, params: {sigma: 0.25}}
-    ActionDiffL2: {weight: 1.0}
+    # action_diff_l2: {weight: 1.0, params: {sigma: 0.25}}
+    action_diff_l2: {weight: 1.0}
 
 
 termination_manager_config:

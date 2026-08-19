@@ -1,6 +1,5 @@
-from collections.abc import Callable
-
 from envs.tasks.managers.reward.terms.base import BaseRewardTerm
+from utils.string import camel_to_snake
 
 
 REWARD_CLASS_MAP: dict[str, type[BaseRewardTerm]] = {}
@@ -10,7 +9,7 @@ def register_reward(
     cls: type[BaseRewardTerm]
 ) -> type[BaseRewardTerm]:
 
-    name = cls.__name__
+    name = camel_to_snake(cls.__name__)
 
     if name in REWARD_CLASS_MAP:
         raise ValueError(

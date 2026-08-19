@@ -1,4 +1,5 @@
 from envs.tasks.managers.action.terms.base import BaseActionTerm
+from utils.string import camel_to_snake
 
 
 ACTION_CLASS_MAP: dict[str, type[BaseActionTerm]] = {}
@@ -8,7 +9,7 @@ def register_action(
     cls: type[BaseActionTerm],
 ) -> type[BaseActionTerm]:
 
-    name = cls.__name__
+    name = camel_to_snake(cls.__name__)
 
     if name in ACTION_CLASS_MAP:
         raise ValueError(

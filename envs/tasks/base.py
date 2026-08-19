@@ -6,6 +6,7 @@ from envs.simulators.utils.context import ModelContext
 from envs.tasks.utils.context import TaskContext
 from envs.tasks.managers.action.base import ActionManager
 from envs.tasks.managers.command.base import CommandManager
+from envs.tasks.managers.observation.base import ObservationManager
 from envs.tasks.managers.reward.base import RewardManager
 from utils.component import Component
 from utils.param import update_attributes
@@ -24,7 +25,7 @@ class BaseTaskLogic(ABC):
 
         self.action_manager: ActionManager
         self.command_manager: CommandManager
-        # self.observation_manager: ObservationManager
+        self.observation_manager: ObservationManager
         self.reward_manager: RewardManager
         # self.termination_manager: TerminationManager
 
@@ -67,11 +68,12 @@ class BaseTaskLogic(ABC):
             **command_manager_config,
         )
 
-        # self.observation_manager = ObservationManager(
-        #     num_envs=self.num_envs,
-        #     context=self.context,
-        #     **observation_manager_config,
-        # )
+        self.observation_manager = ObservationManager(
+            num_envs=self.num_envs,
+            context=self.context,
+            model_context=self.model_context,
+            **observation_manager_config,
+        )
 
         self.reward_manager = RewardManager(
             num_envs=self.num_envs,
@@ -94,7 +96,7 @@ class BaseTaskLogic(ABC):
 
         self.action_manager.reset(env_ids)
         self.command_manager.reset(env_ids)
-        # self.observation_manager.reset(env_ids)
+        self.observation_manager.reset(env_ids)
         self.reward_manager.reset(env_ids)
         # self.termination_manager.reset(env_ids)
 

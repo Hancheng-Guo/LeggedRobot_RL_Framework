@@ -169,7 +169,7 @@ class VectorEnv(BaseEnv):
         state = self.simulator.get_state(env_ids)
         task_context = self.task.build_task_context(
             state=state,
-            episode_step=self.current_episode_steps,
+            episode_step=self.current_episode_steps[env_ids],
             env_ids=env_ids,
         )
         reset_obs, _ = self.task.compute_observation(
@@ -205,22 +205,23 @@ class VectorEnv(BaseEnv):
         task_context = self.task.build_task_context(
             state=state,
             episode_step=self.current_episode_steps,
-        )
+        ) # old_command, action, last_action
 
-        obs, obs_info = self.task.compute_observation(task_context)
         reward, reward_info = self.task.compute_reward(task_context)
         terminated, terminated_info = self.task.check_terminated(task_context)
-        truncated = (
-            self.current_episode_steps
-            >= self.max_episode_steps
-        )
+        truncated = (self.current_episode_steps >= self.max_episode_steps)
 
         post_step_info = self.task.post_step(task_context)
 
-        transition_next_obs = obs
+        next_task_context = self.task.build_task_context(
+            state=state,
+            episode_step=self.current_episode_steps,
+        ) # new_command, action, last_action
+
+        transition_next_obs, obs_info = self.task.compute_observation(next_task_context)
 
         next_obs = self._reset_done_envs(
-            obs,
+            transition_next_obs,
             terminated,
             truncated,
         )

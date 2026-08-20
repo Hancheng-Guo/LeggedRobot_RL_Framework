@@ -21,6 +21,7 @@ def test_mujoco_builds_observation_indices_from_model(runtime_context):
     simulator._build_model_context()
     context = simulator.model_context
 
+    assert context.base_pos_qpos_ids.tolist() == [0, 1, 2]
     assert context.base_quat_qpos_ids.tolist() == [3, 4, 5, 6]
     assert context.base_ang_vel_qvel_ids.tolist() == [3, 4, 5]
     assert context.joint_qpos_ids.tolist() == list(range(7, 19))

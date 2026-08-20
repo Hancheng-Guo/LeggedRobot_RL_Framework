@@ -31,19 +31,8 @@ reward_manager_config:
 
 
 termination_manager_config:
-  type: LocomotionTerminationManager
-  config:
-    terms:
-      illegal_contact:
-        enabled: true
-
-      base_height:
-        enabled: true
-        min_height: 0.20
-
-      episode_timeout:
-        enabled: true
-        max_episode_steps: 1000
+  terms:
+    base_height: {min_height: 0.20}
 
 
 curriculum_manager_config:

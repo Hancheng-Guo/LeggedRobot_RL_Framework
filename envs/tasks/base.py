@@ -8,6 +8,7 @@ from envs.tasks.managers.action.base import ActionManager
 from envs.tasks.managers.command.base import CommandManager
 from envs.tasks.managers.observation.base import ObservationManager
 from envs.tasks.managers.reward.base import RewardManager
+from envs.tasks.managers.termination.base import TerminationManager
 from utils.component import Component
 from utils.param import update_attributes
 
@@ -27,7 +28,7 @@ class BaseTaskLogic(ABC):
         self.command_manager: CommandManager
         self.observation_manager: ObservationManager
         self.reward_manager: RewardManager
-        # self.termination_manager: TerminationManager
+        self.termination_manager: TerminationManager
 
 
     def config_update(
@@ -82,11 +83,12 @@ class BaseTaskLogic(ABC):
             **reward_manager_config,
         )
 
-        # self.termination_manager = TerminationManager(
-        #     num_envs=self.num_envs,
-        #     device=self.device,
-        #     **termination_manager_config,
-        # )
+        self.termination_manager = TerminationManager(
+            num_envs=self.num_envs,
+            context=self.context,
+            model_context=self.model_context,
+            **termination_manager_config,
+        )
 
 
     def reset(
@@ -98,7 +100,7 @@ class BaseTaskLogic(ABC):
         self.command_manager.reset(env_ids)
         self.observation_manager.reset(env_ids)
         self.reward_manager.reset(env_ids)
-        # self.termination_manager.reset(env_ids)
+        self.termination_manager.reset(env_ids)
 
 
     def build_task_context(
@@ -184,7 +186,7 @@ class BaseTaskLogic(ABC):
         task_context: TaskContext,
     ) -> tuple[torch.Tensor, dict]:
 
-        return self.termination_manager.compute_terminated(
+        return self.termination_manager.compute(
             task_context=task_context,
         )
 

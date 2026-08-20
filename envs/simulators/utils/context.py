@@ -15,6 +15,7 @@ class ModelContext:
 
     # base_names: tuple[str, ...]
     # base_ids: torch.Tensor
+    base_pos_qpos_ids: torch.Tensor
     base_quat_qpos_ids: torch.Tensor
     base_ang_vel_qvel_ids: torch.Tensor
 

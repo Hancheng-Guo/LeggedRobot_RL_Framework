@@ -174,6 +174,9 @@ class MujocoSimulator(BaseSimulator):
             na = model.na,
             gravity=tensors(model.opt.gravity),
             # base_names=names(mujoco.mjtObj.mjOBJ_BODY, model.nbody),  # pyright: ignore[reportAttributeAccessIssue]
+            base_pos_qpos_ids=indices(
+                np.arange(base_qpos_adr, base_qpos_adr + 3)
+            ),
             base_quat_qpos_ids=indices(
                 np.arange(base_qpos_adr + 3, base_qpos_adr + 7)
             ),

@@ -27,6 +27,7 @@ def model_context() -> ModelContext:
         nv=8,
         nu=2,
         na=0,
+        base_pos_qpos_ids=torch.tensor([5, 6, 7]),
         base_quat_qpos_ids=torch.tensor([1, 2, 3, 4]),
         base_ang_vel_qvel_ids=torch.tensor([1, 2, 3]),
         gravity=torch.tensor([0.0, 0.0, -9.81]),

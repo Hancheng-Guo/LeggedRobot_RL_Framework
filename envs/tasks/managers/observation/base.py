@@ -50,6 +50,7 @@ class ObservationManager:
 
             cls = get_observation_class(name)
             self.terms[name] = cls(
+                context=self.context,
                 model_context=self.model_context,
                 **config,
             )

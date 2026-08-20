@@ -27,9 +27,13 @@ def model_context() -> ModelContext:
         nv=8,
         nu=2,
         na=0,
+        base_quat_qpos_ids=torch.tensor([1, 2, 3, 4]),
+        base_ang_vel_qvel_ids=torch.tensor([1, 2, 3]),
+        gravity=torch.tensor([0.0, 0.0, -9.81]),
+        joint_qpos_ids=torch.tensor([0, 8]),
+        joint_qvel_ids=torch.tensor([0, 7]),
         actuator_ctrl_range=torch.tensor(
             [[0.0, 2.0], [-2.0, 2.0]],
             dtype=torch.float32,
         ),
     )
-

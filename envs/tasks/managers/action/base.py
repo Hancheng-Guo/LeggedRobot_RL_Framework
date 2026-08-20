@@ -68,6 +68,7 @@ class ActionManager:
 
             self.terms[name] = cls(
                 output_dim=dim,
+                context=self.context,
                 model_context=self.model_context,
                 **params
             )

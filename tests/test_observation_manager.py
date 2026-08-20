@@ -1,5 +1,6 @@
 import pytest
 import torch
+from dataclasses import replace
 
 from envs.tasks.managers.observation.base import ObservationManager
 from envs.tasks.managers.observation.terms.base import BaseObservationTerm
@@ -11,12 +12,12 @@ from envs.tasks.utils.context import TaskContext
 
 def make_task_context(num_envs: int = 2) -> TaskContext:
     qpos = torch.zeros(num_envs, 9)
-    qpos[:, 3] = 1.0
-    qpos[:, 7:] = torch.tensor([0.25, -0.5])
+    qpos[:, 1] = 1.0
+    qpos[:, [0, 8]] = torch.tensor([0.25, -0.5])
 
     qvel = torch.zeros(num_envs, 8)
-    qvel[:, 3:6] = torch.tensor([1.0, 2.0, 3.0])
-    qvel[:, 6:] = torch.tensor([4.0, 5.0])
+    qvel[:, 1:4] = torch.tensor([1.0, 2.0, 3.0])
+    qvel[:, [0, 7]] = torch.tensor([4.0, 5.0])
 
     return TaskContext(
         state={"qpos": qpos, "qvel": qvel},
@@ -123,3 +124,43 @@ def test_observation_manager_rejects_non_matrix_term(
     finally:
         OBSERVATION_CLASS_MAP.pop("invalid_shape", None)
 
+
+def test_projected_gravity_uses_model_gravity(
+    runtime_context,
+    model_context,
+):
+    model_context = replace(
+        model_context,
+        gravity=torch.tensor([0.0, -9.81, 0.0]),
+    )
+    manager = ObservationManager(
+        num_envs=2,
+        context=runtime_context,
+        model_context=model_context,
+        terms={"projected_gravity": {}},
+    )
+
+    observation, _ = manager.compute(make_task_context())
+
+    torch.testing.assert_close(
+        observation,
+        torch.tensor([[0.0, -1.0, 0.0]]).repeat(2, 1),
+    )
+
+
+def test_projected_gravity_rejects_zero_model_gravity(
+    runtime_context,
+    model_context,
+):
+    model_context = replace(
+        model_context,
+        gravity=torch.zeros(3),
+    )
+
+    with pytest.raises(ValueError, match="non-zero gravity"):
+        ObservationManager(
+            num_envs=2,
+            context=runtime_context,
+            model_context=model_context,
+            terms={"projected_gravity": {}},
+        )

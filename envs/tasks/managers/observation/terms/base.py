@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 
 import torch
 
+from app.utils.context import RuntimeContext
 from envs.simulators.utils.context import ModelContext
 from envs.tasks.utils.context import TaskContext
 
@@ -10,6 +11,7 @@ class BaseObservationTerm(ABC):
 
     def __init__(
         self,
+        context: RuntimeContext,
         scale: float = 1.0,
         *args, **kwargs,
     ) -> None:
@@ -17,6 +19,7 @@ class BaseObservationTerm(ABC):
         if not isinstance(scale, (int, float)):
             raise TypeError("'scale' of observation term must be numeric.")
 
+        self.context = context
         self.scale = float(scale)
 
 

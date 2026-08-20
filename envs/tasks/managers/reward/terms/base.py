@@ -1,6 +1,7 @@
 import torch
 from abc import ABC, abstractmethod
 
+from app.utils.context import RuntimeContext
 from envs.tasks.utils.context import TaskContext
 
 
@@ -8,6 +9,7 @@ class BaseRewardTerm(ABC):
 
     def __init__(
         self,
+        context: RuntimeContext,
         weight: float = 1.0,
         *args, **kwargs,
     ) -> None:
@@ -15,6 +17,7 @@ class BaseRewardTerm(ABC):
         if not isinstance(weight, (int, float)):
             raise TypeError("'weight' of reward term must be numeric.")
 
+        self.context = context
         self.weight = float(weight)
 
 
@@ -31,4 +34,3 @@ class BaseRewardTerm(ABC):
         env_ids: torch.Tensor | None = None,
     ) -> None:
         pass
-

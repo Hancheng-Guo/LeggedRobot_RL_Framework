@@ -1,5 +1,8 @@
 import torch
+from typing import cast
 
+from envs.simulators.base import BaseSimulator
+from envs.tasks.base import BaseTaskLogic
 from envs.tasks.utils.context import TaskContext
 from envs.vector_env import VectorEnv
 
@@ -116,8 +119,8 @@ def make_env(max_episode_steps: int = 10) -> VectorEnv:
     env.num_envs = 2
     env.max_episode_steps = max_episode_steps
     env.current_episode_steps = torch.zeros(2, dtype=torch.long)
-    env.simulator = FakeSimulator(2)
-    env.task = FakeTask(2)
+    env.simulator = cast(BaseSimulator, FakeSimulator(2))
+    env.task = cast(BaseTaskLogic, FakeTask(2))
     return env
 
 

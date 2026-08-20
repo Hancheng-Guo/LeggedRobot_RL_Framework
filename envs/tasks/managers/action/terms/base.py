@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 import torch
 
-from envs.simulators.utils.context import ModelContext
+from app.utils.context import RuntimeContext
 
 
 class BaseActionTerm(ABC):
@@ -9,11 +9,13 @@ class BaseActionTerm(ABC):
     def __init__(
         self,
         output_dim: int,
+        context: RuntimeContext,
         *args, **kwargs,
     ) -> None:
 
         self.input_dim: int
         self.output_dim = output_dim
+        self.context = context
 
 
     @abstractmethod

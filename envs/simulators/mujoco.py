@@ -106,13 +106,87 @@ class MujocoSimulator(BaseSimulator):
                 device=self.context.device,
             )
 
+        def indices(object_indices: np.ndarray) -> torch.Tensor:
+            return torch.as_tensor(
+                object_indices,
+                dtype=torch.long,
+                device=self.context.device,
+            )
+
+        # find the free joint in the model, which represents the base of the robot
+        free_joint_ids = np.flatnonzero(
+            model.jnt_type == mujoco.mjtJoint.mjJNT_FREE    # pyright: ignore[reportAttributeAccessIssue]
+        )
+        if free_joint_ids.size != 1:
+            raise ValueError(
+                "The model must contain exactly one free joint to build "
+                "base observations."
+            )
+        base_joint_id = int(free_joint_ids[0])
+        base_qpos_adr = int(model.jnt_qposadr[base_joint_id])
+        base_qvel_adr = int(model.jnt_dofadr[base_joint_id])
+
+        # check all transmission type of actuators are JOINT or JOINTINPARENT.
+        # if transmission type is TENDON, the actuator is connected to a tendon,
+        # which does not have a direct mapping to a joint
+        joint_transmission_types = {
+            int(mujoco.mjtTrn.mjTRN_JOINT),         # pyright: ignore[reportAttributeAccessIssue]
+            int(mujoco.mjtTrn.mjTRN_JOINTINPARENT), # pyright: ignore[reportAttributeAccessIssue]
+        }
+        if any(
+            int(transmission_type) not in joint_transmission_types
+            for transmission_type in model.actuator_trntype
+        ):
+            raise ValueError(
+                "Every actuator must use a joint transmission to build "
+                "joint observations."
+            )
+
+        # explain the mapping between actuators and joints
+        actuator_joint_ids = model.actuator_trnid[:, 0].astype(
+            np.int64,
+            copy=False,
+        )
+        if np.any(actuator_joint_ids < 0):
+            raise ValueError(
+                "Every actuator must reference a joint to build joint observations."
+            )   # '-1' means that the actuator does not reference a joint correctly
+
+        # check all actuated joints are hinge or slide joints, which are one-dimensional joints
+        actuator_joint_types = model.jnt_type[actuator_joint_ids]
+        scalar_joint_types = {
+            int(mujoco.mjtJoint.mjJNT_HINGE),   # pyright: ignore[reportAttributeAccessIssue]
+            int(mujoco.mjtJoint.mjJNT_SLIDE),   # pyright: ignore[reportAttributeAccessIssue]
+        }
+        if any(
+            int(joint_type) not in scalar_joint_types
+            for joint_type in actuator_joint_types
+        ):
+            raise ValueError(
+                "Actuated joints must be hinge or slide joints to build "
+                "one-dimensional joint observations."
+            )
+
         self.model_context = ModelContext(
             nq = model.nq,
             nv = model.nv,
             nu = model.nu,
             na = model.na,
-            # body_names=names(mujoco.mjtObj.mjOBJ_BODY, model.nbody),  # pyright: ignore[reportAttributeAccessIssue]
+            gravity=tensors(model.opt.gravity),
+            # base_names=names(mujoco.mjtObj.mjOBJ_BODY, model.nbody),  # pyright: ignore[reportAttributeAccessIssue]
+            base_quat_qpos_ids=indices(
+                np.arange(base_qpos_adr + 3, base_qpos_adr + 7)
+            ),
+            base_ang_vel_qvel_ids=indices(
+                np.arange(base_qvel_adr + 3, base_qvel_adr + 6)
+            ),
             # joint_names=names(mujoco.mjtObj.mjOBJ_JOINT, model.njnt),  # pyright: ignore[reportAttributeAccessIssue]
+            joint_qpos_ids=indices(
+                model.jnt_qposadr[actuator_joint_ids]
+            ),
+            joint_qvel_ids=indices(
+                model.jnt_dofadr[actuator_joint_ids]
+            ),
             # actuator_names=names(mujoco.mjtObj.mjOBJ_ACTUATOR, model.nu),  # pyright: ignore[reportAttributeAccessIssue]
             actuator_ctrl_range = tensors(model.actuator_ctrlrange),
         )

@@ -33,6 +33,7 @@ reward_manager_config:
 termination_manager_config:
   terms:
     base_height: {min_height: 0.20}
+    body_contact: {body_names: [trunk, FR_thigh, FL_thigh, RR_thigh, RL_thigh], ground_geom_name: floor}
 
 
 curriculum_manager_config:

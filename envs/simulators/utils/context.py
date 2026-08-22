@@ -19,6 +19,8 @@ class ModelContext:
     base_quat_qpos_ids: torch.Tensor
     base_ang_vel_qvel_ids: torch.Tensor
 
+    body_names: tuple[str | None, ...]
+
     # joint_names: tuple[str, ...]
     # joint_ids: torch.Tensor
     joint_qpos_ids: torch.Tensor
@@ -29,7 +31,8 @@ class ModelContext:
     # actuator_ids: torch.Tensor
     actuator_ctrl_range: torch.Tensor
 
-    # geom_names: tuple[str, ...]
+    geom_names: tuple[str | None, ...]
+    geom_body_ids: torch.Tensor
     # geom_ids: torch.Tensor
 
     # foot_body_ids: torch.Tensor

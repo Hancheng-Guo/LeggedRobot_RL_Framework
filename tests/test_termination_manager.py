@@ -77,3 +77,76 @@ def test_termination_manager_partial_reset(
 
     assert not manager.term_terminated["base_height"][0]
 
+
+def test_body_contact_terminates_for_either_contact_order(
+    runtime_context,
+    model_context,
+):
+    manager = TerminationManager(
+        num_envs=2,
+        context=runtime_context,
+        model_context=model_context,
+        terms={
+            "body_contact": {
+                "body_names": ["base", "thigh"],
+                "ground_geom_name": "floor",
+            },
+        },
+    )
+    task_context = make_task_context()
+    task_context.state["contact_geom_ids"] = torch.tensor([
+        [[1, 0], [-1, -1]],
+        [[0, 2], [-1, -1]],
+    ])
+
+    terminated, info = manager.compute(task_context)
+
+    torch.testing.assert_close(terminated, torch.tensor([True, True]))
+    torch.testing.assert_close(
+        info["termination/body_contact"],
+        terminated,
+    )
+
+
+def test_body_contact_ignores_other_contacts(
+    runtime_context,
+    model_context,
+):
+    manager = TerminationManager(
+        num_envs=2,
+        context=runtime_context,
+        model_context=model_context,
+        terms={
+            "body_contact": {
+                "body_names": ["base"],
+                "ground_geom_name": "floor",
+            },
+        },
+    )
+    task_context = make_task_context()
+    task_context.state["contact_geom_ids"] = torch.tensor([
+        [[3, 0]],
+        [[1, 3]],
+    ])
+
+    terminated, _ = manager.compute(task_context)
+
+    torch.testing.assert_close(terminated, torch.tensor([False, False]))
+
+
+def test_body_contact_rejects_unknown_body_name(
+    runtime_context,
+    model_context,
+):
+    with pytest.raises(ValueError, match="missing_body"):
+        TerminationManager(
+            num_envs=2,
+            context=runtime_context,
+            model_context=model_context,
+            terms={
+                "body_contact": {
+                    "body_names": ["missing_body"],
+                    "ground_geom_name": "floor",
+                },
+            },
+        )

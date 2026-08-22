@@ -183,6 +183,10 @@ class MujocoSimulator(BaseSimulator):
             base_ang_vel_qvel_ids=indices(
                 np.arange(base_qvel_adr + 3, base_qvel_adr + 6)
             ),
+            body_names=names(
+                mujoco.mjtObj.mjOBJ_BODY,  # pyright: ignore[reportAttributeAccessIssue]
+                model.nbody,
+            ),
             # joint_names=names(mujoco.mjtObj.mjOBJ_JOINT, model.njnt),  # pyright: ignore[reportAttributeAccessIssue]
             joint_qpos_ids=indices(
                 model.jnt_qposadr[actuator_joint_ids]
@@ -192,6 +196,11 @@ class MujocoSimulator(BaseSimulator):
             ),
             # actuator_names=names(mujoco.mjtObj.mjOBJ_ACTUATOR, model.nu),  # pyright: ignore[reportAttributeAccessIssue]
             actuator_ctrl_range = tensors(model.actuator_ctrlrange),
+            geom_names=names(
+                mujoco.mjtObj.mjOBJ_GEOM,  # pyright: ignore[reportAttributeAccessIssue]
+                model.ngeom,
+            ),
+            geom_body_ids=indices(model.geom_bodyid),
         )
 
 
@@ -328,6 +337,36 @@ class MujocoSimulator(BaseSimulator):
             for data in datas
         ]).to(self.context.device)
 
+        contact_pairs = [
+            np.asarray(
+                [
+                    (data.contact[index].geom1, data.contact[index].geom2)
+                    for index in range(data.ncon)
+                ],
+                dtype=np.int64,
+            ).reshape(-1, 2)
+            for data in datas
+        ]
+        max_contacts = max(
+            (pairs.shape[0] for pairs in contact_pairs),
+            default=0,
+        )
+        contact_geom_ids = torch.full(
+            (len(datas), max_contacts, 2),
+            -1,
+            dtype=torch.long,
+            device=self.context.device,
+        )
+        for env_index, pairs in enumerate(contact_pairs):
+            if pairs.shape[0] > 0:
+                contact_geom_ids[env_index, :pairs.shape[0]] = (
+                    torch.as_tensor(
+                        pairs,
+                        dtype=torch.long,
+                        device=self.context.device,
+                    )
+                )
+
         # time = torch.tensor(
         #     [data.time for data in datas],
         #     dtype=self.context.dtype,
@@ -379,6 +418,7 @@ class MujocoSimulator(BaseSimulator):
             "qvel": qvel,
             "qacc": qacc,
             "ctrl": ctrl,
+            "contact_geom_ids": contact_geom_ids,
             # "time": time,
             # "body_pos": body_pos,
             # "body_quat": body_quat,

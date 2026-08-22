@@ -1,4 +1,4 @@
-model_path: .\assets\unitree_go1\MJCF\go1.xml
+model_path: .\assets\unitree_go1\MJCF\scene.xml
 sim_dt: 0.002
 frame_skip: 10
 render_mode: human

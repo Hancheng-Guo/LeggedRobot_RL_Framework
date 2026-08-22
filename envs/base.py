@@ -22,12 +22,12 @@ class BaseEnv(ABC):
         num_envs: int = 1,
         *args, **kwargs
     ) -> None:
-        pass
+        raise NotImplementedError
 
 
     @abstractmethod
     def reset(self) -> torch.Tensor:
-        pass
+        raise NotImplementedError
 
 
     @abstractmethod
@@ -51,12 +51,12 @@ class BaseEnv(ABC):
             truncated,
             info,
         """
-        pass
+        raise NotImplementedError
 
     @abstractmethod
     def close(self) -> None:
-        pass
+        raise NotImplementedError
 
     @abstractmethod
     def render(self) -> np.ndarray | None:
-        pass
+        raise NotImplementedError

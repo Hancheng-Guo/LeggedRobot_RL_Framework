@@ -1,8 +1,8 @@
 max_iterations: 2000
 rollout_length: 64
 callback_names:
-  - progress_bar
-  - checkpoint
-  - tensorboard
-  - early_stopping
-  - logging
+  # - progress_bar
+  # - checkpoint
+  # - tensorboard
+  # - early_stopping
+  # - logging

@@ -166,8 +166,7 @@ class StageManager:
 
 
     def save(self) -> None:
-
-        pass        
+        raise NotImplementedError
 
 
     def close(self) -> None:

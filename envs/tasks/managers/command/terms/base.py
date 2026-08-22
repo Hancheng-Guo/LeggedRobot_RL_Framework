@@ -34,7 +34,7 @@ class BaseCommandTerm(ABC):
         self,
         task_context: TaskContext,
     ) -> None:
-        pass
+        raise NotImplementedError
 
 
     @abstractmethod
@@ -42,4 +42,4 @@ class BaseCommandTerm(ABC):
         self,
         env_ids: torch.Tensor | None = None,
     ) -> None:
-        pass
+        raise NotImplementedError

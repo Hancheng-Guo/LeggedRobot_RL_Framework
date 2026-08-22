@@ -23,7 +23,7 @@ class BaseActionTerm(ABC):
         self,
         value: torch.Tensor,
     ) -> torch.Tensor:
-        pass
+        raise NotImplementedError
 
 
     def reset(

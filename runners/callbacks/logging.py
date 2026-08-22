@@ -8,5 +8,4 @@ class LoggingCallback(BaseCallback):
         runner: BaseCallback,
         **kwargs,
     ) -> None:
-        pass
-    
+        raise NotImplementedError

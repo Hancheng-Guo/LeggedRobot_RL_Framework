@@ -28,18 +28,18 @@ class BaseRunner(ABC):
         callback_names: list[str] | None = None,
         *args, **kwargs
     ) -> None:
-        pass
+        raise NotImplementedError
 
     @abstractmethod
     def stage_update(
         self,
         stage_callback: StageCallback
     ):
-        pass
+        raise NotImplementedError
 
     @abstractmethod
     def train(self) -> None:
-        pass
+        raise NotImplementedError
 
 
     @abstractmethod
@@ -47,7 +47,7 @@ class BaseRunner(ABC):
         self,
         num_episodes: int = 1000,
     ) -> None:
-        pass
+        raise NotImplementedError
 
 
     @abstractmethod
@@ -55,14 +55,14 @@ class BaseRunner(ABC):
         self,
         num_steps: int = 5000
     ) -> None:
-        pass
+        raise NotImplementedError
 
 
     @abstractmethod
     def close(self) -> None:
-        pass
+        raise NotImplementedError
 
 
     @abstractmethod
     def save(self) -> None:
-        pass
+        raise NotImplementedError

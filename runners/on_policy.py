@@ -373,4 +373,4 @@ class OnPolicyRunner(BaseRunner):
 
 
     def save(self) -> None:
-        pass
+        raise NotImplementedError

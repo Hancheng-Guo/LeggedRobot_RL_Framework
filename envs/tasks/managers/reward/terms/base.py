@@ -26,7 +26,7 @@ class BaseRewardTerm(ABC):
         self,
         task_context: TaskContext,
     ) -> torch.Tensor:
-        pass
+        raise NotImplementedError
 
 
     def reset(

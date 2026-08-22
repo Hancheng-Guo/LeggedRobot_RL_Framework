@@ -28,12 +28,12 @@ class BaseSimulator(ABC):
         render_mode: str | None = None,
         *args, **kwargs
     ) -> None:
-        pass
+        raise NotImplementedError
 
 
     @abstractmethod
     def _build_model_context(self) -> None:
-        pass
+        raise NotImplementedError
 
 
     @property
@@ -50,7 +50,7 @@ class BaseSimulator(ABC):
         self,
         env_ids: torch.Tensor | None = None,
     ) -> None:
-        pass
+        raise NotImplementedError
 
 
     @abstractmethod
@@ -58,25 +58,25 @@ class BaseSimulator(ABC):
         self,
         action: torch.Tensor,
     ) -> None:
-        pass
+        raise NotImplementedError
 
 
     @abstractmethod
     def render(
         self,
     ) -> np.ndarray | None:
-        pass
+        raise NotImplementedError
 
 
     @abstractmethod
     def close(
         self,
     ) -> None:
-        pass
+        raise NotImplementedError
 
     @abstractmethod
     def get_state(
         self,
         env_ids: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
-        pass
+        raise NotImplementedError

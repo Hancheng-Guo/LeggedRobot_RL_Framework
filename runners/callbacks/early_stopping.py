@@ -8,5 +8,4 @@ class EarlystoppingCallback(BaseCallback):
         runner: BaseCallback,
         **kwargs,
     ) -> None:
-        pass
-    
+        raise NotImplementedError

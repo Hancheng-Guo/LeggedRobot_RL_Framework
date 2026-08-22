@@ -10,7 +10,6 @@ class BaseCallback(ABC):
         *args, **kwargs,
     ) -> None:
         self.runner = runner
-        pass
 
 
     def _on_train_start(self) -> None:

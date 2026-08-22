@@ -27,7 +27,7 @@ class BaseCurriculumTerm(ABC):
         self,
         *args, **kwargs
     ) -> dict[str, torch.Tensor]:
-        pass
+        raise NotImplementedError
 
 
     def reset(

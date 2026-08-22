@@ -8,6 +8,7 @@ from envs.simulators.base import BaseSimulator
 from envs.simulators.utils.context import ModelContext
 from envs.simulators.registry import SIM_TYPE_MAP
 from envs.tasks.base import BaseTaskLogic
+from envs.tasks.utils.context import TaskStepResult
 from envs.tasks.registry import TASK_TYPE_MAP
 from utils.component import Component
 from utils.config import load_yaml
@@ -211,7 +212,12 @@ class VectorEnv(BaseEnv):
         terminated, terminated_info = self.task.check_terminated(task_context)
         truncated = (self.current_episode_steps >= self.max_episode_steps)
 
-        post_step_info = self.task.post_step(task_context)
+        step_result = TaskStepResult(
+            reward=reward,
+            terminated=terminated,
+            truncated=truncated,
+        )
+        post_step_info = self.task.post_step(task_context, step_result)
 
         next_task_context = self.task.build_task_context(
             state=state,

@@ -2,7 +2,7 @@ import torch
 
 from envs.tasks.managers.command.terms.base import BaseCommandTerm
 from envs.tasks.managers.command.terms.registry import register_command
-from envs.tasks.base import TaskContext
+from envs.tasks.utils.context import TaskContext
 
 
 @register_command

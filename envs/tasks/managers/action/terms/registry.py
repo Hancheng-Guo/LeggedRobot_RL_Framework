@@ -1,3 +1,5 @@
+from typing import TypeVar
+
 from envs.tasks.managers.action.terms.base import BaseActionTerm
 from utils.string import camel_to_snake
 
@@ -5,9 +7,12 @@ from utils.string import camel_to_snake
 ACTION_CLASS_MAP: dict[str, type[BaseActionTerm]] = {}
 
 
+ActionTermType = TypeVar("ActionTermType", bound=BaseActionTerm)
+
+
 def register_action(
-    cls: type[BaseActionTerm],
-) -> type[BaseActionTerm]:
+    cls: type[ActionTermType],
+) -> type[ActionTermType]:
 
     name = camel_to_snake(cls.__name__)
 
@@ -21,7 +26,7 @@ def register_action(
     return cls
 
 
-def get_action_class(action_name: str):
+def get_action_class(action_name: str) -> type[BaseActionTerm]:
 
     cls = ACTION_CLASS_MAP.get(action_name, None)
 

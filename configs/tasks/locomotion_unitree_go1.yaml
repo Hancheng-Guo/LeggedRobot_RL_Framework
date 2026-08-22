@@ -6,9 +6,9 @@ action_manager_config:
 
 command_manager_config:
   terms:
-    lin_vel_x: {type: UniformOnReset, params: {min_value: -0.5, max_value: 0.5}}
-    lin_vel_y: {type: UniformOnReset, params: {min_value: -0.5, max_value: 0.5}}
-    ang_vel_z: {type: UniformOnReset, params: {min_value: -1.0, max_value: 1.0}}
+    lin_vel_x: {type: CurriculumSampleOnReset, params: {group: locomotion, min_value: -0.5, max_value: 0.5, num_bins: 5, noise_scale: 0.167}}
+    lin_vel_y: {type: CurriculumSampleOnReset, params: {group: locomotion, min_value: -0.5, max_value: 0.5, num_bins: 5, noise_scale: 0.167}}
+    ang_vel_z: {type: CurriculumSampleOnReset, params: {group: locomotion, min_value: -1.0, max_value: 1.0, num_bins: 5, noise_scale: 0.167}}
   constraints:
     ang_vel_z: {operator: "<=", expression: "0.5 * (1.0 - abs({lin_vel_x}))"}
 
@@ -36,16 +36,8 @@ termination_manager_config:
 
 
 curriculum_manager_config:
-  type: LocomotionCurriculumManager
-  config:
-    enabled: true
-
-    terms:
-      command_range:
-        type: CommandRangeCurriculum
-
-      terrain_level:
-        type: TerrainCurriculum
+  terms:
+    command_reward: {temperature: 1.0, exploration: 0.05, max_cells: 100000}
 
 
 event_manager_config:

@@ -1,3 +1,5 @@
+from typing import TypeVar
+
 from envs.tasks.managers.observation.terms.base import BaseObservationTerm
 from utils.string import camel_to_snake
 
@@ -5,9 +7,15 @@ from utils.string import camel_to_snake
 OBSERVATION_CLASS_MAP: dict[str, type[BaseObservationTerm]] = {}
 
 
+ObservationTermType = TypeVar(
+    "ObservationTermType",
+    bound=BaseObservationTerm,
+)
+
+
 def register_observation(
-    cls: type[BaseObservationTerm],
-) -> type[BaseObservationTerm]:
+    cls: type[ObservationTermType],
+) -> type[ObservationTermType]:
 
     name = camel_to_snake(cls.__name__)
 

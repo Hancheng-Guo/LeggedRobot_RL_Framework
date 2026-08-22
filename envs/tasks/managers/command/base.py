@@ -1,15 +1,16 @@
-# envs/tasks/managers/command/base.py
-
 import torch
-import re
-from collections.abc import Callable
 from typing import Any
 
 from app.utils.context import RuntimeContext
 from envs.simulators.utils.context import ModelContext
-from envs.tasks.base import TaskContext
+from envs.tasks.utils.context import TaskContext
 from envs.tasks.managers.command.terms.base import BaseCommandTerm
 from envs.tasks.managers.command.terms.registry import get_command_class
+from envs.tasks.managers.command.constraints import CommandConstraintSet
+from envs.tasks.managers.curriculum.types import (
+    CommandCurriculumSampler,
+    CurriculumTermProvider,
+)
 
 
 class CommandManager:
@@ -21,8 +22,7 @@ class CommandManager:
         model_context: ModelContext,
         terms: dict[str, dict[str, Any]],
         constraints: dict[str, dict[str, Any]] | None = None,
-        *args,
-        **kwargs,
+        *args, **kwargs,
     ) -> None:
 
         self.num_envs = num_envs
@@ -30,15 +30,11 @@ class CommandManager:
         self.model_context = model_context
 
         self.terms: dict[str, BaseCommandTerm] = {}
-        self._build_terms(terms)
-        self.constraints: dict[
-            str,
-            Callable[
-                [torch.Tensor, dict[str, torch.Tensor]],
-                torch.Tensor,
-            ],
-        ] = {}
-        self.constraints = self._build_constraints(constraints)
+        self._build_terms(terms, *args, **kwargs)
+        self.constraint_set = CommandConstraintSet(
+            set(self.terms),
+            constraints,
+        )
 
         self.command: dict[str, torch.Tensor] = {}
         self.last_command: dict[str, torch.Tensor] = {}
@@ -56,6 +52,7 @@ class CommandManager:
     def _build_terms(
         self,
         terms: dict[str, dict[str, Any]],
+        *args, **kwargs
     ) -> None:
 
         for name, config in terms.items():
@@ -88,129 +85,49 @@ class CommandManager:
                 )
 
             cls = get_command_class(type_name)
+            term_kwargs = self._get_term_kwargs(cls, name, *args, **kwargs)
 
             self.terms[name] = cls(
                 num_envs=self.num_envs,
                 context=self.context,
                 model_context=self.model_context,
+                **term_kwargs,
                 **params,
             )
 
 
-    def _build_constraints(
+    def _get_term_kwargs(
         self,
-        constraints: dict[str, dict[str, Any]] | None,
-    ) -> dict[
-        str,
-        Callable[
-            [torch.Tensor, dict[str, torch.Tensor]],
-            torch.Tensor,
-        ],
-    ]:
+        cls: type[BaseCommandTerm],
+        name: str,
+        *args, **kwargs,
+    ) -> dict[str, Any]:
 
-        if constraints is None:
-            return {}
+        term_kwargs: dict[str, Any] = {}
+        curriculum_term_name = getattr(cls, "curriculum_term_name", None)
 
-        built_constraints: dict[
-            str,
-            Callable[
-                [torch.Tensor, dict[str, torch.Tensor]],
-                torch.Tensor,
-            ],
-        ] = {}
+        if curriculum_term_name is not None:
 
-        for term_name, constraint_config in constraints.items():
-
-            if term_name not in self.terms:
+            curriculum_manager = kwargs.get("curriculum_manager")
+            if not isinstance(curriculum_manager, CurriculumTermProvider):
                 raise ValueError(
-                    f"Constraint target '{term_name}' is not a command term."
+                    f"Command term '{name}' requires a "
+                    "curriculum term provider."
                 )
-
-            if not isinstance(constraint_config, dict):
-                raise TypeError(
-                    f"Config of constraint '{term_name}' must be a dict."
-                )
-
-            operator = constraint_config.get("operator")
-            expression = constraint_config.get("expression")
-
-            if operator is None or expression is None:
-                raise ValueError(
-                    f"'operator' or 'expression' is missing for constraint '{term_name}'."
-                )
-
-            if operator not in {"<=", ">="}:
-                raise ValueError(
-                    f"Unsupported operator '{operator}' "
-                    f"for constraint '{term_name}'."
-                )
-
-            if not isinstance(expression, str):
-                raise TypeError(
-                    f"'expression' of constraint '{term_name}' must be a string."
-                )
-
-            referenced_terms = set(
-                re.findall(r"\{([A-Za-z_]\w*)\}", expression)
+            
+            curriculum_term = curriculum_manager.get_term(
+                curriculum_term_name
             )
-            unknown_terms = referenced_terms - self.terms.keys()
-            if unknown_terms:
-                raise ValueError(
-                    f"Constraint '{term_name}' references unknown command "
-                    f"term(s): {sorted(unknown_terms)}."
+            if not isinstance(curriculum_term, CommandCurriculumSampler):
+                raise TypeError(
+                    f"Curriculum term '{curriculum_term_name}' "
+                    "does not provide command sampling."
                 )
+            
+            term_kwargs["curriculum_sampler"] = curriculum_term
+            term_kwargs["term_name"] = name
 
-            compiled_expression = compile(
-                re.sub(
-                    r"\{([A-Za-z_]\w*)\}",
-                    lambda match: f"commands[{match.group(1)!r}]",
-                    expression,
-                ),
-                f"<command constraint: {term_name}>",
-                "eval",
-            )
-
-            def apply_constraint(
-                command: torch.Tensor,
-                command_context: dict[str, torch.Tensor],
-                *,
-                compiled_expression=compiled_expression,
-                constraint_operator=operator,
-                referenced_terms=referenced_terms,
-                term_name=term_name,
-            ) -> torch.Tensor:
-                commands = {
-                    name: command_context[name]
-                    for name in referenced_terms
-                }
-                try:
-                    boundary = eval(
-                        compiled_expression,
-                        {"__builtins__": {}},
-                        {
-                            "commands": commands,
-                            "abs": torch.abs,
-                            "torch": torch,
-                        },
-                    )
-                    boundary = torch.as_tensor(
-                        boundary,
-                        dtype=command.dtype,
-                        device=command.device,
-                    )
-                except Exception as error:
-                    raise ValueError(
-                        f"Error evaluating constraint '{term_name}': {error}"
-                    ) from error
-
-                if constraint_operator == "<=":
-                    return torch.minimum(command, boundary)
-
-                return torch.maximum(command, boundary)
-
-            built_constraints[term_name] = apply_constraint
-
-        return built_constraints
+        return term_kwargs
 
 
     def update(
@@ -276,11 +193,7 @@ class CommandManager:
                 for name, value in proposed_command.items()
             }
 
-        for name, constraint in self.constraints.items():
-            checked_command[name] = constraint(
-                checked_command[name],
-                checked_command,
-            )
+        checked_command = self.constraint_set.apply(checked_command)
 
         for name, value in checked_command.items():
             if env_ids is None:

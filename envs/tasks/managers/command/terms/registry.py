@@ -1,12 +1,17 @@
+from typing import TypeVar
+
 from envs.tasks.managers.command.terms.base import BaseCommandTerm
 
 
 COMMAND_CLASS_MAP: dict[str, type[BaseCommandTerm]] = {}
 
 
+CommandTermType = TypeVar("CommandTermType", bound=BaseCommandTerm)
+
+
 def register_command(
-    cls: type[BaseCommandTerm],
-) -> type[BaseCommandTerm]:
+    cls: type[CommandTermType],
+) -> type[CommandTermType]:
 
     name = cls.__name__
 

@@ -1,3 +1,5 @@
+from typing import TypeVar
+
 from envs.tasks.managers.reward.terms.base import BaseRewardTerm
 from utils.string import camel_to_snake
 
@@ -5,9 +7,12 @@ from utils.string import camel_to_snake
 REWARD_CLASS_MAP: dict[str, type[BaseRewardTerm]] = {}
 
 
+RewardTermType = TypeVar("RewardTermType", bound=BaseRewardTerm)
+
+
 def register_reward(
-    cls: type[BaseRewardTerm]
-) -> type[BaseRewardTerm]:
+    cls: type[RewardTermType]
+) -> type[RewardTermType]:
 
     name = camel_to_snake(cls.__name__)
 

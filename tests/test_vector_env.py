@@ -3,7 +3,7 @@ from typing import cast
 
 from envs.simulators.base import BaseSimulator
 from envs.tasks.base import BaseTaskLogic
-from envs.tasks.utils.context import TaskContext
+from envs.tasks.utils.context import TaskContext, TaskStepResult
 from envs.vector_env import VectorEnv
 
 
@@ -95,7 +95,11 @@ class FakeTask:
             dtype=torch.bool,
         ), {}
 
-    def post_step(self, task_context: TaskContext) -> dict:
+    def post_step(
+        self,
+        task_context: TaskContext,
+        step_result: TaskStepResult,
+    ) -> dict:
         self.command += 1.0
         return {}
 

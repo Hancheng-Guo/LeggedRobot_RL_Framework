@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 
 from app.utils.context import RuntimeContext
 from envs.simulators.utils.context import ModelContext
-from envs.tasks.utils.context import TaskContext
+from envs.tasks.utils.context import TaskContext, TaskStepResult
 from envs.tasks.managers.action.base import ActionManager
 from envs.tasks.managers.command.base import CommandManager
 from envs.tasks.managers.observation.base import ObservationManager
@@ -55,12 +55,30 @@ class BaseTaskLogic(ABC):
         termination_manager_config: dict,
     ) -> None:
 
+        self._build_action_manager(action_manager_config)
+        self._build_command_manager(command_manager_config)
+        self._build_observation_manager(observation_manager_config)
+        self._build_reward_manager(reward_manager_config)
+        self._build_termination_manager(termination_manager_config)
+
+
+    def _build_action_manager(
+        self,
+        action_manager_config: dict,
+    ) -> None:
+
         self.action_manager = ActionManager(
             num_envs=self.num_envs,
             context=self.context,
             model_context=self.model_context,
             **action_manager_config,
         )
+
+
+    def _build_command_manager(
+        self,
+        command_manager_config: dict,
+    ) -> None:
 
         self.command_manager = CommandManager(
             num_envs=self.num_envs,
@@ -69,6 +87,12 @@ class BaseTaskLogic(ABC):
             **command_manager_config,
         )
 
+
+    def _build_observation_manager(
+        self,
+        observation_manager_config: dict,
+    ) -> None:
+
         self.observation_manager = ObservationManager(
             num_envs=self.num_envs,
             context=self.context,
@@ -76,12 +100,24 @@ class BaseTaskLogic(ABC):
             **observation_manager_config,
         )
 
+
+    def _build_reward_manager(
+        self,
+        reward_manager_config: dict,
+    ) -> None:
+
         self.reward_manager = RewardManager(
             num_envs=self.num_envs,
             context=self.context,
             model_context=self.model_context,
             **reward_manager_config,
         )
+
+
+    def _build_termination_manager(
+        self,
+        termination_manager_config: dict,
+    ) -> None:
 
         self.termination_manager = TerminationManager(
             num_envs=self.num_envs,
@@ -144,6 +180,7 @@ class BaseTaskLogic(ABC):
     def post_step(
         self,
         task_context: TaskContext,
+        step_result: TaskStepResult,
     ) -> dict:
 
         command_update_info = self.command_manager.update(task_context)

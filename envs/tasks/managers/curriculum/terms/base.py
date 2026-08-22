@@ -4,10 +4,9 @@ import torch
 
 from app.utils.context import RuntimeContext
 from envs.simulators.utils.context import ModelContext
-from envs.tasks.utils.context import TaskContext
 
 
-class BaseCommandTerm(ABC):
+class BaseCurriculumTerm(ABC):
 
     def __init__(
         self,
@@ -17,29 +16,22 @@ class BaseCommandTerm(ABC):
         *args,
         **kwargs,
     ) -> None:
-
+        
         self.num_envs = num_envs
         self.context = context
         self.model_context = model_context
-
-        self.command = torch.zeros(
-            (self.num_envs, 1),
-            dtype=self.context.dtype,
-            device=self.context.device,
-        )
 
 
     @abstractmethod
     def update(
         self,
-        task_context: TaskContext,
-    ) -> None:
+        *args, **kwargs
+    ) -> dict[str, torch.Tensor]:
         pass
 
 
-    @abstractmethod
     def reset(
         self,
-        env_ids: torch.Tensor | None = None,
+        env_ids: torch.Tensor | None = None
     ) -> None:
         pass

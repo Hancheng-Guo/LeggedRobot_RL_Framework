@@ -13,7 +13,7 @@ def test_create_runtime_context():
         "dtype": "float32",
         "num_threads": 4,
         "seed": 123,
-        "deterministic": True,
+        "deterministic_ops": True,
     }
 
     context = create_runtime_context(
@@ -28,7 +28,7 @@ def test_create_runtime_context():
     assert context.dtype == torch.float32
     assert context.num_threads == 4
     assert context.seed == 123
-    assert context.deterministic is True
+    assert context.deterministic_ops is True
     assert context.load_dir == Path("./a/b")
     assert context.save_dir == Path("./c/d")
 
@@ -40,7 +40,7 @@ def test_create_runtime_context_with_invalid_dtype():
         "dtype": "float16",
         "num_threads": 4,
         "seed": 123,
-        "deterministic": True,
+        "deterministic_ops": True,
     }
 
     with pytest.raises(ValueError):
@@ -58,7 +58,7 @@ def test_create_runtime_context_with_zero_threads(monkeypatch):
         "dtype": "float32",
         "num_threads": 0,
         "seed": 123,
-        "deterministic": True,
+        "deterministic_ops": True,
     }
 
     called = False
@@ -97,7 +97,7 @@ def test_create_runtime_context_with_dtypes(dtype_name, expected):
         "dtype": dtype_name,
         "num_threads": 4,
         "seed": 123,
-        "deterministic": True,
+        "deterministic_ops": True,
     }
 
     context = create_runtime_context(
@@ -132,7 +132,7 @@ def test_create_runtime_context_with_invalid_load_dir():
         "dtype": "float16",
         "num_threads": 4,
         "seed": 123,
-        "deterministic": True,
+        "deterministic_ops": True,
     }
 
     invalid_dir: Any = "./a/b"
@@ -152,7 +152,7 @@ def test_create_runtime_context_with_invalid_save_dir():
         "dtype": "float16",
         "num_threads": 4,
         "seed": 123,
-        "deterministic": True,
+        "deterministic_ops": True,
     }
 
     invalid_dir: Any = "./c/d"

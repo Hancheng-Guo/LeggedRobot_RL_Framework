@@ -20,7 +20,7 @@ class RuntimeContext:
     dtype: torch.dtype
     num_threads: int
     seed: int
-    deterministic: bool
+    deterministic_ops: bool
     load_dir: Path
     save_dir: Path
 
@@ -51,15 +51,15 @@ def create_runtime_context(
 
     num_threads = int(runtime_config.get("num_threads", 0))
     seed = runtime_config.get("seed")
-    deterministic = bool(runtime_config.get("deterministic"))
+    deterministic_ops = bool(runtime_config.get("deterministic_ops"))
 
 
     if num_threads > 0:
         torch.set_num_threads(num_threads)
     
-    seed, deterministic = set_seed(
+    seed, deterministic_ops = set_seed(
         seed=seed,
-        deterministic=deterministic,
+        deterministic_ops=deterministic_ops,
     )
 
     context = RuntimeContext(
@@ -67,7 +67,7 @@ def create_runtime_context(
             dtype=dtype,
             num_threads=num_threads,
             seed=seed,
-            deterministic=deterministic,
+            deterministic_ops=deterministic_ops,
             load_dir=load_dir,
             save_dir=save_dir,
         )

@@ -7,7 +7,7 @@ import numpy as np
 
 def set_seed(
     seed: int | str | None = None,
-    deterministic: bool = False,
+    deterministic_ops: bool = False,
 ) -> tuple[int, bool]:
 
     if seed is None:
@@ -31,9 +31,9 @@ def set_seed(
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-    if deterministic:
+    if deterministic_ops:
         torch.use_deterministic_algorithms(True)
     else:
         torch.use_deterministic_algorithms(False)
 
-    return seed, deterministic
+    return seed, deterministic_ops

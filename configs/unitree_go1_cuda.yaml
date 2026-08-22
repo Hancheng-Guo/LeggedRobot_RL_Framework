@@ -3,7 +3,7 @@ runtime:
   dtype: float32
   num_threads: 4
   seed: None
-  deterministic: true
+  deterministic_ops: true
 
 
 stage:

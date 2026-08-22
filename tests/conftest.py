@@ -14,7 +14,7 @@ def runtime_context() -> RuntimeContext:
         dtype=torch.float32,
         num_threads=1,
         seed=0,
-        deterministic=True,
+        deterministic_ops=True,
         load_dir=Path("."),
         save_dir=Path("."),
     )

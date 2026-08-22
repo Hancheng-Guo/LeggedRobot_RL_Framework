@@ -10,7 +10,7 @@ def test_load_yaml_success(tmp_path):
     expected_config = {
         "seed": 1,
         "device": "cpu",
-        "deterministic": True,
+        "deterministic_ops": True,
     }
 
     path = tmp_path / "config.yaml"
@@ -28,7 +28,7 @@ def test_load_yaml_success_with_str(tmp_path):
     expected_config = {
         "seed": 1,
         "device": "cpu",
-        "deterministic": True,
+        "deterministic_ops": True,
     }
 
     path = tmp_path / "config.yaml"

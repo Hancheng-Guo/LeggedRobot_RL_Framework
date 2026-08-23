@@ -25,13 +25,13 @@ class OnPolicyRunner(BaseRunner):
     ) -> None:
 
         self.context = context
-        self.environment: BaseEnv | None = None
-        self.algorithm: OnPolicyAlgorithm | None = None
+        self.environment: BaseEnv
+        self.algorithm: OnPolicyAlgorithm
         
         self.current_iteration: int
 
-        self.max_iterations: int | None = None
-        self.rollout_length: int | None = None
+        self.max_iterations: int
+        self.rollout_length: int
         self.callbacks: list = []
 
 
@@ -95,7 +95,10 @@ class OnPolicyRunner(BaseRunner):
     ) -> None:
         
         if component.environment is None:
-            if self.environment is None:
+            if (
+                hasattr(self, "environment") is False
+                or self.environment is None
+            ):
                 raise RuntimeError(
                     f"environment instance is required."
                 )
@@ -110,7 +113,10 @@ class OnPolicyRunner(BaseRunner):
             
             env_type = ENV_TYPE_MAP[env_type_name]
             env_config = load_yaml(component.environment.config)
-            if not isinstance(self.environment, env_type):
+            if (
+                hasattr(self, "environment") is False
+                or not isinstance(self.environment, env_type)
+            ):
                 self.environment = env_type(
                     context=self.context
                 )
@@ -126,7 +132,10 @@ class OnPolicyRunner(BaseRunner):
     ) -> None:
         
         if component.algorithm is None:
-            if self.algorithm is None:
+            if (
+                hasattr(self, "algorithm") is False
+                or self.algorithm is None
+            ):
                 raise RuntimeError(
                     f"algorithm instance is required."
                 )
@@ -175,7 +184,8 @@ class OnPolicyRunner(BaseRunner):
 
         if self.rollout_length is None:
             raise RuntimeError("'rollout_length' is missing.")
-        
+
+        self.algorithm.set_train_mode()
         obs = self.environment.reset()
         self._run_callbacks("_on_train_start")
 
@@ -189,7 +199,10 @@ class OnPolicyRunner(BaseRunner):
                 self._run_callbacks("_on_step_start")
                 
                 with torch.no_grad():
-                    policy_output = self.algorithm.act(obs)
+                    policy_output = self.algorithm.act(
+                        obs=obs,
+                        deterministic=False,
+                    )
 
                 (
                     next_obs,
@@ -237,6 +250,7 @@ class OnPolicyRunner(BaseRunner):
         if self.algorithm is None:
             raise RuntimeError("algorithm is not instantiated.")
 
+        self.algorithm.set_eval_mode()
         obs = self.environment.reset()
 
         self._run_callbacks("_on_test_start")
@@ -326,6 +340,7 @@ class OnPolicyRunner(BaseRunner):
         if not isinstance(num_steps, Number) or num_steps <= 0:
             raise ValueError("'num_steps' must be a number greater than 0.")
 
+        self.algorithm.set_eval_mode()
         obs = self.environment.reset()
 
         self._run_callbacks("_on_play_start")
@@ -365,11 +380,13 @@ class OnPolicyRunner(BaseRunner):
 
         self._run_callbacks("_on_close")
 
-        if self.environment is not None:
+        if hasattr(self, "environment"):
             self.environment.close()
+            del self.environment
 
-        if self.algorithm is not None:
+        if hasattr(self, "algorithm"):
             self.algorithm.close()
+            del self.algorithm
 
 
     def save(self) -> None:

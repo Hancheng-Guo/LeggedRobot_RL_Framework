@@ -1,9 +1,16 @@
 import torch
+from collections.abc import Mapping
+from typing import Any
 
-from utils.component import Component
 from app.utils.context import RuntimeContext
 from rl.algorithms.base import OnPolicyAlgorithm, PolicyOutput
+from rl.models.base import BaseModel
+from rl.models.registry import MODEL_TYPE_MAP
+from rl.utils.gae import compute_gae
+from rl.utils.storage import RolloutBatch, RolloutStorage
 from utils.param import update_attributes
+from utils.component import Component, ComponentInfo
+from utils.config import load_yaml
 
 
 class PPO(OnPolicyAlgorithm):
@@ -11,38 +18,42 @@ class PPO(OnPolicyAlgorithm):
     def __init__(
         self,
         context: RuntimeContext,
+        *args, **kwargs,
     ) -> None:
 
         self.context = context
+        self.model: BaseModel
+        self.storage: RolloutStorage
+        self.optimizer: torch.optim.Optimizer
 
-        self.model = None
-        self.storage = None
-
-        self.gamma = None
-        self.gae_lambda = None
-        self.clip_range = None
-        self.entropy_coef = None
-        self.value_coef = None
-        self.max_grad_norm = None
-        self.num_epochs = None
-        self.num_mini_batches = None
+        self.learning_rate: float
+        self.gamma: float
+        self.gae_lambda: float
+        self.clip_range: float
+        self.entropy_coef: float
+        self.value_coef: float
+        self.max_grad_norm: float
+        self.num_epochs: int
+        self.num_mini_batches: int
 
 
     def config_update(
         self,
         component: Component,
-        gamma: float,
-        gae_lambda: float,
-        clip_range: float,
-        entropy_coef: float,
-        value_coef: float,
-        max_grad_norm: float,
-        num_epochs: int,
-        num_mini_batches: int,
+        learning_rate: float | None = None,
+        gamma: float | None = None,
+        gae_lambda: float | None = None,
+        clip_range: float | None = None,
+        entropy_coef: float | None = None,
+        value_coef: float | None = None,
+        max_grad_norm: float | None = None,
+        num_epochs: int | None = None,
+        num_mini_batches: int | None = None,
     ) -> None:
 
         update_attributes(
             self,
+            learning_rate=learning_rate,
             gamma=gamma,
             gae_lambda=gae_lambda,
             clip_range=clip_range,
@@ -52,103 +63,298 @@ class PPO(OnPolicyAlgorithm):
             num_epochs=num_epochs,
             num_mini_batches=num_mini_batches,
         )
-        self._build_model(component=component)
-        self._build_storage(component=component)
-        
+        self._validate_config()
+        self._build(component=component)
 
-    def _build_model(
+
+    def _validate_config(self) -> None:
+        
+        if self.learning_rate <= 0.0:
+            raise ValueError("'learning_rate' must be greater than 0.")
+        if not 0.0 <= self.gamma <= 1.0:
+            raise ValueError("'gamma' must be in [0, 1].")
+        if not 0.0 <= self.gae_lambda <= 1.0:
+            raise ValueError("'gae_lambda' must be in [0, 1].")
+        if self.clip_range <= 0.0:
+            raise ValueError("'clip_range' must be greater than 0.")
+        if self.entropy_coef < 0.0:
+            raise ValueError("'entropy_coef' must be nonnegative.")
+        if self.value_coef < 0.0:
+            raise ValueError("'value_coef' must be nonnegative.")
+        if self.max_grad_norm <= 0.0:
+            raise ValueError("'max_grad_norm' must be greater than 0.")
+        if self.num_epochs <= 0:
+            raise ValueError("'num_epochs' must be greater than 0.")
+        if self.num_mini_batches <= 0:
+            raise ValueError("'num_mini_batches' must be greater than 0.")
+
+
+    def _build(
         self,
         component: Component
     ) -> None:
-        pass
 
-
-    def _build_storage(
-        self,
-        component: Component
-    ) -> None:
-        pass
+        model = component.model
         
+        if model is None:
 
-    def act(
+            self._update_model_config(component=component)
+            self._update_optimizer_config()
+            self.storage.clear()
+
+        else:
+
+            model_type = self._check_rebuild(model=model)
+            if model_type:
+                self.model = model_type(
+                    context=self.context,
+                )
+                self.optimizer = torch.optim.Adam(
+                    self.model.parameters(),
+                )
+                self.storage = RolloutStorage(
+                    context=self.context
+                )
+
+            model_config = load_yaml(model.config)
+            self._update_model_config(
+                component=component,
+                **model_config,
+            )
+            self._update_optimizer_config()
+            self.storage.clear()
+
+
+    def _update_model_config(
         self,
-        obs,
-    ) -> PolicyOutput:
+        component: Component,
+        *args, **kwargs,
+    ) -> None:
 
-        output = self.model(obs)
-        action = output.action
-        log_prob = output.log_prob
-        value = output.value
-
-        return PolicyOutput(
-            action=action,
-            log_prob=log_prob,
-            value=value,
+        if (
+            hasattr(self, "model") is False
+            or self.model is None
+        ):
+            raise RuntimeError("model instance is required.")
+        self.model.config_update(
+            component=component,
+            **kwargs
         )
 
 
-    def eval(self) -> None:
-        pass
+    def _update_optimizer_config(self) -> None:
+
+        if (
+            hasattr(self, "optimizer") is False
+            or self.optimizer is None
+        ):
+            raise RuntimeError("optimizer is not built.")
+        for param_group in self.optimizer.param_groups:
+            param_group["lr"] = self.learning_rate
 
 
-    def update(self) -> None:
-        pass
+    def _check_rebuild(
+        self,
+        model: ComponentInfo
+    ) -> type[BaseModel] | None:
+        
+        model_type_name = model.type
+        if model_type_name not in MODEL_TYPE_MAP:
+            raise ValueError(
+                f"Invalid model type: {model_type_name!r}."
+            )
 
+        model_type = MODEL_TYPE_MAP[model_type_name]
+        if (
+            hasattr(self, "model") is False
+            or not isinstance(self.model, model_type)
+        ):
+            return model_type
+        return None
+
+
+    def act(
+        self,
+        obs: torch.Tensor,
+        deterministic: bool = False,
+    ) -> PolicyOutput:
+
+        model_output = self.model.act(
+            obs=obs,
+            deterministic=deterministic,
+        )
+
+        return PolicyOutput(
+            action=model_output.action,
+            log_prob=model_output.log_prob,
+            value=model_output.value,
+        )
+    
 
     def process_transition(
         self,
-        obs,
-        policy_output,
-        reward,
-        terminated,
-        truncated,
-        next_obs,
+        obs: torch.Tensor,
+        policy_output: PolicyOutput,
+        reward: torch.Tensor,
+        terminated: torch.Tensor,
+        truncated: torch.Tensor,
+        next_obs: torch.Tensor,
+        info: Mapping[str, Any] | None = None,
     ) -> None:
 
-        # self.storage.add(
-        #     obs=obs,
-        #     action=policy_output.action,
-        #     log_prob=policy_output.log_prob,
-        #     value=policy_output.value,
-        #     reward=reward,
-        #     terminated=terminated,
-        #     truncated=truncated,
-        #     next_obs=next_obs,
-        # )
-        pass
+        self.storage.add(
+            obs=obs,
+            action=policy_output.action,
+            log_prob=policy_output.log_prob,
+            value=policy_output.value,
+            reward=reward,
+            terminated=terminated,
+            truncated=truncated,
+            next_obs=next_obs,
+        )
 
 
     def compute_returns(
         self,
-        last_obs,
+        last_obs: torch.Tensor,
     ) -> None:
 
-        # with torch.no_grad():
-        #     value = self.model.value(last_obs)
+        rollout = self.storage.tensors()
+        values = rollout.values
 
-        # self.storage.compute_returns(last_value=value)
-        pass
+        with torch.no_grad():
+            next_values = torch.empty_like(values)
+            if values.shape[0] > 1:
+                next_values[:-1] = values[1:]
+            next_values[-1] = self.model.predict_values(last_obs)
+
+            if torch.any(rollout.truncated):
+                truncated_obs = rollout.next_obs[rollout.truncated]
+                next_values[rollout.truncated] = (
+                    self.model.predict_values(truncated_obs)
+                )
+
+        returns, advantages = compute_gae(
+            rewards=rollout.rewards,
+            values=rollout.values,
+            next_values=next_values,
+            terminated=rollout.terminated,
+            truncated=rollout.truncated,
+            gamma=self.gamma,
+            gae_lambda=self.gae_lambda,
+        )
+        self.storage.set_returns(
+            returns=returns,
+            advantages=advantages,
+        )
 
 
-    def update(self) -> dict:
+    def update(self) -> dict[str, float]:
 
-        # info = {}
+        totals = {
+            "loss": 0.0,
+            "policy_loss": 0.0,
+            "value_loss": 0.0,
+            "entropy": 0.0,
+            "approx_kl": 0.0,
+            "clip_fraction": 0.0,
+            "grad_norm": 0.0,
+        }
+        num_updates = 0
 
-        # for epoch in range(self.num_epochs):
+        for _ in range(self.num_epochs):
+            for batch in self.storage.mini_batches(
+                num_mini_batches=self.num_mini_batches,
+            ):
+                loss, metrics = self._compute_loss(batch)
 
-        #     for batch in self.storage:
+                self.optimizer.zero_grad(set_to_none=True)
+                loss.backward()
+                grad_norm = torch.nn.utils.clip_grad_norm_(
+                    self.model.parameters(),
+                    self.max_grad_norm,
+                )   # grad will be modified in place
+                self.optimizer.step()
 
-        #         loss = self.compute_loss(batch)
-        #         self.optimizer.zero_grad()
-        #         loss.backward()
-        #         torch.nn.utils.clip_grad_norm_(
-        #             self.model.parameters(),
-        #             self.max_grad_norm,
-        #         )
+                totals["loss"] += float(loss.detach().item())
+                totals["grad_norm"] += float(grad_norm.detach().item())
+                for name, value in metrics.items():
+                    totals[name] += float(value.detach().item())
+                num_updates += 1
 
-        #         self.optimizer.step()
+        if num_updates == 0:
+            raise RuntimeError("storage produced no mini-batches.")
 
-        # self.storage.clear()
+        info = {
+            f"ppo/{name}": value / num_updates
+            for name, value in totals.items()
+        }
+        self.storage.clear()
+        return info
 
-        # return info
-        pass
+
+    def _compute_loss(
+        self,
+        batch: RolloutBatch,
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+
+        evaluation = self.model.evaluate_actions(
+            obs=batch.obs,
+            actions=batch.actions,
+        )
+
+        log_ratio = (
+            evaluation.log_prob - batch.old_log_probs
+        )
+        ratio = torch.exp(log_ratio)
+
+        unclipped_loss = -batch.advantages * ratio
+        clipped_loss = -batch.advantages * torch.clamp(
+            ratio,
+            1.0 - self.clip_range,
+            1.0 + self.clip_range,
+        )
+        policy_loss = torch.maximum(
+            unclipped_loss,
+            clipped_loss,
+        ).mean()
+
+        value_loss = torch.nn.functional.mse_loss(
+            evaluation.value,
+            batch.returns,
+        )
+        entropy_mean = evaluation.entropy.mean()
+
+        loss = (
+            policy_loss
+            + self.value_coef * value_loss
+            - self.entropy_coef * entropy_mean
+        )
+
+        with torch.no_grad():
+            approx_kl = (ratio - 1.0 - log_ratio).mean()
+            clip_fraction = (
+                torch.abs(ratio - 1.0) > self.clip_range
+            ).float().mean()
+
+        return loss, {
+            "policy_loss": policy_loss,
+            "value_loss": value_loss,
+            "entropy": entropy_mean,
+            "approx_kl": approx_kl,
+            "clip_fraction": clip_fraction,
+        }
+
+
+    def close(self) -> None:
+
+        if hasattr(self, "model"):
+            self.model.close()
+            del self.model
+
+        if hasattr(self, "optimizer"):
+            del self.optimizer
+
+        if hasattr(self, "storage"):
+            self.storage.close()
+            del self.storage

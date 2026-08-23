@@ -62,7 +62,10 @@ class VectorEnv(BaseEnv):
     ) -> None:
         
         if component.simulator is None:
-            if self.simulator is None:
+            if (
+                hasattr(self, "simulator") is False
+                or self.simulator is None
+            ):
                 raise RuntimeError(
                     f"simulator instance is required."
                 )
@@ -81,7 +84,7 @@ class VectorEnv(BaseEnv):
             sim_type = SIM_TYPE_MAP[sim_type_name]
             sim_config = load_yaml(component.simulator.config)
             if (
-                not hasattr(self, "simulator")
+                hasattr(self, "simulator") is False
                 or not isinstance(self.simulator, sim_type)
             ):
                 self.simulator = sim_type(context=self.context)
@@ -99,7 +102,10 @@ class VectorEnv(BaseEnv):
     ) -> None:
         
         if component.task is None:
-            if self.task is None:
+            if (
+                hasattr(self, "task") is False
+                or self.task is None
+            ):
                 raise RuntimeError(
                     f"task instance is required."
                 )
@@ -119,7 +125,7 @@ class VectorEnv(BaseEnv):
             task_type = TASK_TYPE_MAP[task_type_name]
             task_config = load_yaml(component.task.config)
             if (
-                not hasattr(self, "task")
+                hasattr(self, "task") is False
                 or not isinstance(self.task, task_type)
             ):
                 self.task = task_type(context=self.context)

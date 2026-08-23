@@ -9,12 +9,12 @@ from rl.algorithms.base import (
     PolicyOutput,
 )
 from rl.algorithms.ppo import PPO
-from rl.models.base import BaseModel, ModelActionOutput, PolicyEvaluation
+from rl.policies.base import BasePolicy, PolicyActionOutput, PolicyEvaluation
 from rl.utils.storage import RolloutStorage
 from utils.component import Component
 
 
-class DummyModel(torch.nn.Linear):
+class DummyPolicy(torch.nn.Linear):
 
     def set_train_mode(self) -> None:
         self.train()
@@ -24,7 +24,7 @@ class DummyModel(torch.nn.Linear):
         self.eval()
 
 
-class FakePPOModel(BaseModel):
+class FakePPOPolicy(BasePolicy):
 
     def __init__(self, context: RuntimeContext) -> None:
         super().__init__(context=context)
@@ -58,10 +58,10 @@ class FakePPOModel(BaseModel):
         self,
         obs: torch.Tensor,
         deterministic: bool = False,
-    ) -> ModelActionOutput:
+    ) -> PolicyActionOutput:
         distribution = self.get_action_distribution(obs)
         action = distribution.mean if deterministic else distribution.sample()
-        return ModelActionOutput(
+        return PolicyActionOutput(
             action=action,
             log_prob=distribution.log_prob(action).sum(dim=-1),
             value=self.predict_values(obs),
@@ -176,18 +176,18 @@ def test_algorithm_defaults_to_stochastic_action(
     assert algorithm.last_deterministic is False
 
 
-def test_algorithm_controls_model_mode(
+def test_algorithm_controls_policy_mode(
     runtime_context: RuntimeContext,
 ) -> None:
 
     algorithm = DummyOnPolicyAlgorithm(runtime_context)
-    algorithm.model = DummyModel(2, 1)
+    algorithm.policy = DummyPolicy(2, 1)
 
     algorithm.set_eval_mode()
-    assert algorithm.model.training is False
+    assert algorithm.policy.training is False
 
     algorithm.set_train_mode()
-    assert algorithm.model.training is True
+    assert algorithm.policy.training is True
 
 
 def test_partial_ppo_remains_instantiable(
@@ -203,9 +203,9 @@ def test_ppo_processes_transition_and_returns(
     runtime_context: RuntimeContext,
 ) -> None:
     algorithm = PPO(runtime_context)
-    model = FakePPOModel(context=runtime_context)
+    policy = FakePPOPolicy(context=runtime_context)
     storage = RolloutStorage(context=runtime_context)
-    algorithm.model = model
+    algorithm.policy = policy
     algorithm.storage = storage
     algorithm.gamma = 0.99
     algorithm.gae_lambda = 0.95
@@ -231,11 +231,11 @@ def test_ppo_update_optimizes_and_reports_metrics(
     runtime_context: RuntimeContext,
 ) -> None:
     algorithm = PPO(runtime_context)
-    model = FakePPOModel(context=runtime_context)
+    policy = FakePPOPolicy(context=runtime_context)
     storage = RolloutStorage(context=runtime_context)
-    algorithm.model = model
+    algorithm.policy = policy
     algorithm.storage = storage
-    algorithm.optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+    algorithm.optimizer = torch.optim.Adam(policy.parameters(), lr=0.01)
     algorithm.clip_range = 0.2
     algorithm.entropy_coef = 0.01
     algorithm.value_coef = 0.5
@@ -247,12 +247,12 @@ def test_ppo_update_optimizes_and_reports_metrics(
 
     obs = torch.zeros(4, 3)
     actions = torch.full((4, 1), 0.5)
-    old_distribution = model.get_action_distribution(obs)
+    old_distribution = policy.get_action_distribution(obs)
     storage.add(
         obs=obs,
         action=actions,
         log_prob=old_distribution.log_prob(actions).sum(dim=-1),
-        value=model.predict_values(obs),
+        value=policy.predict_values(obs),
         reward=torch.ones(4),
         terminated=torch.zeros(4, dtype=torch.bool),
         truncated=torch.zeros(4, dtype=torch.bool),
@@ -280,15 +280,15 @@ def test_ppo_closes_owned_components(
     
     algorithm = PPO(runtime_context)
     storage = TrackingRolloutStorage(context=runtime_context)
-    model = FakePPOModel(context=runtime_context)
+    policy = FakePPOPolicy(context=runtime_context)
     algorithm.storage = storage
-    algorithm.model = model
+    algorithm.policy = policy
 
     algorithm.close()
 
     assert storage.closed is True
-    assert model.closed is True
+    assert policy.closed is True
     assert not hasattr(algorithm, "storage")
-    assert not hasattr(algorithm, "model")
+    assert not hasattr(algorithm, "policy")
 
     algorithm.close()

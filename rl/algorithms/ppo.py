@@ -4,8 +4,8 @@ from typing import Any
 
 from app.utils.context import RuntimeContext
 from rl.algorithms.base import OnPolicyAlgorithm, PolicyOutput
-from rl.models.base import BaseModel
-from rl.models.registry import MODEL_TYPE_MAP
+from rl.policies.base import BasePolicy
+from rl.policies.registry import POLICY_TYPE_MAP
 from rl.utils.gae import compute_gae
 from rl.utils.storage import RolloutBatch, RolloutStorage
 from utils.param import update_attributes
@@ -22,7 +22,7 @@ class PPO(OnPolicyAlgorithm):
     ) -> None:
 
         self.context = context
-        self.model: BaseModel
+        self.policy: BasePolicy
         self.storage: RolloutStorage
         self.optimizer: torch.optim.Optimizer
 
@@ -94,49 +94,49 @@ class PPO(OnPolicyAlgorithm):
         component: Component
     ) -> None:
 
-        model = component.model
+        policy = component.policy
         
-        if model is None:
+        if policy is None:
 
-            self._update_model_config(component=component)
+            self._update_policy_config(component=component)
             self._update_optimizer_config()
             self.storage.clear()
 
         else:
 
-            model_type = self._check_rebuild(model=model)
-            if model_type:
-                self.model = model_type(
+            policy_type = self._check_policy_rebuild(policy=policy)
+            if policy_type:
+                self.policy = policy_type(
                     context=self.context,
                 )
                 self.optimizer = torch.optim.Adam(
-                    self.model.parameters(),
+                    self.policy.parameters(),
                 )
                 self.storage = RolloutStorage(
                     context=self.context
                 )
 
-            model_config = load_yaml(model.config)
-            self._update_model_config(
+            policy_config = load_yaml(policy.config)
+            self._update_policy_config(
                 component=component,
-                **model_config,
+                **policy_config,
             )
             self._update_optimizer_config()
             self.storage.clear()
 
 
-    def _update_model_config(
+    def _update_policy_config(
         self,
         component: Component,
         *args, **kwargs,
     ) -> None:
 
         if (
-            hasattr(self, "model") is False
-            or self.model is None
+            hasattr(self, "policy") is False
+            or self.policy is None
         ):
-            raise RuntimeError("model instance is required.")
-        self.model.config_update(
+            raise RuntimeError("policy instance is required.")
+        self.policy.config_update(
             component=component,
             **kwargs
         )
@@ -153,23 +153,23 @@ class PPO(OnPolicyAlgorithm):
             param_group["lr"] = self.learning_rate
 
 
-    def _check_rebuild(
+    def _check_policy_rebuild(
         self,
-        model: ComponentInfo
-    ) -> type[BaseModel] | None:
+        policy: ComponentInfo
+    ) -> type[BasePolicy] | None:
         
-        model_type_name = model.type
-        if model_type_name not in MODEL_TYPE_MAP:
+        policy_type_name = policy.type
+        if policy_type_name not in POLICY_TYPE_MAP:
             raise ValueError(
-                f"Invalid model type: {model_type_name!r}."
+                f"Invalid policy type: {policy_type_name!r}."
             )
 
-        model_type = MODEL_TYPE_MAP[model_type_name]
+        policy_type = POLICY_TYPE_MAP[policy_type_name]
         if (
-            hasattr(self, "model") is False
-            or not isinstance(self.model, model_type)
+            hasattr(self, "policy") is False
+            or not isinstance(self.policy, policy_type)
         ):
-            return model_type
+            return policy_type
         return None
 
 
@@ -179,15 +179,15 @@ class PPO(OnPolicyAlgorithm):
         deterministic: bool = False,
     ) -> PolicyOutput:
 
-        model_output = self.model.act(
+        policy_output = self.policy.act(
             obs=obs,
             deterministic=deterministic,
         )
 
         return PolicyOutput(
-            action=model_output.action,
-            log_prob=model_output.log_prob,
-            value=model_output.value,
+            action=policy_output.action,
+            log_prob=policy_output.log_prob,
+            value=policy_output.value,
         )
     
 
@@ -226,12 +226,12 @@ class PPO(OnPolicyAlgorithm):
             next_values = torch.empty_like(values)
             if values.shape[0] > 1:
                 next_values[:-1] = values[1:]
-            next_values[-1] = self.model.predict_values(last_obs)
+            next_values[-1] = self.policy.predict_values(last_obs)
 
             if torch.any(rollout.truncated):
                 truncated_obs = rollout.next_obs[rollout.truncated]
                 next_values[rollout.truncated] = (
-                    self.model.predict_values(truncated_obs)
+                    self.policy.predict_values(truncated_obs)
                 )
 
         returns, advantages = compute_gae(
@@ -271,7 +271,7 @@ class PPO(OnPolicyAlgorithm):
                 self.optimizer.zero_grad(set_to_none=True)
                 loss.backward()
                 grad_norm = torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(),
+                    self.policy.parameters(),
                     self.max_grad_norm,
                 )   # grad will be modified in place
                 self.optimizer.step()
@@ -298,7 +298,7 @@ class PPO(OnPolicyAlgorithm):
         batch: RolloutBatch,
     ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
 
-        evaluation = self.model.evaluate_actions(
+        evaluation = self.policy.evaluate_actions(
             obs=batch.obs,
             actions=batch.actions,
         )
@@ -348,9 +348,9 @@ class PPO(OnPolicyAlgorithm):
 
     def close(self) -> None:
 
-        if hasattr(self, "model"):
-            self.model.close()
-            del self.model
+        if hasattr(self, "policy"):
+            self.policy.close()
+            del self.policy
 
         if hasattr(self, "optimizer"):
             del self.optimizer

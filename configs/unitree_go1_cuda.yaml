@@ -29,7 +29,7 @@ component:
     - type: "ppo"
       config: "ppo_unitree_go1_stage1"
 
-  model:
+  policy:
     - type: ""
       config: "tmp"
 

@@ -16,7 +16,7 @@ def test_create_component():
             "type": "ppo",
             "config": "ppo",
         },
-        "model": {
+        "policy": {
             "type": "actor_critic",
             "config": "actor_critic",
         },
@@ -38,14 +38,14 @@ def test_create_component():
 
     assert component.runner is not None
     assert component.algorithm is not None
-    assert component.model is not None
+    assert component.policy is not None
     assert component.environment is not None
     assert component.simulator is not None
     assert component.task is not None
 
     assert component.runner.type == "on_policy"
     assert component.algorithm.type == "ppo"
-    assert component.model.type == "actor_critic"
+    assert component.policy.type == "actor_critic"
     assert component.environment.type == "vector_env"
     assert component.simulator.type == "mujoco"
     assert component.task.type == "locomotion"
@@ -58,8 +58,8 @@ def test_create_component():
         "./configs/algorithms/ppo.yaml"
     )
 
-    assert component.model.config == Path(
-        "./configs/models/actor_critic.yaml"
+    assert component.policy.config == Path(
+        "./configs/policies/actor_critic.yaml"
     )
 
     assert component.environment.config == Path(
@@ -127,7 +127,7 @@ def test_missing_component_is_none():
 
     assert component.runner is not None
     assert component.algorithm is None
-    assert component.model is None
+    assert component.policy is None
     assert component.environment is None
     assert component.simulator is None
     assert component.task is None

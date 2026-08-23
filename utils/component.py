@@ -5,6 +5,16 @@ from pathlib import Path
 from utils.path import fill_path
 
 
+COMPONENT_CONFIG_DIR_MAP: dict[str, str] = {
+    "runner": "runners",
+    "algorithm": "algorithms",
+    "policy": "policies",
+    "environment": "environments",
+    "simulator": "simulators",
+    "task": "tasks",
+}
+
+
 @dataclass(frozen=True)
 class ComponentInfo:
     type: str
@@ -15,7 +25,7 @@ class ComponentInfo:
 class Component:
     runner: ComponentInfo | None
     algorithm: ComponentInfo | None
-    model: ComponentInfo | None
+    policy: ComponentInfo | None
     environment: ComponentInfo | None
     simulator: ComponentInfo | None
     task: ComponentInfo | None
@@ -36,9 +46,10 @@ def _create_component_info(
 
     if config_path is None:
         config_name = component.get("config", None)
+        component_dir_name = COMPONENT_CONFIG_DIR_MAP[component_name]
         config_dir = component.get(
             "config_dir",
-            load_dir / "configs" / f"{component_name}s"
+            load_dir / "configs" / component_dir_name,
         )
         config_path = fill_path(
             file_name=config_name,
@@ -64,11 +75,10 @@ def create_component(
 ) -> Component:
 
     return Component(
-        runner=_create_component_info(component_dict, "runner", load_dir), 
-        algorithm=_create_component_info(component_dict, "algorithm", load_dir), 
-        model=_create_component_info(component_dict, "model", load_dir), 
-        environment=_create_component_info(component_dict, "environment", load_dir), 
-        simulator=_create_component_info(component_dict, "simulator", load_dir), 
-        task=_create_component_info(component_dict, "task", load_dir), 
+        runner=_create_component_info(component_dict, "runner", load_dir),
+        algorithm=_create_component_info(component_dict, "algorithm", load_dir),
+        policy=_create_component_info(component_dict, "policy", load_dir),
+        environment=_create_component_info(component_dict, "environment", load_dir),
+        simulator=_create_component_info(component_dict, "simulator", load_dir),
+        task=_create_component_info(component_dict, "task", load_dir),
     )
-    

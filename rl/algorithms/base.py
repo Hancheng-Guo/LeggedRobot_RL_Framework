@@ -22,7 +22,7 @@ class BaseAlgorithm(ABC):
         context: RuntimeContext
     ) -> None:
         self.context = context
-        self.model: Any | None = None
+        self.policy: Any | None = None
         self.storage: Any | None = None
 
 
@@ -57,14 +57,14 @@ class BaseAlgorithm(ABC):
 
     def set_train_mode(self) -> None:
         """Put the owned policy in training mode, if it has been built."""
-        if self.model is not None:
-            self.model.set_train_mode()
+        if self.policy is not None:
+            self.policy.set_train_mode()
 
 
     def set_eval_mode(self) -> None:
         """Put the owned policy in evaluation mode, if it has been built."""
-        if self.model is not None:
-            self.model.set_eval_mode()
+        if self.policy is not None:
+            self.policy.set_eval_mode()
 
 
 class OnPolicyAlgorithm(BaseAlgorithm):

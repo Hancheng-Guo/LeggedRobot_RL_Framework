@@ -84,3 +84,35 @@ def test_rollout_storage_clear_resets_rollout(runtime_context):
     assert storage.obs == []
     assert storage.returns is None
     assert storage.advantages is None
+
+
+def test_recurrent_storage_preserves_time_sequences(runtime_context):
+    storage = RolloutStorage(context=runtime_context)
+    for step in range(3):
+        obs = torch.full((2, 1), float(step))
+        storage.add(
+            obs=obs,
+            action=obs,
+            log_prob=torch.zeros(2),
+            value=torch.zeros(2),
+            reward=torch.ones(2),
+            terminated=torch.tensor([step == 1, False]),
+            truncated=torch.zeros(2, dtype=torch.bool),
+            next_obs=obs + 1.0,
+            recurrent_state={
+                "actor.0": torch.full((2, 4), float(step)),
+            },
+        )
+    storage.set_returns(
+        returns=torch.ones(3, 2),
+        advantages=torch.ones(3, 2),
+    )
+
+    batch = next(storage.mini_batches(num_mini_batches=1))
+
+    assert batch.obs.shape == (3, 2, 1)
+    assert batch.initial_recurrent_state is not None
+    assert batch.initial_recurrent_state["actor.0"].shape == (2, 4)
+    assert batch.reset_mask is not None
+    assert torch.count_nonzero(batch.reset_mask[0]) == 0
+    assert torch.count_nonzero(batch.reset_mask[2]) == 1

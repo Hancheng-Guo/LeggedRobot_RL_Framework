@@ -1,7 +1,6 @@
 import warnings
 import torch
 import numpy as np
-from numbers import Number
 
 from app.utils.context import RuntimeContext
 from runners.base import BaseRunner
@@ -152,6 +151,11 @@ class OnPolicyRunner(BaseRunner):
                 )
             
             alg_type = ALG_TYPE_MAP[alg_type_name]
+            if not issubclass(alg_type, OnPolicyAlgorithm):
+                raise TypeError(
+                    f"Algorithm {alg_type_name!r} is not "
+                    "an on-policy algorithm."
+                )
             alg_config = load_yaml(component.algorithm.config)
             if (
                 not hasattr(self, "algorithm")
@@ -251,6 +255,13 @@ class OnPolicyRunner(BaseRunner):
         num_episodes: int = 1000,
     ) -> None:
 
+        if (
+            not isinstance(num_episodes, int)
+            or isinstance(num_episodes, bool)
+            or num_episodes <= 0
+        ):
+            raise ValueError("'num_episodes' must be a positive integer.")
+
         if self.environment is None:
             raise RuntimeError("environment is not instantiated.")
 
@@ -300,6 +311,8 @@ class OnPolicyRunner(BaseRunner):
             done = terminated | truncated
 
             done_ids = done.nonzero(as_tuple=False).flatten()
+            if done_ids.numel() > 0:
+                self.algorithm.reset_policy_state(done_ids)
 
             for env_id in done_ids:
 
@@ -344,8 +357,12 @@ class OnPolicyRunner(BaseRunner):
         if self.algorithm is None:
             raise RuntimeError("algorithm is not instantiated.")
 
-        if not isinstance(num_steps, Number) or num_steps <= 0:
-            raise ValueError("'num_steps' must be a number greater than 0.")
+        if (
+            not isinstance(num_steps, int)
+            or isinstance(num_steps, bool)
+            or num_steps <= 0
+        ):
+            raise ValueError("'num_steps' must be a positive integer.")
 
         self.algorithm.set_eval_mode()
         obs = self.environment.reset()
@@ -365,8 +382,19 @@ class OnPolicyRunner(BaseRunner):
                 )
 
             (
-                next_obs, _, _, _, _, info,
+                next_obs,
+                _,
+                _,
+                terminated,
+                truncated,
+                info,
             ) = self.environment.step(policy_output.action)
+
+            done_ids = (terminated | truncated).nonzero(
+                as_tuple=False,
+            ).flatten()
+            if done_ids.numel() > 0:
+                self.algorithm.reset_policy_state(done_ids)
 
             frame = self.environment.render()
             if frame is not None:

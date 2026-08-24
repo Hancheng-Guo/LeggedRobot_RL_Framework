@@ -14,16 +14,6 @@ from rl.utils.storage import RolloutStorage
 from utils.component import Component
 
 
-class DummyPolicy(torch.nn.Linear):
-
-    def set_train_mode(self) -> None:
-        self.train()
-
-
-    def set_eval_mode(self) -> None:
-        self.eval()
-
-
 class FakePPOPolicy(BasePolicy):
 
     def __init__(self, context: RuntimeContext) -> None:
@@ -181,7 +171,7 @@ def test_algorithm_controls_policy_mode(
 ) -> None:
 
     algorithm = DummyOnPolicyAlgorithm(runtime_context)
-    algorithm.policy = DummyPolicy(2, 1)
+    algorithm.policy = FakePPOPolicy(context=runtime_context)
 
     algorithm.set_eval_mode()
     assert algorithm.policy.training is False

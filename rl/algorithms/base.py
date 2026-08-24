@@ -5,6 +5,8 @@ from typing import Any
 from torch import Tensor
 
 from app.utils.context import RuntimeContext
+from rl.policies.base import BasePolicy, RecurrentPolicy
+from rl.utils.storage import RolloutStorage
 
 
 @dataclass(slots=True)
@@ -22,8 +24,8 @@ class BaseAlgorithm(ABC):
         context: RuntimeContext
     ) -> None:
         self.context = context
-        self.policy: Any | None = None
-        self.storage: Any | None = None
+        self.policy: BasePolicy
+        self.storage: RolloutStorage
 
 
     @abstractmethod
@@ -56,15 +58,43 @@ class BaseAlgorithm(ABC):
     
 
     def set_train_mode(self) -> None:
-        """Put the owned policy in training mode, if it has been built."""
-        if self.policy is not None:
-            self.policy.set_train_mode()
+
+        if not hasattr(self, "policy"):
+            raise RuntimeError(
+                "setting train mode should init policy first"
+            )
+        
+        self.policy.set_train_mode()
+        if (
+            isinstance(self.policy, RecurrentPolicy)
+            and self.policy.is_recurrent
+        ):
+            self.policy.reset_recurrent_state()
 
 
     def set_eval_mode(self) -> None:
-        """Put the owned policy in evaluation mode, if it has been built."""
-        if self.policy is not None:
-            self.policy.set_eval_mode()
+
+        if not hasattr(self, "policy"):
+            raise RuntimeError(
+                "setting train mode should init policy first"
+            )
+        
+        self.policy.set_eval_mode()
+        if (
+            isinstance(self.policy, RecurrentPolicy)
+            and self.policy.is_recurrent
+        ):
+            self.policy.reset_recurrent_state()
+
+
+    def reset_policy_state(self, env_ids: Tensor | None = None) -> None:
+        """Reset episode-local policy state for selected environments."""
+        if (
+            hasattr(self, "policy")
+            and isinstance(self.policy, RecurrentPolicy)
+            and self.policy.is_recurrent
+        ):
+            self.policy.reset_recurrent_state(env_ids)
 
 
 class OnPolicyAlgorithm(BaseAlgorithm):

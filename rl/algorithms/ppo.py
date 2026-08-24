@@ -4,7 +4,7 @@ from typing import Any
 
 from app.utils.context import RuntimeContext
 from rl.algorithms.base import OnPolicyAlgorithm, PolicyOutput
-from rl.policies.base import BasePolicy
+from rl.policies.base import BasePolicy, RecurrentPolicy, RecurrentState
 from rl.policies.registry import POLICY_TYPE_MAP
 from rl.utils.gae import compute_gae
 from rl.utils.storage import RolloutBatch, RolloutStorage
@@ -25,6 +25,7 @@ class PPO(OnPolicyAlgorithm):
         self.policy: BasePolicy
         self.storage: RolloutStorage
         self.optimizer: torch.optim.Optimizer
+        self._pending_recurrent_state: RecurrentState
 
         self.learning_rate: float
         self.action_dim: int
@@ -105,7 +106,7 @@ class PPO(OnPolicyAlgorithm):
 
             if not hasattr(self, "policy"):
                 raise RuntimeError("policy is not built.")
-            if hasattr(self, "optimizer"):
+            if not hasattr(self, "optimizer"):
                 raise RuntimeError("optimizer is not built.")
             if not hasattr(self, "storage"):
                 raise RuntimeError("storage is not built.")
@@ -144,10 +145,7 @@ class PPO(OnPolicyAlgorithm):
         *args, **kwargs,
     ) -> None:
 
-        if (
-            hasattr(self, "policy") is False
-            or self.policy is None
-        ):
+        if not hasattr(self, "policy"):
             raise RuntimeError("policy instance is required.")
         self.policy.config_update(
             component=component,
@@ -187,6 +185,17 @@ class PPO(OnPolicyAlgorithm):
         deterministic: bool = False,
     ) -> PolicyOutput:
 
+        if self._is_recurrent_policy:
+            assert isinstance(self.policy, RecurrentPolicy)
+            if self.policy.training:
+                self._pending_recurrent_state = (
+                    self.policy.get_recurrent_state(
+                        batch_size=obs.shape[0],
+                    )
+                )
+            elif hasattr(self, "_pending_recurrent_state"):
+                del self._pending_recurrent_state
+
         policy_output = self.policy.act(
             obs=obs,
             deterministic=deterministic,
@@ -210,6 +219,11 @@ class PPO(OnPolicyAlgorithm):
         info: Mapping[str, Any] | None = None,
     ) -> None:
 
+        recurrent_state = (
+            self._pending_recurrent_state
+            if self._is_recurrent_policy
+            else None
+        )
         self.storage.add(
             obs=obs,
             action=policy_output.action,
@@ -219,7 +233,17 @@ class PPO(OnPolicyAlgorithm):
             terminated=terminated,
             truncated=truncated,
             next_obs=next_obs,
+            recurrent_state=recurrent_state,
         )
+
+        if self._is_recurrent_policy:
+            done_ids = torch.nonzero(
+                terminated | truncated,
+                as_tuple=False,
+            ).flatten()
+            if done_ids.numel() > 0:
+                self.reset_policy_state(done_ids)
+            del self._pending_recurrent_state
 
 
     def compute_returns(
@@ -306,10 +330,29 @@ class PPO(OnPolicyAlgorithm):
         batch: RolloutBatch,
     ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
 
-        evaluation = self.policy.evaluate_actions(
-            obs=batch.obs,
-            actions=batch.actions,
-        )
+        if batch.initial_recurrent_state is None:
+            
+            evaluation = self.policy.evaluate_actions(
+                obs=batch.obs,
+                actions=batch.actions,
+            )
+
+        else:
+            if batch.reset_mask is None:
+                raise RuntimeError("Recurrent batch requires a reset mask.")
+            if not self._is_recurrent_policy:
+                raise RuntimeError(
+                    "Storage contains recurrent state for a non-recurrent "
+                    "policy."
+                )
+            assert isinstance(self.policy, RecurrentPolicy)
+
+            evaluation, _ = self.policy.evaluate_recurrent_sequences(
+                obs=batch.obs,
+                actions=batch.actions,
+                initial_state=batch.initial_recurrent_state,
+                reset_mask=batch.reset_mask,
+            )
 
         log_ratio = (
             evaluation.log_prob - batch.old_log_probs
@@ -366,3 +409,18 @@ class PPO(OnPolicyAlgorithm):
         if hasattr(self, "storage"):
             self.storage.close()
             del self.storage
+
+        if hasattr(self, "_pending_recurrent_state"):
+            del self._pending_recurrent_state
+
+
+    @property
+    def _is_recurrent_policy(self) -> bool:
+
+        if not hasattr(self, "policy"):
+            return False
+        
+        return (
+            isinstance(self.policy, RecurrentPolicy)
+            and self.policy.is_recurrent
+        )

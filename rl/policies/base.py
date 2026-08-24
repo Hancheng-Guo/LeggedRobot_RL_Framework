@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 import torch
 
@@ -20,6 +20,34 @@ class PolicyEvaluation:
     log_prob: torch.Tensor
     entropy: torch.Tensor
     value: torch.Tensor
+
+
+RecurrentState = dict[str, torch.Tensor]
+
+
+@runtime_checkable
+class RecurrentPolicy(Protocol):
+
+    @property
+    def is_recurrent(self) -> bool: ...
+
+    def get_recurrent_state(
+        self,
+        batch_size: int | None = None,
+    ) -> RecurrentState: ...
+
+    def reset_recurrent_state(
+        self,
+        env_ids: torch.Tensor | None = None,
+    ) -> None: ...
+
+    def evaluate_recurrent_sequences(
+        self,
+        obs: torch.Tensor,
+        actions: torch.Tensor,
+        initial_state: RecurrentState,
+        reset_mask: torch.Tensor,
+    ) -> tuple[PolicyEvaluation, RecurrentState]: ...
 
 
 class BasePolicy(torch.nn.Module, ABC):

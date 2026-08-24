@@ -2,6 +2,8 @@ import torch.nn as nn
 from collections.abc import Callable, Mapping
 from typing import Any, TypeVar
 
+from rl.policies.modules.recurrent import StatefulGRU
+
 
 MODULE_TYPE_MAP: dict[str, type[nn.Module]] = {
     "linear": nn.Linear,
@@ -13,6 +15,7 @@ MODULE_TYPE_MAP: dict[str, type[nn.Module]] = {
     "layer_norm": nn.LayerNorm,
     "dropout": nn.Dropout,
     "identity": nn.Identity,
+    "gru": StatefulGRU,
 }
 
 

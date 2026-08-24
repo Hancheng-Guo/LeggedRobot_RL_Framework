@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Iterator
 
 from app.utils.context import RuntimeContext
+from rl.policies.base import RecurrentState
 
 
 @dataclass(slots=True)
@@ -13,6 +14,8 @@ class RolloutBatch:
     old_values: torch.Tensor
     returns: torch.Tensor
     advantages: torch.Tensor
+    initial_recurrent_state: RecurrentState | None = None
+    reset_mask: torch.Tensor | None = None
 
 
 @dataclass(slots=True)
@@ -25,6 +28,7 @@ class RolloutTensors:
     terminated: torch.Tensor
     truncated: torch.Tensor
     next_obs: torch.Tensor
+    recurrent_states: RecurrentState | None
 
 
 class RolloutStorage:
@@ -44,6 +48,8 @@ class RolloutStorage:
         self.terminated: list[torch.Tensor] = []
         self.truncated: list[torch.Tensor] = []
         self.next_obs: list[torch.Tensor] = []
+        self.recurrent_states: list[RecurrentState] = []
+        self._is_recurrent: bool | None = None
         self.returns: torch.Tensor | None = None
         self.advantages: torch.Tensor | None = None
 
@@ -58,7 +64,19 @@ class RolloutStorage:
         terminated: torch.Tensor,
         truncated: torch.Tensor,
         next_obs: torch.Tensor,
+        recurrent_state: RecurrentState | None = None,
     ) -> None:
+        
+        if recurrent_state is not None and not recurrent_state:
+            raise ValueError("Recurrent state cannot be empty.")
+        
+        is_recurrent = recurrent_state is not None
+        if self._is_recurrent is None:
+            self._is_recurrent = is_recurrent
+        elif self._is_recurrent != is_recurrent:
+            raise ValueError(
+                "A rollout cannot mix recurrent and non-recurrent states."
+            )
         
         self.obs.append(self._prepare(obs))
         self.actions.append(self._prepare(action))
@@ -68,6 +86,11 @@ class RolloutStorage:
         self.terminated.append(self._prepare(terminated))
         self.truncated.append(self._prepare(truncated))
         self.next_obs.append(self._prepare(next_obs))
+        if recurrent_state is not None:
+            self.recurrent_states.append({
+                name: self._prepare(value)
+                for name, value in recurrent_state.items()
+            })
 
 
     def tensors(self) -> RolloutTensors:
@@ -81,6 +104,7 @@ class RolloutStorage:
             terminated=torch.stack(self.terminated),
             truncated=torch.stack(self.truncated),
             next_obs=torch.stack(self.next_obs),
+            recurrent_states=self._stack_recurrent_states(),
         )
 
 
@@ -105,6 +129,28 @@ class RolloutStorage:
             raise ValueError("'num_mini_batches' must be greater than 0.")
 
         rollout = self.tensors()
+        if rollout.recurrent_states is not None:
+            yield from self._recurrent_mini_batches(
+                rollout=rollout,
+                num_mini_batches=num_mini_batches,
+            )
+            return
+
+        yield from self._feedforward_mini_batches(
+            rollout=rollout,
+            num_mini_batches=num_mini_batches,
+        )
+
+
+    def _feedforward_mini_batches(
+        self,
+        rollout: RolloutTensors,
+        num_mini_batches: int,
+    ) -> Iterator[RolloutBatch]:
+        
+        assert self.returns is not None
+        assert self.advantages is not None
+        
         num_steps, num_envs = rollout.rewards.shape[:2]
         batch_size = num_steps * num_envs
         if num_mini_batches > batch_size:
@@ -139,6 +185,57 @@ class RolloutStorage:
             )
 
 
+    def _recurrent_mini_batches(
+        self,
+        rollout: RolloutTensors,
+        num_mini_batches: int,
+    ) -> Iterator[RolloutBatch]:
+        assert rollout.recurrent_states is not None
+        assert self.returns is not None
+        assert self.advantages is not None
+
+        _, num_envs = rollout.rewards.shape[:2]
+        if num_mini_batches > num_envs:
+            raise ValueError(
+                "For recurrent rollouts, 'num_mini_batches' cannot exceed "
+                "the number of environments."
+            )
+
+        env_indices = torch.randperm(
+            num_envs,
+            device=self.context.device,
+        )
+        done = rollout.terminated | rollout.truncated
+        reset_mask = torch.zeros_like(done, dtype=torch.bool)
+        reset_mask[1:] = done[:-1]
+
+        for batch_env_ids in torch.tensor_split(
+            env_indices,
+            num_mini_batches,
+        ):
+            yield RolloutBatch(
+                obs=rollout.obs[:, batch_env_ids],
+                actions=rollout.actions[:, batch_env_ids],
+                old_log_probs=self._squeeze_scalar(
+                    rollout.log_probs
+                )[:, batch_env_ids],
+                old_values=self._squeeze_scalar(
+                    rollout.values
+                )[:, batch_env_ids],
+                returns=self._squeeze_scalar(
+                    self.returns
+                )[:, batch_env_ids],
+                advantages=self._squeeze_scalar(
+                    self.advantages
+                )[:, batch_env_ids],
+                initial_recurrent_state={
+                    name: value[0, batch_env_ids]
+                    for name, value in rollout.recurrent_states.items()
+                },
+                reset_mask=reset_mask[:, batch_env_ids],
+            )
+
+
     def clear(self) -> None:
         self.obs.clear()
         self.actions.clear()
@@ -148,6 +245,8 @@ class RolloutStorage:
         self.terminated.clear()
         self.truncated.clear()
         self.next_obs.clear()
+        self.recurrent_states.clear()
+        self._is_recurrent = None
         self.returns = None
         self.advantages = None
 
@@ -158,6 +257,21 @@ class RolloutStorage:
 
     def _prepare(self, value: torch.Tensor) -> torch.Tensor:
         return value.detach().to(device=self.context.device)
+
+
+    def _stack_recurrent_states(self) -> RecurrentState | None:
+        if not self.recurrent_states:
+            return None
+        expected_names = set(self.recurrent_states[0])
+        if any(set(state) != expected_names for state in self.recurrent_states):
+            raise ValueError("Recurrent state keys changed during rollout.")
+        return {
+            name: torch.stack([
+                state[name]
+                for state in self.recurrent_states
+            ])
+            for name in expected_names
+        }
 
 
     @staticmethod

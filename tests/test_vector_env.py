@@ -1,4 +1,5 @@
 import torch
+from types import SimpleNamespace
 from typing import cast
 
 from envs.simulators.base import BaseSimulator
@@ -35,6 +36,7 @@ class FakeTask:
         self.command = torch.zeros(num_envs, 1)
         self.action = torch.zeros(num_envs, 1)
         self.last_action = torch.zeros(num_envs, 1)
+        self.action_manager = SimpleNamespace(input_dim=1)
 
     def reset(self, env_ids: torch.Tensor | None = None) -> None:
         if env_ids is None:
@@ -147,6 +149,12 @@ def test_step_uses_old_command_for_reward_and_new_command_for_observation():
     torch.testing.assert_close(next_obs, transition_obs)
     assert not torch.any(terminated)
     assert not torch.any(truncated)
+
+
+def test_action_dim_comes_from_action_manager_input() -> None:
+    env = make_env()
+
+    assert env.action_dim == 1
 
 
 def test_done_env_returns_terminal_and_reset_observations_separately():

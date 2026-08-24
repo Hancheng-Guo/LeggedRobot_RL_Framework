@@ -266,3 +266,9 @@ class VectorEnv(BaseEnv):
 
     def render(self) -> np.ndarray | None:
         return self.simulator.render()
+
+
+    @property
+    def action_dim(self) -> int:
+        return self.task.action_manager.input_dim
+    

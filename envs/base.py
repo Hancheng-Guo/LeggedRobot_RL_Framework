@@ -53,10 +53,18 @@ class BaseEnv(ABC):
         """
         raise NotImplementedError
 
+
     @abstractmethod
     def close(self) -> None:
         raise NotImplementedError
 
+
     @abstractmethod
     def render(self) -> np.ndarray | None:
+        raise NotImplementedError
+
+    
+    @property
+    @abstractmethod
+    def action_dim(self) -> int:
         raise NotImplementedError

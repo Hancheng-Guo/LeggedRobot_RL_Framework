@@ -27,6 +27,7 @@ class PPO(OnPolicyAlgorithm):
         self.optimizer: torch.optim.Optimizer
 
         self.learning_rate: float
+        self.action_dim: int
         self.gamma: float
         self.gae_lambda: float
         self.clip_range: float
@@ -40,6 +41,7 @@ class PPO(OnPolicyAlgorithm):
     def config_update(
         self,
         component: Component,
+        action_dim: int | None = None,
         learning_rate: float | None = None,
         gamma: float | None = None,
         gae_lambda: float | None = None,
@@ -53,6 +55,7 @@ class PPO(OnPolicyAlgorithm):
 
         update_attributes(
             self,
+            action_dim=action_dim,
             learning_rate=learning_rate,
             gamma=gamma,
             gae_lambda=gae_lambda,
@@ -71,6 +74,8 @@ class PPO(OnPolicyAlgorithm):
         
         if self.learning_rate <= 0.0:
             raise ValueError("'learning_rate' must be greater than 0.")
+        if self.action_dim <= 0:
+            raise ValueError("'action_dim' must be greater than 0.")
         if not 0.0 <= self.gamma <= 1.0:
             raise ValueError("'gamma' must be in [0, 1].")
         if not 0.0 <= self.gae_lambda <= 1.0:
@@ -98,31 +103,39 @@ class PPO(OnPolicyAlgorithm):
         
         if policy is None:
 
-            self._update_policy_config(component=component)
+            if not hasattr(self, "policy"):
+                raise RuntimeError("policy is not built.")
+            if hasattr(self, "optimizer"):
+                raise RuntimeError("optimizer is not built.")
+            if not hasattr(self, "storage"):
+                raise RuntimeError("storage is not built.")
+            
             self._update_optimizer_config()
             self.storage.clear()
+            return
 
+        policy_type = self._check_policy_rebuild(policy=policy)
+        if policy_type is not None:
+            if hasattr(self, "policy"):
+                self.policy.close()
+            self.policy = policy_type(context=self.context)
+
+        policy_config = load_yaml(policy.config)
+        self._update_policy_config(
+            component=component,
+            action_dim=self.action_dim,
+            **policy_config,
+        )
+
+        self.optimizer = torch.optim.Adam(
+            self.policy.parameters(),
+        )
+        self._update_optimizer_config()
+
+        if hasattr(self, "storage"):
+            self.storage.clear()
         else:
-
-            policy_type = self._check_policy_rebuild(policy=policy)
-            if policy_type:
-                self.policy = policy_type(
-                    context=self.context,
-                )
-                self.optimizer = torch.optim.Adam(
-                    self.policy.parameters(),
-                )
-                self.storage = RolloutStorage(
-                    context=self.context
-                )
-
-            policy_config = load_yaml(policy.config)
-            self._update_policy_config(
-                component=component,
-                **policy_config,
-            )
-            self._update_optimizer_config()
-            self.storage.clear()
+            self.storage = RolloutStorage(context=self.context)
 
 
     def _update_policy_config(
@@ -144,11 +157,6 @@ class PPO(OnPolicyAlgorithm):
 
     def _update_optimizer_config(self) -> None:
 
-        if (
-            hasattr(self, "optimizer") is False
-            or self.optimizer is None
-        ):
-            raise RuntimeError("optimizer is not built.")
         for param_group in self.optimizer.param_groups:
             param_group["lr"] = self.learning_rate
 

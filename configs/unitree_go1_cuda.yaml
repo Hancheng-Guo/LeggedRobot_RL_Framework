@@ -30,8 +30,8 @@ component:
       config: "ppo_unitree_go1_stage1"
 
   policy:
-    - type: ""
-      config: "tmp"
+    - type: "actor_critic"
+      config: "actor_critic_unitree_go1_stage1"
 
   environment:
     - type: "vector_env"

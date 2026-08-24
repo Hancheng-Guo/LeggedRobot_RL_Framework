@@ -139,7 +139,10 @@ class OnPolicyRunner(BaseRunner):
                 raise RuntimeError(
                     f"algorithm instance is required."
                 )
-            self.algorithm.config_update(component=component)
+            self.algorithm.config_update(
+                component=component,
+                action_dim=self.environment.action_dim,
+            )
 
         else:
             alg_type_name = component.algorithm.type
@@ -150,12 +153,16 @@ class OnPolicyRunner(BaseRunner):
             
             alg_type = ALG_TYPE_MAP[alg_type_name]
             alg_config = load_yaml(component.algorithm.config)
-            if not isinstance(self.algorithm, alg_type):
+            if (
+                not hasattr(self, "algorithm")
+                or not isinstance(self.algorithm, alg_type)
+            ):
                 self.algorithm = alg_type(
                     context=self.context,
                 )
             self.algorithm.config_update(
                 component=component,
+                action_dim=self.environment.action_dim,
                 **alg_config
             )
 

@@ -42,6 +42,7 @@ class OnPolicyRunner(BaseRunner):
         callback_names: list[str] | None = None,
     ) -> None:
 
+        self._merge_component(component=component)
         update_attributes(
             self,
             max_iterations=max_iterations,
@@ -50,6 +51,56 @@ class OnPolicyRunner(BaseRunner):
         self._build_callbacks(callback_names=callback_names)
         self._build_environment(component=component)
         self._build_algorithm(component=component)
+
+
+    def _merge_component(
+        self,
+        component: Component
+    ) -> None:
+        
+        previous = getattr(self, "_component", None)
+        if previous is None:
+            self._component = component
+            return
+
+        self._component = Component(
+            runner=component.runner or previous.runner,
+            algorithm=component.algorithm or previous.algorithm,
+            policy=component.policy or previous.policy,
+            environment=component.environment or previous.environment,
+            simulator=component.simulator or previous.simulator,
+            task=component.task or previous.task,
+        )
+
+
+    def _create_temporary_environment(
+        self,
+        num_envs: int,
+    ) -> BaseEnv:
+        
+        if num_envs <= 0:
+            raise ValueError("'num_envs' must be greater than 0.")
+        if not hasattr(self, "_component"):
+            raise RuntimeError("Runner component configuration is missing.")
+
+        environment_info = self._component.environment
+        if environment_info is None:
+            raise RuntimeError("Environment configuration is missing.")
+        if environment_info.type not in ENV_TYPE_MAP:
+            raise ValueError(
+                f"Invalid environment type: {environment_info.type!r}."
+            )
+
+        environment_config = load_yaml(environment_info.config)
+        environment_config["num_envs"] = num_envs
+        environment = ENV_TYPE_MAP[environment_info.type](
+            context=self.context,
+        )
+        environment.config_update(
+            component=self._component,
+            **environment_config,
+        )
+        return environment
 
 
     def stage_update(
@@ -364,6 +415,25 @@ class OnPolicyRunner(BaseRunner):
         ):
             raise ValueError("'num_steps' must be a positive integer.")
 
+        original_environment = self.environment
+        temporary_environment = self._create_temporary_environment(
+            num_envs=1,
+        )
+        self.environment = temporary_environment
+
+        try:
+            self._play_steps(num_steps)
+        finally:
+            self.algorithm.reset_policy_state()
+            temporary_environment.close()
+            self.environment = original_environment
+
+
+    def _play_steps(
+        self,
+        num_steps: int
+    ) -> None:
+        
         self.algorithm.set_eval_mode()
         obs = self.environment.reset()
 

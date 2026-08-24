@@ -34,8 +34,7 @@ class ConfigurableActorCritic(ActorCritic):
         actor: Sequence[Mapping[str, Any]],
         critic: Sequence[Mapping[str, Any]],
         distribution: Mapping[str, Any],
-        *args: Any,
-        **kwargs: Any,
+        *args, **kwargs,
     ) -> None:
         
         if action_dim <= 0:

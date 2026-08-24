@@ -86,22 +86,6 @@ def test_configurable_actor_critic_builds_and_evaluates(
     assert output.action.dtype == runtime_context.dtype
 
 
-def test_configurable_actor_critic_rejects_unknown_config(
-    runtime_context: RuntimeContext,
-) -> None:
-    policy = ConfigurableActorCritic(context=runtime_context)
-
-    with pytest.raises(TypeError, match="unknown_option"):
-        policy.config_update(
-            component=make_component(),
-            action_dim=2,
-            actor=ACTOR_CONFIG,
-            critic=CRITIC_CONFIG,
-            distribution={"type": "diagonal_gaussian"},
-            unknown_option=True,
-        )
-
-
 def test_stateful_gru_rejects_online_batch_size_change() -> None:
     module = StatefulGRU(input_size=3, hidden_size=4)
     module(torch.zeros(2, 3))

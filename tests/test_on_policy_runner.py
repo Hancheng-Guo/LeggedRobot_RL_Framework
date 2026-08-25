@@ -11,6 +11,7 @@ from app.utils.context import RuntimeContext
 from envs.base import BaseEnv
 from envs.registry import ENV_TYPE_MAP
 from rl.algorithms.base import OnPolicyAlgorithm, PolicyOutput
+from runners.callbacks.base import BaseCallback
 from runners.on_policy import OnPolicyRunner
 from utils.component import Component, ComponentInfo
 
@@ -59,6 +60,9 @@ class TrackingEnvironment(BaseEnv):
 
 
 class MinimalAlgorithm(OnPolicyAlgorithm):
+    def set_train_mode(self) -> None:
+        return None
+
     def config_update(self, *args: Any, **kwargs: Any) -> None:
         raise NotImplementedError
 
@@ -89,6 +93,31 @@ class MinimalAlgorithm(OnPolicyAlgorithm):
 
     def close(self) -> None:
         return None
+
+
+class StopAtStepStartCallback(BaseCallback):
+    def __init__(self) -> None:
+        self.runner = None
+
+    def _on_step_start(self, *args: Any, **kwargs: Any) -> bool:
+        return False
+
+
+def test_train_stops_before_empty_rollout_update(
+    runtime_context: RuntimeContext,
+) -> None:
+    runner = OnPolicyRunner(context=runtime_context)
+    runner.environment = TrackingEnvironment(runtime_context)
+    runner.environment.num_envs = 1
+    runner.algorithm = MinimalAlgorithm(runtime_context)
+    runner.max_iterations = 1
+    runner.rollout_length = 1
+    callback = StopAtStepStartCallback()
+    runner.callbacks = [callback]
+
+    runner.train()
+
+    assert runner.stop_callback == [callback]
 
 
 def test_play_restores_original_environment_after_failure(

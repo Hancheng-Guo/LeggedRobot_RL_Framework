@@ -292,7 +292,7 @@ class CommandReward(BaseCurriculumTerm):
             buffer.reward_sum.scatter_add_(0, cell_ids, reward[valid])
             buffer.sample_count.scatter_add_(0, cell_ids, torch.ones_like(cell_ids))
 
-            info[f"curriculum/{name}/probabilities"] = self.probabilities(name)
+            info[f"{name}/probabilities"] = self.probabilities(name)
 
         return info
 

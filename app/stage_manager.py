@@ -1,4 +1,5 @@
 import warnings
+from enum import Enum, auto
 from pathlib import Path
 
 from app.utils.context import RuntimeContext
@@ -7,6 +8,12 @@ from runners.base import BaseRunner
 from runners.registry import RUNNER_TYPE_MAP
 from utils.component import create_component, Component
 from utils.config import load_yaml
+
+
+class StageTrainResult(Enum):
+    STAGE_COMPLETED = auto()
+    STOPPED_BY_CALLBACK = auto()
+    MAX_ITERATIONS_REACHED = auto()
 
 
 class StageManager:
@@ -46,15 +53,22 @@ class StageManager:
     def train(self) -> None:
         
         while self.continue_training:
-            stage_complete = self._train_current()
+            train_result = self._train_current()
 
-            if stage_complete:
+            if train_result is StageTrainResult.STAGE_COMPLETED:
                 self.current_stage += 1
+                continue
+
+            if train_result is StageTrainResult.STOPPED_BY_CALLBACK:
+                for callback in self.runner.stop_callback:
+                    warnings.warn(
+                        f"Training was stopped by callback "
+                        f"{type(callback).__name__!r} during stage "
+                        f"{self.current_stage}."
+                    )
             else:
-                warnings.warn(
-                    f"Stage {self.current_stage} timeout."
-                )
-                break
+                warnings.warn(f"Stage {self.current_stage} timeout.")
+            break
 
 
     @property
@@ -66,7 +80,7 @@ class StageManager:
         return False
 
 
-    def _train_current(self) -> bool:
+    def _train_current(self) -> StageTrainResult:
 
         current_component = self._get_current_component()
         current_stage_callback = self._build_current_stage_callback()
@@ -77,7 +91,11 @@ class StageManager:
         )
         self.runner.train()
 
-        return current_stage_callback.stop_training
+        if current_stage_callback.stop_training:
+            return StageTrainResult.STAGE_COMPLETED
+        if self.runner.stop_callback:
+            return StageTrainResult.STOPPED_BY_CALLBACK
+        return StageTrainResult.MAX_ITERATIONS_REACHED
 
 
     def _get_current_component(self) -> Component:
@@ -138,9 +156,9 @@ class StageManager:
                 **runner_config
             )
 
-            if stage_callback is not None:
-                stage_callback.set_runner(self.runner)
-                self.runner.stage_update(stage_callback)
+        if stage_callback is not None:
+            stage_callback.set_runner(self.runner)
+        self.runner.stage_update(stage_callback)
         
 
     def test(self, *args, **kwargs) -> None:

@@ -1,10 +1,13 @@
 from abc import ABC, abstractmethod
 
 from app.utils.context import RuntimeContext
+from runners.callbacks.base import BaseCallback
 from runners.callbacks.stage import StageCallback
 
 
 class BaseRunner(ABC):
+
+    stop_callback: list[BaseCallback]
 
     def __init__(
         self,
@@ -33,7 +36,7 @@ class BaseRunner(ABC):
     @abstractmethod
     def stage_update(
         self,
-        stage_callback: StageCallback
+        stage_callback: StageCallback | None,
     ):
         raise NotImplementedError
 

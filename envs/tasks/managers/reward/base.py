@@ -86,7 +86,7 @@ class RewardManager:
             dtype=self.context.dtype,
             device=self.context.device,
         )
-        weighted_reward_mean: dict[str, torch.Tensor] = {}
+        weighted_reward_info: dict[str, torch.Tensor] = {}
 
         for name, term in self.terms.items():
 
@@ -94,9 +94,11 @@ class RewardManager:
             weighted_reward = reward * term.weight
             self.term_rewards[name].copy_(weighted_reward)
             weighted_reward_sum += weighted_reward
-            weighted_reward_mean[name] = weighted_reward.mean()
+            weighted_reward_info[f"reward/{name}"] = weighted_reward.mean()
+
+        weighted_reward_info["reward"] = weighted_reward_sum.mean()
             
-        return weighted_reward_sum, weighted_reward_mean
+        return weighted_reward_sum, weighted_reward_info
 
 
     def get_term_reward(

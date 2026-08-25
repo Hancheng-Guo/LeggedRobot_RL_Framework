@@ -4,6 +4,7 @@ import numpy as np
 
 from app.utils.context import RuntimeContext
 from runners.base import BaseRunner
+from runners.callbacks.base import BaseCallback
 from runners.callbacks.stage import StageCallback
 from runners.callbacks.registry import CALLBACK_TYPE_MAP
 from runners.utils.frames import save_frames_to_video
@@ -31,7 +32,8 @@ class OnPolicyRunner(BaseRunner):
 
         self.max_iterations: int
         self.rollout_length: int
-        self.callbacks: list = []
+        self.callbacks: list[BaseCallback] = []
+        self.stop_callback: list[BaseCallback] = []
 
 
     def config_update(
@@ -105,14 +107,17 @@ class OnPolicyRunner(BaseRunner):
 
     def stage_update(
         self,
-        stage_callback: StageCallback
-    ):
-    
-        for callback in self.callbacks:
-            if isinstance(callback, StageCallback):
-                self.callbacks.remove(callback)
+        stage_callback: StageCallback | None,
+    ) -> None:
+        
+        self.callbacks = [
+            callback
+            for callback in self.callbacks
+            if not isinstance(callback, StageCallback)
+        ]
 
-        self.callbacks.append(stage_callback)
+        if stage_callback is not None:
+            self.callbacks.append(stage_callback)
 
 
     def _build_callbacks(
@@ -222,7 +227,9 @@ class OnPolicyRunner(BaseRunner):
             )
 
 
-    def _run_callbacks(self, hook: str, *args, **kwargs) -> None:
+    def _run_callbacks(self, hook: str, *args, **kwargs) -> bool:
+
+        should_continue = True
 
         for callback in self.callbacks:
             method = getattr(callback, hook, None)
@@ -230,7 +237,11 @@ class OnPolicyRunner(BaseRunner):
             if method is None:
                 continue
 
-            method(*args, **kwargs)
+            if method(*args, **kwargs) is False:
+                self.stop_callback.append(callback)
+                should_continue = False
+
+        return should_continue
         
 
     def train(self) -> None:
@@ -249,16 +260,25 @@ class OnPolicyRunner(BaseRunner):
 
         self.algorithm.set_train_mode()
         obs = self.environment.reset()
-        self._run_callbacks("_on_train_start")
+        self.stop_callback.clear()
+        
+        if not self._run_callbacks("_on_train_start"):
+            self._run_callbacks("_on_train_end")
+            return
 
         for iteration in range(self.max_iterations):
 
             self.current_iteration = iteration
-            self._run_callbacks("_on_iteration_start")
+            if not self._run_callbacks("_on_iteration_start"):
+                break
 
+            callback_step_break = False
+            collected_steps = 0
             for _ in range(self.rollout_length):
 
-                self._run_callbacks("_on_step_start")
+                if not self._run_callbacks("_on_step_start"):
+                    callback_step_break = True
+                    break
                 
                 with torch.no_grad():
                     policy_output = self.algorithm.act(
@@ -286,8 +306,14 @@ class OnPolicyRunner(BaseRunner):
                 )
 
                 obs = next_obs
+                collected_steps += 1
 
-                self._run_callbacks("_on_step_end")
+                if not self._run_callbacks("_on_step_end", info=info):
+                    callback_step_break = True
+                    break
+
+            if collected_steps == 0:
+                break
 
             # Bootstrap the final observation and compute
             # returns / advantages inside the algorithm.
@@ -296,7 +322,11 @@ class OnPolicyRunner(BaseRunner):
 
             update_info = self.algorithm.update()
 
-            self._run_callbacks("_on_iteration_end", info=update_info)
+            if not self._run_callbacks("_on_iteration_end", info=update_info):
+                break
+
+            if callback_step_break:
+                break
 
         self._run_callbacks("_on_train_end")
 
@@ -322,7 +352,9 @@ class OnPolicyRunner(BaseRunner):
         self.algorithm.set_eval_mode()
         obs = self.environment.reset()
 
-        self._run_callbacks("_on_test_start")
+        if not self._run_callbacks("_on_test_start"):
+            self._run_callbacks("_on_test_end")
+            return
 
         episode_rewards = torch.zeros(
             self.environment.num_envs,
@@ -339,7 +371,8 @@ class OnPolicyRunner(BaseRunner):
 
         while len(completed_rewards) < num_episodes:
 
-            self._run_callbacks("_on_step_start")
+            if not self._run_callbacks("_on_step_start"):
+                break
 
             with torch.no_grad():
                 policy_output = self.algorithm.act(
@@ -383,7 +416,8 @@ class OnPolicyRunner(BaseRunner):
 
             obs = next_obs
 
-            self._run_callbacks("_on_step_end", info=info)
+            if not self._run_callbacks("_on_step_end", info=info):
+                break
 
         test_info = {
             "mean_reward": sum(completed_rewards) / len(completed_rewards),
@@ -437,13 +471,16 @@ class OnPolicyRunner(BaseRunner):
         self.algorithm.set_eval_mode()
         obs = self.environment.reset()
 
-        self._run_callbacks("_on_play_start")
+        if not self._run_callbacks("_on_play_start"):
+            self._run_callbacks("_on_play_end")
+            return
 
         frames: list[np.ndarray] = []
         step = 0
         while step < num_steps:
 
-            self._run_callbacks("_on_step_start")
+            if not self._run_callbacks("_on_step_start"):
+                break
 
             with torch.no_grad():
                 policy_output = self.algorithm.act(
@@ -472,7 +509,8 @@ class OnPolicyRunner(BaseRunner):
 
             obs = next_obs
 
-            self._run_callbacks("_on_step_end", info=info)
+            if not self._run_callbacks("_on_step_end", info=info):
+                break
             step += 1
 
         if len(frames):

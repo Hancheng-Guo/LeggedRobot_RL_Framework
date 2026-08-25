@@ -32,7 +32,11 @@ def test_reward_manager_computes_weighted_reward_and_reuses_buffer(
     torch.testing.assert_close(reward, expected)
     torch.testing.assert_close(buffer, expected)
     assert manager.get_term_reward("action_diff_l2") is buffer
-    torch.testing.assert_close(means["action_diff_l2"], expected.mean())
+    torch.testing.assert_close(
+        means["reward/action_diff_l2"],
+        expected.mean(),
+    )
+    torch.testing.assert_close(means["reward"], expected.mean())
 
 
 def test_reward_manager_partial_reset(
@@ -55,4 +59,3 @@ def test_reward_manager_partial_reset(
         previous,
     )
     assert manager.get_term_reward("action_diff_l2")[1] == 0.0
-

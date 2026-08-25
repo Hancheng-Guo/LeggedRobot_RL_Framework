@@ -209,6 +209,10 @@ class VectorEnv(BaseEnv):
         self.current_episode_steps += 1
 
         state = self.simulator.get_state()
+        state_info = {
+            f"state/{name}": value
+            for name, value in state.items()
+        }
         task_context = self.task.build_task_context(
             state=state,
             episode_step=self.current_episode_steps,
@@ -245,7 +249,7 @@ class VectorEnv(BaseEnv):
             | obs_info
             | reward_info
             | terminated_info
-            | state
+            | state_info
         )
 
         return (

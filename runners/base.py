@@ -1,4 +1,6 @@
 from abc import ABC, abstractmethod
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 from app.utils.context import RuntimeContext
 from runners.callbacks.base import BaseCallback
@@ -28,7 +30,7 @@ class BaseRunner(ABC):
         self,
         max_iterations: int | None = None,
         rollout_length: int | None = None,
-        callback_names: list[str] | None = None,
+        callbacks: Sequence[str | Mapping[str, Any]] | None = None,
         *args, **kwargs
     ) -> None:
         raise NotImplementedError

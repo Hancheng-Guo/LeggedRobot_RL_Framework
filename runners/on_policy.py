@@ -1,6 +1,8 @@
 import warnings
 import torch
 import numpy as np
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 from app.utils.context import RuntimeContext
 from runners.base import BaseRunner
@@ -41,7 +43,7 @@ class OnPolicyRunner(BaseRunner):
         component: Component, 
         max_iterations: int | None = None,
         rollout_length: int | None = None,
-        callback_names: list[str] | None = None,
+        callbacks: Sequence[str | Mapping[str, Any]] | None = None,
     ) -> None:
 
         self._merge_component(component=component)
@@ -50,7 +52,7 @@ class OnPolicyRunner(BaseRunner):
             max_iterations=max_iterations,
             rollout_length=rollout_length,
         )
-        self._build_callbacks(callback_names=callback_names)
+        self._build_callbacks(callbacks=callbacks)
         self._build_environment(component=component)
         self._build_algorithm(component=component)
 
@@ -122,13 +124,50 @@ class OnPolicyRunner(BaseRunner):
 
     def _build_callbacks(
         self,
-        callback_names: list[str] | None,
+        callbacks: Sequence[str | Mapping[str, Any]] | None,
     ) -> None:
 
-        if callback_names is not None:
-            self.callbacks = []
+        self.callbacks = []
 
-            for callback_name in callback_names:
+        if callbacks is not None:
+
+            for callback_entry in callbacks:
+
+                if isinstance(callback_entry, str):
+                    callback_name = callback_entry
+                    callback_config: dict[str, Any] = {}
+
+                elif isinstance(callback_entry, Mapping):
+
+                    if len(callback_entry) != 1:
+                        raise ValueError(
+                            "Each callback config must contain exactly one "
+                            "callback name."
+                        )
+                    
+                    callback_name, raw_config = next(
+                        iter(callback_entry.items())
+                    )
+                    if not isinstance(callback_name, str) or not callback_name:
+                        raise ValueError(
+                            "Callback name must be a non-empty string."
+                        )
+                    
+                    if raw_config is None:
+                        callback_config = {}
+                    elif isinstance(raw_config, Mapping):
+                        callback_config = dict(raw_config)
+                    else:
+                        raise TypeError(
+                            f"Callback parameters for {callback_name!r} "
+                            "must be a mapping."
+                        )
+                    
+                else:
+                    raise TypeError(
+                        "Each callback must be a name or configuration mapping."
+                    )
+
                 if callback_name not in CALLBACK_TYPE_MAP:
                     warnings.warn(
                         f"Unknown callback type: '{callback_name}'. "
@@ -140,6 +179,7 @@ class OnPolicyRunner(BaseRunner):
                             max_iterations=self.max_iterations,
                             rollout_length=self.rollout_length,
                             context=self.context,
+                            **callback_config,
                         )
                     )
 
@@ -321,14 +361,24 @@ class OnPolicyRunner(BaseRunner):
                 self.algorithm.compute_returns(last_obs=obs)
 
             update_info = self.algorithm.update()
+            runner_info = self._get_info()
+            info = update_info | runner_info
 
-            if not self._run_callbacks("_on_iteration_end", info=update_info):
+            if not self._run_callbacks("_on_iteration_end", info=info):
                 break
 
             if callback_step_break:
                 break
 
         self._run_callbacks("_on_train_end")
+
+
+    def _get_info(self) -> dict:
+
+        info = {
+            "runner/current_iter": self.current_iteration
+        }
+        return info
 
 
     def test(

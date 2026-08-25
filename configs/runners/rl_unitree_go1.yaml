@@ -1,8 +1,8 @@
 max_iterations: 2000
 rollout_length: 64
-callback_names:
-  # - progress_bar
-  # - checkpoint
-  # - tensorboard
-  # - early_stopping
-  # - logging
+callbacks:
+  - progress_bar: {}
+  - checkpoint: {save_interval: 100}
+  - tensorboard: {}
+  - early_stopping: {monitor: "*/loss", mode: min, max_no_improve_iters: 20, min_delta: 0.0}
+  - logging: {}

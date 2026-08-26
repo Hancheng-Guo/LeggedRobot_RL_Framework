@@ -9,10 +9,12 @@ from runners.callbacks.checkpoint import CheckpointCallback
 from runners.callbacks.early_stopping import EarlystoppingCallback
 from runners.callbacks.logging import LoggingCallback
 from runners.callbacks.progress_bar import ProgressBarCallback
+from runners.callbacks import tensorboard as tensorboard_module
 from runners.callbacks.tensorboard import TensorboardCallback
 from runners.base import BaseRunner
 from runners.on_policy import OnPolicyRunner
 from app.utils.context import RuntimeContext
+from utils.logging import get_logger
 
 
 class DummyAlgorithm:
@@ -28,8 +30,11 @@ def make_runner() -> BaseRunner:
     ))
 
 
-def make_context(save_dir: Path) -> SimpleNamespace:
-    return SimpleNamespace(save_dir=save_dir)
+def make_context(save_dir: Path) -> RuntimeContext:
+    return cast(
+        RuntimeContext,
+        SimpleNamespace(save_dir=save_dir),
+    )
 
 
 def test_early_stopping_stops_at_no_improvement_limit() -> None:
@@ -139,6 +144,7 @@ def test_logging_callback_writes_scalar_metrics(tmp_path: Path) -> None:
     )
     callback._on_train_start()
     callback._on_iteration_end({
+        "runner/current_iter": 0,
         "loss": torch.tensor(1.25),
         "structured": torch.ones(2),
     })
@@ -149,10 +155,29 @@ def test_logging_callback_writes_scalar_metrics(tmp_path: Path) -> None:
         encoding="utf-8"
     )
     assert "Iteration 1" in content
-    assert "Training started.\n\n" in content
-    assert "loss :         1.25" in content
+    assert " | INFO | Training started.\n" in content
+    assert "\tloss" in content
+    assert ":         1.25" in content
+    assert "runner/current_iter" in content
     assert "structured" not in content
-    assert "loss :         1.25\n\n" in content
+    assert "runner/current_iter :            0\n" in content
+
+
+def test_global_logger_uses_callback_handlers(
+    tmp_path: Path,
+) -> None:
+    callback = LoggingCallback(
+        runner=make_runner(),
+        context=make_context(tmp_path),
+        console=False,
+    )
+    get_logger("tests").info("Message from another component.")
+    callback._on_close()
+
+    content = (tmp_path / "logs" / "training.log").read_text(
+        encoding="utf-8"
+    )
+    assert " | INFO | Message from another component." in content
 
 
 def test_tensorboard_callback_writes_event_file(tmp_path: Path) -> None:
@@ -167,6 +192,119 @@ def test_tensorboard_callback_writes_event_file(tmp_path: Path) -> None:
     event_files = list((tmp_path / "tensorboard").glob("events.out.*"))
     assert event_files
     assert event_files[0].stat().st_size > 0
+
+
+def test_tensorboard_reduces_configured_vector_metrics(
+    tmp_path: Path,
+) -> None:
+    class RecordingWriter:
+        def __init__(self) -> None:
+            self.scalars: dict[str, float] = {}
+            self.histograms: list[str] = []
+
+        def add_scalar(
+            self,
+            name: str,
+            value: float,
+            step: int,
+        ) -> None:
+            self.scalars[name] = float(value)
+
+        def add_histogram(
+            self,
+            name: str,
+            value: torch.Tensor,
+            step: int,
+        ) -> None:
+            self.histograms.append(name)
+
+        def close(self) -> None:
+            pass
+
+    callback = TensorboardCallback(
+        runner=make_runner(),
+        context=make_context(tmp_path),
+        histogram_log_interval=2,
+        step_metrics={
+            "reward": ["value"],
+            "episode_length": ["value"],
+            "termination/*": ["mean"],
+            "action/action": ["mean", "std", "min", "max", "histogram"],
+        },
+    )
+    callback.writer.close()
+    writer = RecordingWriter()
+    callback.writer = cast(Any, writer)
+    info = {
+        "reward": 1.5,
+        "episode_length": torch.tensor(12.0),
+        "ignored_scalar": 2.5,
+        "termination/fall": torch.tensor([True, False]),
+        "action/action": torch.tensor([[-1.0, 1.0], [3.0, 5.0]]),
+        "observation/policy": torch.ones(2, 4),
+    }
+
+    callback._on_step_end(info)
+    assert writer.scalars["reward"] == pytest.approx(1.5)
+    assert writer.scalars["episode_length"] == pytest.approx(12.0)
+    assert "ignored_scalar" not in writer.scalars
+    assert writer.scalars["termination/fall/mean"] == pytest.approx(0.5)
+    assert writer.scalars["action/action/mean"] == pytest.approx(2.0)
+    assert writer.scalars["action/action/std"] == pytest.approx(5 ** 0.5)
+    assert writer.scalars["action/action/min"] == pytest.approx(-1.0)
+    assert writer.scalars["action/action/max"] == pytest.approx(5.0)
+    assert not any(name.startswith("observation/") for name in writer.scalars)
+    assert writer.histograms == []
+
+    callback._on_step_end(info)
+    assert writer.histograms == ["action/action/distribution"]
+    callback._on_close()
+
+
+def test_tensorboard_starts_server_and_logs_returned_url(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeTensorBoard:
+        configured_argv: tuple[str, ...] = ()
+
+        def configure(self, argv: tuple[str, ...]) -> None:
+            FakeTensorBoard.configured_argv = argv
+
+        def launch(self) -> str:
+            return "http://127.0.0.1:43123/"
+
+    monkeypatch.setattr(
+        tensorboard_module,
+        "TensorBoard",
+        FakeTensorBoard,
+    )
+    runner = make_runner()
+    tensorboard = TensorboardCallback(
+        runner=runner,
+        context=make_context(tmp_path),
+    )
+    logger = LoggingCallback(
+        runner=runner,
+        context=make_context(tmp_path),
+        console=False,
+    )
+    runner.callbacks = [tensorboard, logger]
+
+    tensorboard._on_train_start()
+    logger._on_close()
+    tensorboard._on_close()
+
+    content = (tmp_path / "logs" / "training.log").read_text(
+        encoding="utf-8"
+    )
+    assert f"TensorBoard dir: {tensorboard.tensorboard_log_dir}" in content
+    assert "TensorBoard url: http://127.0.0.1:43123/" in content
+    assert FakeTensorBoard.configured_argv == (
+        "tensorboard",
+        "--logdir",
+        str(tensorboard.tensorboard_log_dir),
+    )
 
 
 def test_checkpoint_callback_saves_policy_and_optimizer(

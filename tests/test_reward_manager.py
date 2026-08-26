@@ -26,17 +26,17 @@ def test_reward_manager_computes_weighted_reward_and_reuses_buffer(
     )
     buffer = manager.get_term_reward("action_diff_l2")
 
-    reward, means = manager.compute(make_reward_context())
+    reward, info = manager.compute(make_reward_context())
 
     expected = torch.tensor([5.0, 2.0])
     torch.testing.assert_close(reward, expected)
     torch.testing.assert_close(buffer, expected)
     assert manager.get_term_reward("action_diff_l2") is buffer
     torch.testing.assert_close(
-        means["reward/action_diff_l2"],
-        expected.mean(),
+        info["reward/action_diff_l2"],
+        expected,
     )
-    torch.testing.assert_close(means["reward"], expected.mean())
+    torch.testing.assert_close(info["reward"], expected.mean())
 
 
 def test_reward_manager_partial_reset(

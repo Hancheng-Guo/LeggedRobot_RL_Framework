@@ -1,4 +1,3 @@
-import warnings
 from enum import Enum, auto
 from pathlib import Path
 
@@ -8,6 +7,10 @@ from runners.base import BaseRunner
 from runners.registry import RUNNER_TYPE_MAP
 from utils.component import create_component, Component
 from utils.config import load_yaml
+from utils.logging import get_logger
+
+
+logger = get_logger(__name__)
 
 
 class StageTrainResult(Enum):
@@ -61,13 +64,13 @@ class StageManager:
 
             if train_result is StageTrainResult.STOPPED_BY_CALLBACK:
                 for callback in self.runner.stop_callback:
-                    warnings.warn(
+                    logger.warning(
                         f"Training was stopped by callback "
                         f"{type(callback).__name__!r} during stage "
                         f"{self.current_stage}."
                     )
             else:
-                warnings.warn(f"Stage {self.current_stage} timeout.")
+                logger.warning(f"Stage {self.current_stage} timeout.")
             break
 
 
@@ -164,7 +167,7 @@ class StageManager:
     def test(self, *args, **kwargs) -> None:
     
         if self.continue_training:
-            warnings.warn("Model is not trained completely.")
+            logger.warning("Model is not trained completely.")
         current_component = self._get_current_component()
         self._build_runner(
             component=current_component
@@ -175,7 +178,7 @@ class StageManager:
     def play(self, *args, **kwargs) -> None:
 
         if self.continue_training:
-            warnings.warn("Model is not trained completely.")
+            logger.warning("Model is not trained completely.")
         current_component = self._get_current_component()
         self._build_runner(
             component=current_component

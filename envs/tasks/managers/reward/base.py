@@ -94,7 +94,7 @@ class RewardManager:
             weighted_reward = reward * term.weight
             self.term_rewards[name].copy_(weighted_reward)
             weighted_reward_sum += weighted_reward
-            weighted_reward_info[f"reward/{name}"] = weighted_reward.mean()
+            weighted_reward_info[f"reward/{name}"] = weighted_reward
 
         weighted_reward_info["reward"] = weighted_reward_sum.mean()
             

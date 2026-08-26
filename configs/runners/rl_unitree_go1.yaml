@@ -1,8 +1,19 @@
 max_iterations: 2000
 rollout_length: 64
 callbacks:
-  - progress_bar: {}
-  - checkpoint: {save_interval: 100}
-  - tensorboard: {}
-  - early_stopping: {monitor: "*/loss", mode: min, max_no_improve_iters: 20, min_delta: 0.0}
-  - logging: {}
+  - progress_bar
+  - checkpoint:
+      save_interval: 100
+  - logging
+  - tensorboard:
+      histogram_log_interval: 1
+      step_metrics:
+        "reward": [value]
+        "reward/*": [mean]
+        "termination/*": [mean]
+        "command/*": [histogram]
+  - early_stopping: 
+      monitor: "*/loss"
+      mode: min
+      max_no_improve_iters: 20
+      min_delta: 0.0

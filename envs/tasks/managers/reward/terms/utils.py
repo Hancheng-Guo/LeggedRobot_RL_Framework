@@ -1,0 +1,37 @@
+import torch
+from collections.abc import Sequence
+
+from envs.simulators.utils.context import ModelContext
+
+
+def geom_ids_from_names(
+    model_context: ModelContext,
+    names: Sequence[str],
+    fallback_ids: torch.Tensor | None = None,
+) -> torch.Tensor:
+    
+    if not names:
+        if fallback_ids is None:
+            raise ValueError("Geom names must be provided.")
+        if fallback_ids.numel() == 0:
+            raise ValueError("No fallback geom IDs are available.")
+        return fallback_ids
+
+    name_to_id = {
+        name: geom_id
+        for geom_id, name in enumerate(model_context.geom_names)
+        if name is not None
+    }
+    unknown_names = set(names) - name_to_id.keys()
+    if unknown_names:
+        raise ValueError(f"Unknown geom name(s): {sorted(unknown_names)}.")
+
+    return torch.tensor(
+        [name_to_id[name] for name in names],
+        dtype=torch.long,
+        device=(
+            fallback_ids.device
+            if fallback_ids is not None
+            else model_context.geom_body_ids.device
+        ),
+    )

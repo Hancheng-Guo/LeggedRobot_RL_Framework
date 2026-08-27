@@ -18,6 +18,7 @@ def make_task_context() -> TaskContext:
         action=torch.zeros(2, 2),
         last_action=torch.zeros(2, 2),
         episode_step=torch.zeros(2, dtype=torch.long),
+        step_dt=0.02,
     )
 
 
@@ -89,7 +90,6 @@ def test_body_contact_terminates_for_either_contact_order(
         terms={
             "body_contact": {
                 "body_names": ["base", "thigh"],
-                "ground_geom_name": "floor",
             },
         },
     )
@@ -119,7 +119,6 @@ def test_body_contact_ignores_other_contacts(
         terms={
             "body_contact": {
                 "body_names": ["base"],
-                "ground_geom_name": "floor",
             },
         },
     )
@@ -146,7 +145,6 @@ def test_body_contact_rejects_unknown_body_name(
             terms={
                 "body_contact": {
                     "body_names": ["missing_body"],
-                    "ground_geom_name": "floor",
                 },
             },
         )

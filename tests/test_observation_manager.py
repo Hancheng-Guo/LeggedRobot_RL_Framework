@@ -29,6 +29,7 @@ def make_task_context(num_envs: int = 2) -> TaskContext:
         action=torch.tensor([[0.6, -0.7]]).repeat(num_envs, 1),
         last_action=torch.zeros(num_envs, 2),
         episode_step=torch.arange(num_envs),
+        step_dt=0.02,
     )
 
 

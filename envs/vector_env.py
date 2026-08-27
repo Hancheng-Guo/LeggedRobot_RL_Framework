@@ -146,6 +146,7 @@ class VectorEnv(BaseEnv):
         task_context = self.task.build_task_context(
             state=state,
             episode_step=self.current_episode_steps,
+            step_dt=self.simulator.control_dt,
         )
         obs, _ = self.task.compute_observation(task_context)
 
@@ -177,6 +178,7 @@ class VectorEnv(BaseEnv):
         task_context = self.task.build_task_context(
             state=state,
             episode_step=self.current_episode_steps[env_ids],
+            step_dt=self.simulator.control_dt,
             env_ids=env_ids,
         )
         reset_obs, _ = self.task.compute_observation(
@@ -216,6 +218,7 @@ class VectorEnv(BaseEnv):
         task_context = self.task.build_task_context(
             state=state,
             episode_step=self.current_episode_steps,
+            step_dt=self.simulator.control_dt,
         ) # old_command, action, last_action
 
         reward, reward_info = self.task.compute_reward(task_context)
@@ -232,6 +235,7 @@ class VectorEnv(BaseEnv):
         next_task_context = self.task.build_task_context(
             state=state,
             episode_step=self.current_episode_steps,
+            step_dt=self.simulator.control_dt,
         ) # new_command, action, last_action
 
         transition_next_obs, obs_info = self.task.compute_observation(next_task_context)

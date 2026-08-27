@@ -2,3 +2,5 @@ model_path: .\assets\unitree_go1\MJCF\scene.xml
 sim_dt: 0.002
 frame_skip: 10
 render_mode: human
+geom_foot_names: [FR, FL, RR, RL]
+geom_floor_names: [floor]

@@ -64,6 +64,7 @@ class RewardManager:
             )
 
         self.terms[name] = cls(
+            num_envs=self.num_envs,
             weight=weight,
             context=self.context,
             model_context=self.model_context,

@@ -10,6 +10,7 @@ class TaskContext:
     action: torch.Tensor
     last_action: torch.Tensor
     episode_step: torch.Tensor
+    step_dt: float
 
 
 @dataclass

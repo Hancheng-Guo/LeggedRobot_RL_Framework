@@ -13,42 +13,21 @@ class BodyContact(BaseTerminationTerm):
         self,
         model_context: ModelContext,
         body_names: list[str],
-        ground_geom_name: str,
-        *args,
-        **kwargs,
+        *args, **kwargs,
     ) -> None:
         
         super().__init__(*args, **kwargs)
 
-        self.ground_geom_id = self._extract_ground_geom_id(
-            model_context,
-            ground_geom_name,
-        )
+        if model_context.geom_floor_ids.numel() == 0:
+            raise ValueError(
+                "BodyContact requires 'model_context.geom_floor_ids'."
+            )
+        self.geom_floor_ids = model_context.geom_floor_ids
 
-        self.geom_ids = self._extract_geom_ids(
+        self.geom_body_ids = self._extract_geom_ids(
             model_context,
             body_names,
         )
-
-
-    def _extract_ground_geom_id(
-        self,
-        model_context: ModelContext,
-        ground_geom_name: str,
-    ) -> int:
-
-        # get geom IDs from names
-        geom_name_to_id = {
-            name: geom_id
-            for geom_id, name in enumerate(model_context.geom_names)
-            if name is not None
-        }
-        if ground_geom_name not in geom_name_to_id:
-            raise ValueError(
-                f"Unknown ground geom name: '{ground_geom_name}'."
-            )
-
-        return geom_name_to_id[ground_geom_name]
 
 
     def _extract_geom_ids(
@@ -106,10 +85,10 @@ class BodyContact(BaseTerminationTerm):
 
         geom1 = contact_geom_ids[..., 0]
         geom2 = contact_geom_ids[..., 1]
-        target_is_geom1 = torch.isin(geom1, self.geom_ids)
-        target_is_geom2 = torch.isin(geom2, self.geom_ids)
-        ground_is_geom1 = geom1 == self.ground_geom_id
-        ground_is_geom2 = geom2 == self.ground_geom_id
+        target_is_geom1 = torch.isin(geom1, self.geom_body_ids)
+        target_is_geom2 = torch.isin(geom2, self.geom_body_ids)
+        ground_is_geom1 = torch.isin(geom1, self.geom_floor_ids)
+        ground_is_geom2 = torch.isin(geom2, self.geom_floor_ids)
 
         return (
             (target_is_geom1 & ground_is_geom2)

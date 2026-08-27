@@ -143,6 +143,7 @@ class BaseTaskLogic(ABC):
         self,
         state: dict[str, torch.Tensor],
         episode_step: torch.Tensor,
+        step_dt: float,
         env_ids: torch.Tensor | None = None,
     ) -> TaskContext:
     
@@ -167,6 +168,7 @@ class BaseTaskLogic(ABC):
             action=action,
             last_action=last_action,
             episode_step=episode_step,
+            step_dt=step_dt,
         )
 
     

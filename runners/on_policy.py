@@ -192,7 +192,6 @@ class OnPolicyRunner(BaseRunner):
         if component.environment is None:
             if (
                 hasattr(self, "environment") is False
-                or self.environment is None
             ):
                 raise RuntimeError(
                     f"environment instance is required."
@@ -226,10 +225,12 @@ class OnPolicyRunner(BaseRunner):
         component: Component
     ) -> None:
         
+        if not hasattr(self, "environment"):
+            raise RuntimeError("environment is not instantiated.")
+        
         if component.algorithm is None:
             if (
                 hasattr(self, "algorithm") is False
-                or self.algorithm is None
             ):
                 raise RuntimeError(
                     f"algorithm instance is required."
@@ -286,10 +287,10 @@ class OnPolicyRunner(BaseRunner):
 
     def train(self) -> None:
 
-        if self.environment is None:
+        if not hasattr(self, "environment"):
             raise RuntimeError("environment is not instantiated.")
 
-        if self.algorithm is None:
+        if not hasattr(self, "algorithm"):
             raise RuntimeError("algorithm is not instantiated.")
 
         if self.max_iterations is None:
@@ -393,10 +394,10 @@ class OnPolicyRunner(BaseRunner):
         ):
             raise ValueError("'num_episodes' must be a positive integer.")
 
-        if self.environment is None:
+        if not hasattr(self, "environment"):
             raise RuntimeError("environment is not instantiated.")
 
-        if self.algorithm is None:
+        if not hasattr(self, "algorithm"):
             raise RuntimeError("algorithm is not instantiated.")
 
         self.algorithm.set_eval_mode()
@@ -486,10 +487,10 @@ class OnPolicyRunner(BaseRunner):
         self,
         num_steps: int = 5000
     ) -> None:
-        if self.environment is None:
+        if not hasattr(self, "environment"):
             raise RuntimeError("environment is not instantiated.")
 
-        if self.algorithm is None:
+        if not hasattr(self, "algorithm"):
             raise RuntimeError("algorithm is not instantiated.")
 
         if (
@@ -517,6 +518,11 @@ class OnPolicyRunner(BaseRunner):
         self,
         num_steps: int
     ) -> None:
+        if not hasattr(self, "environment"):
+            raise RuntimeError("environment is not instantiated.")
+
+        if not hasattr(self, "algorithm"):
+            raise RuntimeError("algorithm is not instantiated.")
         
         self.algorithm.set_eval_mode()
         obs = self.environment.reset()

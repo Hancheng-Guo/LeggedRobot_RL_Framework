@@ -27,6 +27,8 @@ class MujocoSimulator(BaseSimulator):
         self.sim_dt: float
         self.frame_skip: int
         self.render_mode: str | None = None
+        self.geom_foot_names: tuple[str, ...] = ()
+        self.geom_floor_names: tuple[str, ...] = ()
 
         self.models: list[mujoco.MjModel] = []  # pyright: ignore[reportAttributeAccessIssue]
         self.datas: list[mujoco.MjData] = []    # pyright: ignore[reportAttributeAccessIssue]
@@ -50,6 +52,8 @@ class MujocoSimulator(BaseSimulator):
         sim_dt: float | None = None,
         frame_skip: int | None = None,
         render_mode: str | None = None,
+        geom_foot_names: list[str] | tuple[str, ...] | None = None,
+        geom_floor_names: list[str] | tuple[str, ...] | None = None,
     ) -> None:
 
         if num_envs is not None and num_envs <= 0:
@@ -63,6 +67,8 @@ class MujocoSimulator(BaseSimulator):
             model_path=None if model_path is None else Path(model_path),
             sim_dt=sim_dt,
             frame_skip=frame_skip,
+            geom_foot_names=tuple(geom_foot_names or ()),
+            geom_floor_names=tuple(geom_floor_names or ()),
         )
 
         if render_mode in self._RENDER_TYPE_MAP:
@@ -92,28 +98,151 @@ class MujocoSimulator(BaseSimulator):
     def _build_model_context(self) -> None:
 
         model = self.models[0]
+        
+        body_names = self._object_names(
+            model,
+            mujoco.mjtObj.mjOBJ_BODY,  # pyright: ignore[reportAttributeAccessIssue]
+            model.nbody,
+        )
+        geom_names = self._object_names(
+            model,
+            mujoco.mjtObj.mjOBJ_GEOM,  # pyright: ignore[reportAttributeAccessIssue]
+            model.ngeom,
+        )
+        base_id, base_qpos_adr, base_qvel_adr = (
+            self._find_base_joint_info(model)
+        )
+        actuator_joint_ids = self._find_actuated_joint_ids(model)
+        joint_pos_limits = self._joint_pos_limits(
+            model,
+            actuator_joint_ids,
+        )
 
-        def names(object_type, count: int) -> tuple[str | None, ...]:
-            return tuple(
-                mujoco.mj_id2name(model, object_type, index)  # pyright: ignore[reportAttributeAccessIssue]
-                for index in range(count)
-            )
+        self.model_context = ModelContext(
 
-        def tensors(object_type: np.ndarray) -> torch.Tensor:
-            return torch.as_tensor(
-                object_type,
-                dtype=self.context.dtype,
-                device=self.context.device,
-            )
+            nq = model.nq,
+            nv = model.nv,
+            nu = model.nu,
+            na = model.na,
 
-        def indices(object_indices: np.ndarray) -> torch.Tensor:
-            return torch.as_tensor(
-                object_indices,
-                dtype=torch.long,
-                device=self.context.device,
-            )
+            body_names=body_names,
+            gravity=self._tensor(model.opt.gravity),
 
-        # find the free joint in the model, which represents the base of the robot
+            # base_names=names(mujoco.mjtObj.mjOBJ_BODY, model.nbody),
+            base_id=int(model.jnt_bodyid[base_id]),
+            base_pos_qpos_ids=self._indices(
+                np.arange(base_qpos_adr, base_qpos_adr + 3)
+            ),
+            base_quat_qpos_ids=self._indices(
+                np.arange(base_qpos_adr + 3, base_qpos_adr + 7)
+            ),
+            base_lin_vel_qvel_ids=self._indices(
+                np.arange(base_qvel_adr, base_qvel_adr + 3)
+            ),
+            base_ang_vel_qvel_ids=self._indices(
+                np.arange(base_qvel_adr + 3, base_qvel_adr + 6)
+            ),
+            
+            # joint_names=names(mujoco.mjtObj.mjOBJ_JOINT, model.njnt),
+            joint_qpos_ids=self._indices(
+                model.jnt_qposadr[actuator_joint_ids]
+            ),
+            joint_qvel_ids=self._indices(
+                model.jnt_dofadr[actuator_joint_ids]
+            ),
+            joint_pos_limits=self._tensor(joint_pos_limits),
+
+            # actuator_names=names(mujoco.mjtObj.mjOBJ_ACTUATOR, model.nu),
+            actuator_ctrl_range = self._tensor(model.actuator_ctrlrange),
+
+            geom_names=geom_names,
+            geom_body_ids=self._indices(model.geom_bodyid),
+            geom_foot_ids=self._geom_ids_by_name(
+                geom_names,
+                requested_names=self.geom_foot_names,
+                default_suffix="foot",
+            ),
+            geom_floor_ids=self._geom_ids_by_name(
+                geom_names,
+                requested_names=self.geom_floor_names,
+            ),
+        )
+
+
+    def _object_names(
+        self,
+        model,
+        object_type,
+        count: int,
+    ) -> tuple[str | None, ...]:
+        
+        return tuple(
+            mujoco.mj_id2name(model, object_type, index)  # pyright: ignore[reportAttributeAccessIssue]
+            for index in range(count)
+        )
+
+
+    def _tensor(
+        self,
+        value: np.ndarray,
+    ) -> torch.Tensor:
+        
+        return torch.as_tensor(
+            value,
+            dtype=self.context.dtype,
+            device=self.context.device,
+        )
+
+
+    def _indices(
+        self,
+        object_indices: np.ndarray,
+    ) -> torch.Tensor:
+        
+        return torch.as_tensor(
+            object_indices,
+            dtype=torch.long,
+            device=self.context.device,
+        )
+
+
+    def _geom_ids_by_name(
+        self,
+        geom_names: tuple[str | None, ...],
+        requested_names: tuple[str, ...],
+        default_suffix: str | None = None,
+    ) -> torch.Tensor:
+        
+        geom_name_to_id = {
+            name: geom_id
+            for geom_id, name in enumerate(geom_names)
+            if name is not None
+        }
+
+        if requested_names:
+            unknown_names = set(requested_names) - geom_name_to_id.keys()
+            if unknown_names:
+                raise ValueError(
+                    f"Unknown geom name(s): {sorted(unknown_names)}."
+                )
+            ids = [geom_name_to_id[name] for name in requested_names]
+        elif default_suffix is not None:
+            ids = [
+                geom_id
+                for geom_id, name in enumerate(geom_names)
+                if name is not None and name.lower().endswith(default_suffix)
+            ]
+        else:
+            ids = []
+
+        return self._indices(np.asarray(ids, dtype=np.int64))
+
+
+    def _find_base_joint_info(
+        self,
+        model,
+    ) -> tuple[int, int, int]:
+        
         free_joint_ids = np.flatnonzero(
             model.jnt_type == mujoco.mjtJoint.mjJNT_FREE    # pyright: ignore[reportAttributeAccessIssue]
         )
@@ -126,9 +255,14 @@ class MujocoSimulator(BaseSimulator):
         base_qpos_adr = int(model.jnt_qposadr[base_joint_id])
         base_qvel_adr = int(model.jnt_dofadr[base_joint_id])
 
-        # check all transmission type of actuators are JOINT or JOINTINPARENT.
-        # if transmission type is TENDON, the actuator is connected to a tendon,
-        # which does not have a direct mapping to a joint
+        return base_joint_id, base_qpos_adr, base_qvel_adr
+
+
+    def _find_actuated_joint_ids(
+        self,
+        model,
+    ) -> np.ndarray:
+        
         joint_transmission_types = {
             int(mujoco.mjtTrn.mjTRN_JOINT),         # pyright: ignore[reportAttributeAccessIssue]
             int(mujoco.mjtTrn.mjTRN_JOINTINPARENT), # pyright: ignore[reportAttributeAccessIssue]
@@ -167,41 +301,21 @@ class MujocoSimulator(BaseSimulator):
                 "one-dimensional joint observations."
             )
 
-        self.model_context = ModelContext(
-            nq = model.nq,
-            nv = model.nv,
-            nu = model.nu,
-            na = model.na,
-            gravity=tensors(model.opt.gravity),
-            # base_names=names(mujoco.mjtObj.mjOBJ_BODY, model.nbody),  # pyright: ignore[reportAttributeAccessIssue]
-            base_pos_qpos_ids=indices(
-                np.arange(base_qpos_adr, base_qpos_adr + 3)
-            ),
-            base_quat_qpos_ids=indices(
-                np.arange(base_qpos_adr + 3, base_qpos_adr + 7)
-            ),
-            base_ang_vel_qvel_ids=indices(
-                np.arange(base_qvel_adr + 3, base_qvel_adr + 6)
-            ),
-            body_names=names(
-                mujoco.mjtObj.mjOBJ_BODY,  # pyright: ignore[reportAttributeAccessIssue]
-                model.nbody,
-            ),
-            # joint_names=names(mujoco.mjtObj.mjOBJ_JOINT, model.njnt),  # pyright: ignore[reportAttributeAccessIssue]
-            joint_qpos_ids=indices(
-                model.jnt_qposadr[actuator_joint_ids]
-            ),
-            joint_qvel_ids=indices(
-                model.jnt_dofadr[actuator_joint_ids]
-            ),
-            # actuator_names=names(mujoco.mjtObj.mjOBJ_ACTUATOR, model.nu),  # pyright: ignore[reportAttributeAccessIssue]
-            actuator_ctrl_range = tensors(model.actuator_ctrlrange),
-            geom_names=names(
-                mujoco.mjtObj.mjOBJ_GEOM,  # pyright: ignore[reportAttributeAccessIssue]
-                model.ngeom,
-            ),
-            geom_body_ids=indices(model.geom_bodyid),
-        )
+        return actuator_joint_ids
+
+
+    def _joint_pos_limits(
+        self,
+        model,
+        actuator_joint_ids: np.ndarray,
+    ) -> np.ndarray:
+        
+        joint_pos_limits = model.jnt_range[actuator_joint_ids].copy()
+        unlimited_joints = ~model.jnt_limited[actuator_joint_ids].astype(bool)
+        joint_pos_limits[unlimited_joints, 0] = -np.inf
+        joint_pos_limits[unlimited_joints, 1] = np.inf
+
+        return joint_pos_limits
 
 
     def reset(
@@ -298,65 +412,171 @@ class MujocoSimulator(BaseSimulator):
 
         if env_ids is None:
             datas = self.datas
+            models = self.models
         else:
             indices = env_ids.detach().cpu().tolist()
             datas = [
                 self.datas[i]
                 for i in indices
             ]
+            models = [
+                self.models[i]
+                for i in indices
+            ]
 
-        qpos = torch.stack([
-            torch.as_tensor(
-                data.qpos,
-                dtype=self.context.dtype,
+        basic_state = self._get_basic_state(datas)
+        base_velocity_state = self._get_base_velocity_state(datas)
+        geom_xvel = self._get_geom_xvel(models, datas)
+        (
+            contact_geom_ids,
+            contact_forces
+        ) = self._get_contact_state(models, datas)
+
+        return (
+            basic_state |
+            base_velocity_state |
+            {
+                "contact_geom_ids": contact_geom_ids,
+                "contact_forces": contact_forces,
+                "geom_xvel": geom_xvel,
+            }
+        )
+
+
+    def _get_basic_state(
+        self,
+        datas,
+    ) -> dict[str, torch.Tensor]:
+        
+        qpos = []
+        qvel = []
+        qacc = []
+        ctrl = []
+        geom_xpos = []
+        actuator_force = []
+
+        for data in datas:
+            qpos.append(data.qpos)
+            qvel.append(data.qvel)
+            qacc.append(data.qacc)
+            ctrl.append(data.ctrl)
+            geom_xpos.append(data.geom_xpos)
+            actuator_force.append(data.actuator_force)
+
+        return {
+            "qpos": self._tensor(np.asarray(qpos)),
+            "qvel": self._tensor(np.asarray(qvel)),
+            "qacc": self._tensor(np.asarray(qacc)),
+            "ctrl": self._tensor(np.asarray(ctrl)),
+            "geom_xpos": self._tensor(np.asarray(geom_xpos)),
+            "actuator_force": self._tensor(np.asarray(actuator_force)),
+        }
+
+
+    def _get_base_velocity_state(
+        self,
+        datas,
+    ) -> dict[str, torch.Tensor]:
+
+        base_id = self.model_context.base_id
+        lin_vel_ids = self.model_context.base_lin_vel_qvel_ids.cpu().numpy()
+        ang_vel_ids = self.model_context.base_ang_vel_qvel_ids.cpu().numpy()
+
+        base_lin_vel_body = []
+        base_ang_vel_body = []
+        for data in datas:
+            rotation_body_to_world = data.xmat[base_id].reshape(3, 3)
+            rotation_world_to_body = rotation_body_to_world.T
+            base_lin_vel_body.append(
+                rotation_world_to_body @ data.qvel[lin_vel_ids]
             )
-            for data in datas
-        ]).to(self.context.device)
-
-        qvel = torch.stack([
-            torch.as_tensor(
-                data.qvel,
-                dtype=self.context.dtype,
+            base_ang_vel_body.append(
+                rotation_world_to_body @ data.qvel[ang_vel_ids]
             )
-            for data in datas
-        ]).to(self.context.device)
 
-        qacc = torch.stack([
-            torch.as_tensor(
-                data.qacc,
-                dtype=self.context.dtype,
+        return {
+            "base_lin_vel_body": self._tensor(np.asarray(base_lin_vel_body)),
+            "base_ang_vel_body": self._tensor(np.asarray(base_ang_vel_body)),
+        }
+
+
+    def _get_geom_xvel(
+        self,
+        models,
+        datas,
+    ) -> torch.Tensor:
+        
+        geom_xvel = []
+        for model, data in zip(models, datas):
+
+            per_env = []
+            for geom_id in range(model.ngeom):
+
+                velocity = np.zeros(6, dtype=np.float64)
+                mujoco.mj_objectVelocity(  # pyright: ignore[reportAttributeAccessIssue]
+                    model,
+                    data,
+                    mujoco.mjtObj.mjOBJ_GEOM,  # pyright: ignore[reportAttributeAccessIssue]
+                    geom_id,
+                    velocity,
+                    0,
+                )
+                per_env.append(velocity)
+
+            geom_xvel.append(
+                torch.as_tensor(
+                    np.asarray(per_env),
+                    dtype=self.context.dtype,
+                )
             )
-            for data in datas
-        ]).to(self.context.device)
 
-        ctrl = torch.stack([
-            torch.as_tensor(
-                data.ctrl,
-                dtype=self.context.dtype,
-            )
-            for data in datas
-        ]).to(self.context.device)
+        return torch.stack(geom_xvel).to(self.context.device)
 
-        contact_pairs = [
-            np.asarray(
-                [
-                    (data.contact[index].geom1, data.contact[index].geom2)
-                    for index in range(data.ncon)
-                ],
-                dtype=np.int64,
-            ).reshape(-1, 2)
-            for data in datas
-        ]
+
+    def _get_contact_state(
+        self,
+        models,
+        datas,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        
+        contact_pairs = []
+        contact_force_arrays = []
+
+        for model, data in zip(models, datas):
+            pairs = np.empty((data.ncon, 2), dtype=np.int64)
+            forces = np.empty((data.ncon, 6), dtype=np.float64)
+
+            for contact_index in range(data.ncon):
+                contact = data.contact[contact_index]
+                pairs[contact_index] = (contact.geom1, contact.geom2)
+                mujoco.mj_contactForce(  # pyright: ignore[reportAttributeAccessIssue]
+                    model,
+                    data,
+                    contact_index,
+                    forces[contact_index],
+                )
+
+            contact_pairs.append(pairs)
+            contact_force_arrays.append(forces)
+
         max_contacts = max(
             (pairs.shape[0] for pairs in contact_pairs),
             default=0,
         )
+
         contact_geom_ids = torch.full(
             (len(datas), max_contacts, 2),
             -1,
             dtype=torch.long,
             device=self.context.device,
         )
+
+        contact_forces = torch.zeros(
+            (len(datas), max_contacts, 6),
+            dtype=self.context.dtype,
+            device=self.context.device,
+        )
+        
         for env_index, pairs in enumerate(contact_pairs):
             if pairs.shape[0] > 0:
                 contact_geom_ids[env_index, :pairs.shape[0]] = (
@@ -366,110 +586,12 @@ class MujocoSimulator(BaseSimulator):
                         device=self.context.device,
                     )
                 )
+                contact_forces[env_index, :pairs.shape[0]] = (
+                    torch.as_tensor(
+                        contact_force_arrays[env_index],
+                        dtype=self.context.dtype,
+                        device=self.context.device,
+                    )
+                )
 
-        # time = torch.tensor(
-        #     [data.time for data in datas],
-        #     dtype=self.context.dtype,
-        #     device=self.context.device,
-        # )
-
-        # body_pos = torch.stack([
-        #     torch.as_tensor(
-        #         data.xpos,
-        #         dtype=self.context.dtype,
-        #     )
-        #     for data in datas
-        # ]).to(self.context.device)
-
-        # body_quat = torch.stack([
-        #     torch.as_tensor(
-        #         data.xquat,
-        #         dtype=self.context.dtype,
-        #     )
-        #     for data in datas
-        # ]).to(self.context.device)
-
-        # body_vel = torch.stack([
-        #     torch.as_tensor(
-        #         data.cvel,
-        #         dtype=self.context.dtype,
-        #     )
-        #     for data in datas
-        # ]).to(self.context.device)
-
-        # sensor_data = torch.stack([
-        #     torch.as_tensor(
-        #         data.sensordata,
-        #         dtype=self.context.dtype,
-        #     )
-        #     for data in datas
-        # ]).to(self.context.device)
-
-        # actuator_force = torch.stack([
-        #     torch.as_tensor(
-        #         data.actuator_force,
-        #         dtype=self.context.dtype,
-        #     )
-        #     for data in datas
-        # ]).to(self.context.device)
-
-        return {
-            "qpos": qpos,
-            "qvel": qvel,
-            "qacc": qacc,
-            "ctrl": ctrl,
-            "contact_geom_ids": contact_geom_ids,
-            # "time": time,
-            # "body_pos": body_pos,
-            # "body_quat": body_quat,
-            # "body_vel": body_vel,
-            # "sensor_data": sensor_data,
-            # "actuator_force": actuator_force,
-        }
-
-
-
-    # def set_state(
-    #     self,
-    #     state: dict[str, Any],
-    # ) -> None:
-
-    #     assert self.model is not None
-    #     assert self.data is not None
-
-    #     self.data.qpos[:] = state["qpos"]
-    #     self.data.qvel[:] = state["qvel"]
-
-    #     mujoco.mj_forward(
-    #         self.model,
-    #         self.data,
-    #     )
-
-
-    # def get_joint_positions(self):
-
-    #     assert self.data is not None
-
-    #     return self.data.qpos.copy()
-
-
-    # def get_joint_velocities(self):
-
-    #     assert self.data is not None
-
-    #     return self.data.qvel.copy()
-
-
-    # def get_contacts(self):
-
-    #     assert self.data is not None
-
-    #     contacts = []
-
-    #     for i in range(
-    #         self.data.ncon
-    #     ):
-    #         contact = self.data.contact[i]
-    #         contacts.append(contact)
-
-    #     return contacts
+        return contact_geom_ids, contact_forces

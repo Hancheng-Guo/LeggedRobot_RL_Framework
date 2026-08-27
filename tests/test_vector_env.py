@@ -12,6 +12,12 @@ class FakeSimulator:
 
     def __init__(self, num_envs: int) -> None:
         self.state = torch.zeros(num_envs, 1)
+        self.sim_dt = 0.01
+        self.frame_skip = 2
+
+    @property
+    def control_dt(self) -> float:
+        return self.sim_dt * self.frame_skip
 
     def step(self, control: torch.Tensor) -> None:
         self.state += 1.0
@@ -52,6 +58,7 @@ class FakeTask:
         self,
         state: dict[str, torch.Tensor],
         episode_step: torch.Tensor,
+        step_dt: float,
         env_ids: torch.Tensor | None = None,
     ) -> TaskContext:
         if env_ids is None:
@@ -69,6 +76,7 @@ class FakeTask:
             action=action,
             last_action=last_action,
             episode_step=episode_step,
+            step_dt=step_dt,
         )
 
     def pre_step(self) -> dict:

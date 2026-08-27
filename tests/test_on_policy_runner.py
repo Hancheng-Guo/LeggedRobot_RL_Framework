@@ -156,6 +156,7 @@ def test_play_restores_original_environment_after_failure(
     runner._merge_component(component)
 
     def fail_during_play(num_steps: int) -> None:
+        assert runner.environment is not None
         assert runner.environment.num_envs == 1
         raise RuntimeError("play failed")
 

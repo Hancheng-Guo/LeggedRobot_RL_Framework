@@ -3,13 +3,13 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from app.utils.context import RuntimeContext
+from envs.base import BaseEnv
+from rl.algorithms.base import OnPolicyAlgorithm
 from runners.callbacks.base import BaseCallback
 from runners.callbacks.stage import StageCallback
 
 
 class BaseRunner(ABC):
-
-    stop_callback: list[BaseCallback]
 
     def __init__(
         self,
@@ -17,12 +17,15 @@ class BaseRunner(ABC):
     ) -> None:
 
         self.context = context
-        self.environment = None
-        self.algorithm = None
+        self.environment: BaseEnv
+        self.algorithm: OnPolicyAlgorithm
 
-        self.max_iterations = None
-        self.rollout_length = None
-        self.callbacks = []
+        self.current_iteration: int
+
+        self.max_iterations: int
+        self.rollout_length: int
+        self.callbacks: list[BaseCallback] = []
+        self.stop_callback: list[BaseCallback] = []
 
 
     @abstractmethod

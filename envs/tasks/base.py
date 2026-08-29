@@ -53,6 +53,7 @@ class BaseTaskLogic(ABC):
         observation_manager_config: dict,
         reward_manager_config: dict,
         termination_manager_config: dict,
+        constants: dict,
     ) -> None:
 
         self._build_action_manager(action_manager_config)
@@ -97,6 +98,8 @@ class BaseTaskLogic(ABC):
             num_envs=self.num_envs,
             context=self.context,
             model_context=self.model_context,
+            command_dim=len(self.command_manager.terms),
+            action_dim=self.action_manager.input_dim,
             **observation_manager_config,
         )
 
@@ -253,3 +256,8 @@ class BaseTaskLogic(ABC):
     @property
     def last_control(self) -> torch.Tensor:
         return self.action_manager.last_control
+
+
+    @property
+    def observation_dim(self) -> int:
+        return self.observation_manager.output_dim

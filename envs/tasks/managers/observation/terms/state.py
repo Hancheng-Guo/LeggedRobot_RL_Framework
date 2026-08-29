@@ -15,10 +15,17 @@ class BaseAngularVelocity(BaseObservationTerm):
         *args,
         **kwargs,
     ) -> None:
+        
         super().__init__(*args, **kwargs)
-        self.qvel_ids = model_context.base_ang_vel_qvel_ids
 
-    def compute(self, task_context: TaskContext) -> torch.Tensor:
+        self.qvel_ids = model_context.base_ang_vel_qvel_ids
+        self.output_dim = self.qvel_ids.numel()
+
+
+    def compute(
+        self,
+        task_context: TaskContext
+    ) -> torch.Tensor:
         return task_context.state["qvel"][:, self.qvel_ids]
 
 
@@ -28,11 +35,14 @@ class ProjectedGravity(BaseObservationTerm):
     def __init__(
         self,
         model_context: ModelContext,
-        *args,
-        **kwargs,
+        *args, **kwargs,
     ) -> None:
+        
         super().__init__(*args, **kwargs)
+
         self.qpos_ids = model_context.base_quat_qpos_ids
+        self.output_dim = 3
+
         gravity = model_context.gravity
         gravity_norm = gravity.norm()
         if gravity_norm <= torch.finfo(gravity.dtype).eps:
@@ -41,7 +51,12 @@ class ProjectedGravity(BaseObservationTerm):
             )
         self.gravity = gravity / gravity_norm
 
-    def compute(self, task_context: TaskContext) -> torch.Tensor:
+
+    def compute(
+        self,
+        task_context: TaskContext
+    ) -> torch.Tensor:
+        
         quaternion = task_context.state["qpos"][:, self.qpos_ids]
         quaternion = quaternion / quaternion.norm(
             dim=-1,
@@ -65,13 +80,19 @@ class JointPosition(BaseObservationTerm):
     def __init__(
         self,
         model_context: ModelContext,
-        *args,
-        **kwargs,
+        *args, **kwargs,
     ) -> None:
+        
         super().__init__(*args, **kwargs)
-        self.qpos_ids = model_context.joint_qpos_ids
 
-    def compute(self, task_context: TaskContext) -> torch.Tensor:
+        self.qpos_ids = model_context.joint_qpos_ids
+        self.output_dim = self.qpos_ids.numel()
+
+
+    def compute(
+        self,
+        task_context: TaskContext
+    ) -> torch.Tensor:
         return task_context.state["qpos"][:, self.qpos_ids]
 
 
@@ -86,6 +107,11 @@ class JointVelocity(BaseObservationTerm):
     ) -> None:
         super().__init__(*args, **kwargs)
         self.qvel_ids = model_context.joint_qvel_ids
+        self.output_dim = self.qvel_ids.numel()
 
-    def compute(self, task_context: TaskContext) -> torch.Tensor:
+
+    def compute(
+        self,
+        task_context: TaskContext
+    ) -> torch.Tensor:
         return task_context.state["qvel"][:, self.qvel_ids]

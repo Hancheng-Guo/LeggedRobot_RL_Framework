@@ -14,15 +14,15 @@ _LANDED_DISTANCE_FACTOR = -1.0
 _LIFTED_DISTANCE_FACTOR = -0.25
 
 
-def _named_tensor(
+def _named_tensor_squeeze(
     task_context: TaskContext,
     name: str,
 ) -> torch.Tensor:
     
     if name in task_context.command:
-        return task_context.command[name]
+        return task_context.command[name].squeeze(-1)
     if name in task_context.state:
-        return task_context.state[name]
+        return task_context.state[name].squeeze(-1)
     raise ValueError(f"'{name}' is missing from task context.")
 
 
@@ -116,8 +116,14 @@ class QuadrupedalGaitPhaseL2Exp(BaseRewardTerm):
         task_context: TaskContext
     ) -> tuple[torch.Tensor, torch.Tensor]:
         
-        phase_real = _named_tensor(task_context, _FOOT_PHASE_REAL_NAME)
-        phase_imag = _named_tensor(task_context, _FOOT_PHASE_IMAG_NAME)
+        phase_real = _named_tensor_squeeze(
+            task_context,
+            _FOOT_PHASE_REAL_NAME
+        )
+        phase_imag = _named_tensor_squeeze(
+            task_context,
+            _FOOT_PHASE_IMAG_NAME
+        )
         if phase_real.shape != self.foot_phase_steps.shape:
             raise ValueError(
                 f"'{_FOOT_PHASE_REAL_NAME}' must have shape "
@@ -137,7 +143,7 @@ class QuadrupedalGaitPhaseL2Exp(BaseRewardTerm):
         task_context: TaskContext
     ) -> torch.Tensor:
         
-        half_period_duration = _named_tensor(
+        half_period_duration = _named_tensor_squeeze(
             task_context,
             _HALF_PERIOD_DURATION_NAME
         )

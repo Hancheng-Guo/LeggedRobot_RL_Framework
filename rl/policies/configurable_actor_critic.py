@@ -30,6 +30,7 @@ class ConfigurableActorCritic(ActorCritic):
     def config_update(
         self,
         component: Component,
+        obs_dim: int,
         action_dim: int,
         actor: Sequence[Mapping[str, Any]],
         critic: Sequence[Mapping[str, Any]],
@@ -37,6 +38,8 @@ class ConfigurableActorCritic(ActorCritic):
         *args, **kwargs,
     ) -> None:
         
+        if obs_dim <= 0:
+            raise ValueError("'obs_dim' must be greater than 0.")
         if action_dim <= 0:
             raise ValueError("'action_dim' must be greater than 0.")
         if "action_dim" in distribution:
@@ -44,12 +47,18 @@ class ConfigurableActorCritic(ActorCritic):
                 "Distribution 'action_dim' is provided by the environment."
             )
 
-        dimensions = {"action_dim": action_dim}
+        dimensions = {
+            "obs_dim": obs_dim,
+            "action_dim": action_dim,
+        }
         self.actor = ConfigurableNetwork(
             modules=actor,
             variables=dimensions,
         )
-        self.critic = ConfigurableNetwork(modules=critic)
+        self.critic = ConfigurableNetwork(
+            modules=critic,
+            variables=dimensions,
+        )
         if self.critic.is_recurrent:
             raise ValueError(
                 "Recurrent critic modules are not supported yet."

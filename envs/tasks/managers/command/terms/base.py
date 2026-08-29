@@ -14,8 +14,7 @@ class BaseCommandTerm(ABC):
         num_envs: int,
         context: RuntimeContext,
         model_context: ModelContext,
-        *args,
-        **kwargs,
+        *args, **kwargs,
     ) -> None:
 
         self.num_envs = num_envs

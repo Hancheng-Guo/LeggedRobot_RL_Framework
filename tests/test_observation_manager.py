@@ -38,6 +38,8 @@ def make_manager(runtime_context, model_context, clip=None):
         num_envs=2,
         context=runtime_context,
         model_context=model_context,
+        command_dim=3,
+        action_dim=2,
         clip=clip,
         terms={
             "base_angular_velocity": {"scale": 0.5},
@@ -109,6 +111,10 @@ def test_observation_manager_rejects_non_matrix_term(
     model_context,
 ):
     class InvalidShape(BaseObservationTerm):
+        def __init__(self, *args, **kwargs) -> None:
+            super().__init__(*args, **kwargs)
+            self.output_dim = 1
+
         def compute(self, task_context: TaskContext) -> torch.Tensor:
             return torch.zeros(task_context.action.shape[0])
 
@@ -118,6 +124,8 @@ def test_observation_manager_rejects_non_matrix_term(
             num_envs=2,
             context=runtime_context,
             model_context=model_context,
+            command_dim=3,
+            action_dim=2,
             terms={"invalid_shape": {}},
         )
         with pytest.raises(ValueError, match="must return a 2D tensor"):
@@ -138,6 +146,8 @@ def test_projected_gravity_uses_model_gravity(
         num_envs=2,
         context=runtime_context,
         model_context=model_context,
+        command_dim=3,
+        action_dim=2,
         terms={"projected_gravity": {}},
     )
 
@@ -163,5 +173,7 @@ def test_projected_gravity_rejects_zero_model_gravity(
             num_envs=2,
             context=runtime_context,
             model_context=model_context,
+            command_dim=3,
+            action_dim=2,
             terms={"projected_gravity": {}},
         )

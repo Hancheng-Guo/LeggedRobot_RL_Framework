@@ -59,6 +59,11 @@ class TrackingEnvironment(BaseEnv):
         return 1
 
 
+    @property
+    def observation_dim(self) -> int:
+        return 1
+
+
 class MinimalAlgorithm(OnPolicyAlgorithm):
     def set_train_mode(self) -> None:
         return None

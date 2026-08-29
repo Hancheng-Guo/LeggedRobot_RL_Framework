@@ -43,6 +43,7 @@ class FakeTask:
         self.action = torch.zeros(num_envs, 1)
         self.last_action = torch.zeros(num_envs, 1)
         self.action_manager = SimpleNamespace(input_dim=1)
+        self.observation_manager = SimpleNamespace(output_dim=3)
 
     def reset(self, env_ids: torch.Tensor | None = None) -> None:
         if env_ids is None:
@@ -126,6 +127,10 @@ class FakeTask:
             ),
             dim=-1,
         ), {}
+
+    @property
+    def observation_dim(self) -> int:
+        return self.observation_manager.output_dim
 
 
 def make_env(max_episode_steps: int = 10) -> VectorEnv:

@@ -66,5 +66,11 @@ class BaseEnv(ABC):
     
     @property
     @abstractmethod
+    def observation_dim(self) -> int:
+        raise NotImplementedError
+
+
+    @property
+    @abstractmethod
     def action_dim(self) -> int:
         raise NotImplementedError

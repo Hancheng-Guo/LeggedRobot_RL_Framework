@@ -4,7 +4,7 @@ distribution:
 
 actor:
   - type: linear
-    in_features: 45
+    in_features: obs_dim
     out_features: 256
   - type: elu
   - type: linear
@@ -17,7 +17,7 @@ actor:
 
 critic:
   - type: linear
-    in_features: 45
+    in_features: obs_dim
     out_features: 256
   - type: elu
   - type: linear

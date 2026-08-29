@@ -58,6 +58,7 @@ def test_configurable_actor_critic_builds_and_evaluates(
     policy = ConfigurableActorCritic(context=runtime_context)
     policy.config_update(
         component=make_component(),
+        obs_dim=3,
         action_dim=2,
         actor=ACTOR_CONFIG,
         critic=CRITIC_CONFIG,
@@ -86,6 +87,29 @@ def test_configurable_actor_critic_builds_and_evaluates(
     assert output.action.dtype == runtime_context.dtype
 
 
+def test_configurable_actor_critic_resolves_obs_dim(
+    runtime_context: RuntimeContext,
+) -> None:
+    policy = ConfigurableActorCritic(context=runtime_context)
+    policy.config_update(
+        component=make_component(),
+        obs_dim=5,
+        action_dim=2,
+        actor=[
+            {"type": "linear", "in_features": "obs_dim", "out_features": 8},
+            {"type": "linear", "in_features": 8, "out_features": "action_dim"},
+        ],
+        critic=[
+            {"type": "linear", "in_features": "obs_dim", "out_features": 8},
+            {"type": "linear", "in_features": 8, "out_features": 1},
+        ],
+        distribution={"type": "diagonal_gaussian"},
+    )
+
+    assert policy.actor[0].in_features == 5
+    assert policy.critic[0].in_features == 5
+
+
 def test_stateful_gru_rejects_online_batch_size_change() -> None:
     module = StatefulGRU(input_size=3, hidden_size=4)
     module(torch.zeros(2, 3))
@@ -107,6 +131,7 @@ def test_recurrent_actor_owns_and_resets_hidden_state(
     policy = ConfigurableActorCritic(context=runtime_context)
     policy.config_update(
         component=make_component(),
+        obs_dim=3,
         action_dim=2,
         actor=RECURRENT_ACTOR_CONFIG,
         critic=CRITIC_CONFIG,
@@ -141,6 +166,7 @@ def test_recurrent_sequence_evaluation_preserves_time_gradients(
     policy = ConfigurableActorCritic(context=runtime_context)
     policy.config_update(
         component=make_component(),
+        obs_dim=3,
         action_dim=2,
         actor=RECURRENT_ACTOR_CONFIG,
         critic=CRITIC_CONFIG,
@@ -189,6 +215,7 @@ def test_ppo_evaluation_does_not_create_rollout_state(
     policy = ConfigurableActorCritic(context=runtime_context)
     policy.config_update(
         component=make_component(),
+        obs_dim=3,
         action_dim=2,
         actor=RECURRENT_ACTOR_CONFIG,
         critic=CRITIC_CONFIG,
@@ -220,6 +247,7 @@ def test_ppo_updates_recurrent_actor_sequences(
     policy = ConfigurableActorCritic(context=runtime_context)
     policy.config_update(
         component=make_component(),
+        obs_dim=3,
         action_dim=2,
         actor=RECURRENT_ACTOR_CONFIG,
         critic=CRITIC_CONFIG,
@@ -309,6 +337,7 @@ def test_ppo_builds_policy_before_optimizer(
     algorithm = PPO(context=runtime_context)
     algorithm.config_update(
         component=make_component(config_path),
+        obs_dim=3,
         action_dim=2,
         learning_rate=3e-4,
         gamma=0.99,

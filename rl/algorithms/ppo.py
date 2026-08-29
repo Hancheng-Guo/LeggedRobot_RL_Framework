@@ -28,6 +28,7 @@ class PPO(OnPolicyAlgorithm):
         self._pending_recurrent_state: RecurrentState
 
         self.learning_rate: float
+        self.obs_dim: int
         self.action_dim: int
         self.gamma: float
         self.gae_lambda: float
@@ -42,6 +43,7 @@ class PPO(OnPolicyAlgorithm):
     def config_update(
         self,
         component: Component,
+        obs_dim: int | None = None,
         action_dim: int | None = None,
         learning_rate: float | None = None,
         gamma: float | None = None,
@@ -56,6 +58,7 @@ class PPO(OnPolicyAlgorithm):
 
         update_attributes(
             self,
+            obs_dim=obs_dim,
             action_dim=action_dim,
             learning_rate=learning_rate,
             gamma=gamma,
@@ -75,6 +78,8 @@ class PPO(OnPolicyAlgorithm):
         
         if self.learning_rate <= 0.0:
             raise ValueError("'learning_rate' must be greater than 0.")
+        if self.obs_dim <= 0:
+            raise ValueError("'obs_dim' must be greater than 0.")
         if self.action_dim <= 0:
             raise ValueError("'action_dim' must be greater than 0.")
         if not 0.0 <= self.gamma <= 1.0:
@@ -124,6 +129,7 @@ class PPO(OnPolicyAlgorithm):
         policy_config = load_yaml(policy.config)
         self._update_policy_config(
             component=component,
+            obs_dim=self.obs_dim,
             action_dim=self.action_dim,
             **policy_config,
         )

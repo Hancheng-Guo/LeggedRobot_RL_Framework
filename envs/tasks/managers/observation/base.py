@@ -15,6 +15,8 @@ class ObservationManager:
         num_envs: int,
         context: RuntimeContext,
         model_context: ModelContext,
+        command_dim: int,
+        action_dim: int,
         terms: dict[str, dict[str, Any] | None],
         clip: float | None = None,
         *args,
@@ -27,9 +29,15 @@ class ObservationManager:
         self.num_envs = num_envs
         self.context = context
         self.model_context = model_context
+        self.command_dim = command_dim
+        self.action_dim = action_dim
         self.clip = clip
         self.terms: dict[str, BaseObservationTerm] = {}
         self._build_terms(terms)
+        self.output_dim = sum(
+            term.output_dim
+            for term in self.terms.values()
+        )
 
 
     def _build_terms(
@@ -52,6 +60,8 @@ class ObservationManager:
             self.terms[name] = cls(
                 context=self.context,
                 model_context=self.model_context,
+                command_dim=self.command_dim,
+                action_dim=self.action_dim,
                 **config,
             )
 

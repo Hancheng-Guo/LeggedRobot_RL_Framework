@@ -21,6 +21,7 @@ class BaseObservationTerm(ABC):
 
         self.context = context
         self.scale = float(scale)
+        self.output_dim: int
 
 
     @abstractmethod

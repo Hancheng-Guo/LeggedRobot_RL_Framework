@@ -237,6 +237,7 @@ class OnPolicyRunner(BaseRunner):
                 )
             self.algorithm.config_update(
                 component=component,
+                obs_dim=self.environment.observation_dim,
                 action_dim=self.environment.action_dim,
             )
 
@@ -263,6 +264,7 @@ class OnPolicyRunner(BaseRunner):
                 )
             self.algorithm.config_update(
                 component=component,
+                obs_dim=self.environment.observation_dim,
                 action_dim=self.environment.action_dim,
                 **alg_config
             )

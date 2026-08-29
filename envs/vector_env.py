@@ -279,4 +279,9 @@ class VectorEnv(BaseEnv):
     @property
     def action_dim(self) -> int:
         return self.task.action_manager.input_dim
+
+
+    @property
+    def observation_dim(self) -> int:
+        return self.task.observation_dim
     

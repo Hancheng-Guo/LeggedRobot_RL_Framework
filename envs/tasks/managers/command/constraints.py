@@ -4,10 +4,17 @@ from dataclasses import dataclass
 from typing import Any
 
 
+_ALLOWED_COMMAND = {
+    "torch": torch,
+    "abs": torch.abs,
+}
+
+
 @dataclass(frozen=True)
 class CommandConstraint:
     target: str
     operator: str
+    direction: str | None
     referenced_terms: frozenset[str]
     compiled_expression: Any
 
@@ -50,10 +57,24 @@ class CommandConstraintSet:
                     f"'operator' or 'expression' is missing for "
                     f"constraint '{target}'."
                 )
-            if operator not in {"<=", ">="}:
+            if operator not in {"<=", ">=", "<", ">", "!="}:
                 raise ValueError(
                     f"Unsupported operator '{operator}' for "
                     f"constraint '{target}'."
+                )
+            direction = config.get("direction")
+            if operator == "!=":
+                if direction is None:
+                    direction = "positive"
+                elif direction not in {"positive", "negative"}:
+                    raise ValueError(
+                        f"'direction' of constraint '{target}' must be "
+                        "'positive' or 'negative'."
+                    )
+            elif direction is not None:
+                raise ValueError(
+                    f"'direction' is only supported by the '!=' operator, "
+                    f"got operator '{operator}' for constraint '{target}'."
                 )
             if not isinstance(expression, str):
                 raise TypeError(
@@ -81,6 +102,7 @@ class CommandConstraintSet:
             built.append(CommandConstraint(
                 target=target,
                 operator=operator,
+                direction=direction,
                 referenced_terms=referenced_terms,
                 compiled_expression=compiled_expression,
             ))
@@ -134,8 +156,7 @@ class CommandConstraintSet:
                     {"__builtins__": {}},
                     {
                         "commands": expression_commands,
-                        "abs": torch.abs,
-                        "torch": torch,
+                        **_ALLOWED_COMMAND,
                     },
                 )
                 boundary = torch.as_tensor(
@@ -150,10 +171,38 @@ class CommandConstraintSet:
                     f"'{constraint.target}': {error}"
                 ) from error
 
-            checked_commands[constraint.target] = (
-                torch.minimum(command, boundary)
-                if constraint.operator == "<="
-                else torch.maximum(command, boundary)
-            )
+            if constraint.operator == "<=":
+                checked_command = torch.minimum(command, boundary)
+            elif constraint.operator == ">=":
+                checked_command = torch.maximum(command, boundary)
+            elif constraint.operator == "<":
+                strict_boundary = torch.nextafter(
+                    boundary,
+                    torch.full_like(boundary, -torch.inf),
+                )
+                checked_command = torch.minimum(command, strict_boundary)
+            elif constraint.operator == ">":
+                strict_boundary = torch.nextafter(
+                    boundary,
+                    torch.full_like(boundary, torch.inf),
+                )
+                checked_command = torch.maximum(command, strict_boundary)
+            else:
+                direction = (
+                    torch.inf
+                    if constraint.direction == "positive"
+                    else -torch.inf
+                )
+                replacement = torch.nextafter(
+                    boundary,
+                    torch.full_like(boundary, direction),
+                )
+                checked_command = torch.where(
+                    command != boundary,
+                    command,
+                    replacement,
+                )
+
+            checked_commands[constraint.target] = checked_command
 
         return checked_commands

@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 # Importing the task module establishes the existing TaskContext import order.
@@ -106,3 +107,85 @@ def test_command_dim_defaults_to_one(runtime_context, model_context):
 
     assert manager.output_dim == 2
     assert all(value.shape == (3, 1) for value in manager.command.values())
+
+
+@pytest.mark.parametrize(
+    ("operator", "initial_value", "direction", "expected_direction"),
+    [
+        ("<=", 1.0, None, None),
+        (">=", -1.0, None, None),
+        ("<", 1.0, None, "negative"),
+        (">", -1.0, None, "positive"),
+        ("!=", 0.0, None, "positive"),
+        ("!=", 0.0, "negative", "negative"),
+    ],
+)
+def test_command_constraint_operators(
+    runtime_context,
+    model_context,
+    operator,
+    initial_value,
+    direction,
+    expected_direction,
+):
+    constraint = {"operator": operator, "expression": "0.0"}
+    if direction is not None:
+        constraint["direction"] = direction
+    manager = CommandManager(
+        num_envs=3,
+        context=runtime_context,
+        model_context=model_context,
+        terms={
+            "x": {
+                "type": "UniformOnReset",
+                "params": {
+                    "min_value": initial_value,
+                    "max_value": initial_value,
+                },
+            },
+        },
+        constraints={"x": constraint},
+    )
+
+    manager.reset()
+
+    boundary = torch.tensor(0.0, dtype=runtime_context.dtype)
+    if expected_direction is None:
+        expected_value = boundary
+    else:
+        target = torch.tensor(
+            torch.inf if expected_direction == "positive" else -torch.inf,
+            dtype=runtime_context.dtype,
+        )
+        expected_value = torch.nextafter(boundary, target)
+    torch.testing.assert_close(
+        manager.command["x"],
+        expected_value.expand(3, 1),
+        rtol=0.0,
+        atol=0.0,
+    )
+
+
+def test_not_equal_constraint_rejects_invalid_direction(
+    runtime_context,
+    model_context,
+):
+    with pytest.raises(ValueError, match="positive.*negative"):
+        CommandManager(
+            num_envs=1,
+            context=runtime_context,
+            model_context=model_context,
+            terms={
+                "x": {
+                    "type": "UniformOnReset",
+                    "params": {"min_value": 0.0, "max_value": 1.0},
+                },
+            },
+            constraints={
+                "x": {
+                    "operator": "!=",
+                    "expression": "0.0",
+                    "direction": "up",
+                },
+            },
+        )

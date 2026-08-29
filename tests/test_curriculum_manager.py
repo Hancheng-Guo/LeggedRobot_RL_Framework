@@ -299,3 +299,56 @@ def test_multidimensional_curriculum_noise_is_independent(
     assert noise.shape == (num_envs, 4)
     assert abs(noise.std().item() - 0.5) < 0.02
     assert not torch.equal(noise[:, 0], noise[:, 1])
+
+
+@pytest.mark.parametrize(
+    ("operator", "expression", "expected"),
+    [
+        ("<", "1.0", [-1.0, 0.0]),
+        (">", "-1.0", [0.0, 1.0]),
+        ("!=", "0.0", [-1.0, 1.0]),
+    ],
+)
+def test_curriculum_filters_strict_and_not_equal_constraints(
+    runtime_context,
+    model_context,
+    operator,
+    expression,
+    expected,
+):
+    terms = {
+        "x": {
+            "type": "CurriculumSampleOnReset",
+            "params": {
+                "min_value": -1.0,
+                "max_value": 1.0,
+                "num_bins": 3,
+                "group": "motion",
+                "noise_scale": 0.0,
+            },
+        },
+    }
+    manager = CurriculumManager(
+        num_envs=2,
+        context=runtime_context,
+        model_context=model_context,
+        terms={"command_reward": {}},
+        manager_configs={
+            "command_manager_config": {
+                "terms": terms,
+                "constraints": {
+                    "x": {
+                        "operator": operator,
+                        "expression": expression,
+                    },
+                },
+            },
+        },
+    )
+
+    term = cast(CommandReward, manager.get_term("command_reward"))
+
+    torch.testing.assert_close(
+        term.buffers["motion"].command_values.squeeze(-1),
+        torch.tensor(expected, dtype=runtime_context.dtype),
+    )

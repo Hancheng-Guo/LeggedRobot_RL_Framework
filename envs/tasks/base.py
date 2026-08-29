@@ -98,7 +98,7 @@ class BaseTaskLogic(ABC):
             num_envs=self.num_envs,
             context=self.context,
             model_context=self.model_context,
-            command_dim=len(self.command_manager.terms),
+            command_dim=self.command_manager.output_dim,
             action_dim=self.action_manager.input_dim,
             **observation_manager_config,
         )

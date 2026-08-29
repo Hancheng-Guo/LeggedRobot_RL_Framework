@@ -10,6 +10,7 @@ from envs.tasks.managers.curriculum.terms.registry import register_curriculum
 @dataclass
 class CommandCurriculumBuffer:
     dimension_names: tuple[str, ...]
+    term_slices: dict[str, slice]
     command_values: torch.Tensor
     reward_sum: torch.Tensor
     sample_count: torch.Tensor
@@ -96,6 +97,7 @@ class CommandReward(BaseCurriculumTerm):
                 "min_value": params.get("min_value"),
                 "max_value": params.get("max_value"),
                 "num_bins": params.get("num_bins"),
+                "dim": params.get("dim", 1),
             }
 
         if not spaces:
@@ -137,29 +139,65 @@ class CommandReward(BaseCurriculumTerm):
 
         # get the axes for each dimension and validate the configuration
         axes: list[torch.Tensor] = []
-        for dimension, config in dimensions.items():
+        dimension_names: list[str] = []
+        term_slices: dict[str, slice] = {}
+        raw_num_cells = 1
+        for term_name, config in dimensions.items():
 
             num_bins = int(config.get("num_bins") or 0)
             if num_bins <= 0:
                 raise ValueError(
-                    f"'num_bins' of dimension '{dimension}' must be positive."
+                    f"'num_bins' of command term '{term_name}' "
+                    "must be positive."
+                )
+
+            command_dim = config.get("dim", 1)
+            if (
+                not isinstance(command_dim, int)
+                or isinstance(command_dim, bool)
+                or command_dim <= 0
+            ):
+                raise ValueError(
+                    f"'command_dim' of command term '{term_name}' must be "
+                    "a positive integer."
+                )
+
+            raw_num_cells *= num_bins ** command_dim
+            if raw_num_cells > self.max_cells:
+                raise ValueError(
+                    f"Curriculum space '{name}' has at least "
+                    f"{raw_num_cells} raw cells, exceeding "
+                    f"max_cells={self.max_cells}. Reduce 'num_bins' or "
+                    "'command_dim', or split the command terms into "
+                    "different groups."
                 )
             
             min_value = float(config["min_value"])
             max_value = float(config["max_value"])
             if min_value > max_value:
                 raise ValueError(
-                    f"'min_value' of dimension '{dimension}' cannot exceed "
-                    "'max_value'."
+                    f"'min_value' of command term '{term_name}' "
+                    "cannot exceed 'max_value'."
                 )
-            
-            axes.append(torch.linspace(
+
+            axis = torch.linspace(
                 min_value,
                 max_value,
                 num_bins,
                 dtype=self.context.dtype,
                 device=self.context.device,
-            ))
+            )
+            start = len(axes)
+            axes.extend([axis] * command_dim)
+            term_slices[term_name] = slice(start, start + command_dim)
+            dimension_names.extend(
+                [term_name]
+                if command_dim == 1
+                else [
+                    f"{term_name}[{index}]"
+                    for index in range(command_dim)
+                ]
+            )
 
         # compute command value of each cell
         all_command_values = (
@@ -167,19 +205,18 @@ class CommandReward(BaseCurriculumTerm):
             if len(axes) == 1
             else torch.cartesian_prod(*axes)
         )
-        dimension_names = tuple(dimensions)
         all_commands = {
-            dimension: all_command_values[:, index:index + 1]
-            for index, dimension in enumerate(dimension_names)
+            term_name: all_command_values[:, term_slice]
+            for term_name, term_slice in term_slices.items()
         }
 
         # apply constraints to command values
         checked_commands = constraint_set.apply(
             all_commands,
-            target_names=set(dimension_names),
+            target_names=set(dimensions),
         )
         checked_command_values = torch.cat(
-            [checked_commands[name] for name in dimension_names],
+            [checked_commands[name] for name in dimensions],
             dim=-1,
         )
 
@@ -198,7 +235,8 @@ class CommandReward(BaseCurriculumTerm):
             )
 
         return CommandCurriculumBuffer(
-            dimension_names=dimension_names,
+            dimension_names=tuple(dimension_names),
+            term_slices=term_slices,
             command_values=filtered_command_values,
             reward_sum=torch.zeros(
                 num_cells,
@@ -259,10 +297,10 @@ class CommandReward(BaseCurriculumTerm):
         buffer = self.buffers[space_name]
 
         try:
-            dimension_id = buffer.dimension_names.index(dimension)
-        except ValueError as error:
+            term_slice = buffer.term_slices[dimension]
+        except KeyError as error:
             raise ValueError(
-                f"Unknown dimension '{dimension}' in curriculum "
+                f"Unknown command term '{dimension}' in curriculum "
                 f"space '{space_name}'."
             ) from error
         
@@ -274,7 +312,7 @@ class CommandReward(BaseCurriculumTerm):
                 f"Curriculum space '{space_name}' has not been sampled."
             )
         
-        return buffer.command_values[cell_ids, dimension_id:dimension_id + 1]
+        return buffer.command_values[cell_ids, term_slice]
 
 
     def update(     # update rewards to cell buffer

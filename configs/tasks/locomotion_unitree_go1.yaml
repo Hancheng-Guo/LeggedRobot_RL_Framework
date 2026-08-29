@@ -15,6 +15,9 @@ command_manager_config:
     lin_vel_y: {type: CurriculumSampleOnReset, params: {group: locomotion, min_value: -0.5, max_value: 0.5, num_bins: 5, noise_scale: 0.167}}
     ang_vel_z: {type: CurriculumSampleOnReset, params: {group: locomotion, min_value: -1.0, max_value: 1.0, num_bins: 5, noise_scale: 0.167}}
     half_period_duration: {type: CurriculumSampleOnReset, params: {group: duration, min_value: 0.1, max_value: 1.0, num_bins: 10, noise_scale: 0.167}}
+    foot_phase_real: {type: CurriculumSampleOnReset, params: {group: real, dim: 4, min_value: -1.0, max_value: 1.0, num_bins: 5, noise_scale: 0.167}}
+    foot_phase_imag: {type: CurriculumSampleOnReset, params: {group: imag, dim: 4, min_value: -1.0, max_value: 1.0, num_bins: 5, noise_scale: 0.167}}
+
   constraints:
     ang_vel_z: {operator: "<=", expression: "0.5 * (1.0 - abs({lin_vel_x}))"}
 

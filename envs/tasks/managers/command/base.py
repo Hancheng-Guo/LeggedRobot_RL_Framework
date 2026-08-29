@@ -38,15 +38,16 @@ class CommandManager:
 
         self.command: dict[str, torch.Tensor] = {}
         self.last_command: dict[str, torch.Tensor] = {}
-        for term_name in self.terms.keys():
-            self.command[term_name] = torch.zeros(
-                (self.num_envs, 1),
-                dtype=self.context.dtype,
-                device=self.context.device,
-            )
+        for term_name, term in self.terms.items():
+            self.command[term_name] = torch.zeros_like(term.command)
             self.last_command[term_name] = torch.zeros_like(
                 self.command[term_name]
             )
+
+        self.output_dim = sum(
+            term.dim
+            for term in self.terms.values()
+        )
 
 
     def _build_terms(

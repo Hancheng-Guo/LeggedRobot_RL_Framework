@@ -50,7 +50,7 @@ class UniformOnReset(BaseCommandTerm):
 
         self.command[env_ids] = (
             torch.rand(
-                (env_ids.numel(), 1),
+                (env_ids.numel(), self.dim),
                 dtype=self.context.dtype,
                 device=self.context.device,
             )

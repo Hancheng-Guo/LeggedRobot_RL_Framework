@@ -211,3 +211,91 @@ def test_curriculum_command_noise_scale_uses_bin_width(
     noise = term.command - term.command_center
     assert abs(noise.mean().item()) < 0.02
     assert abs(noise.std().item() - 0.5) < 0.02
+
+
+def test_curriculum_supports_multidimensional_command_term(
+    runtime_context,
+    model_context,
+):
+    terms = {
+        "foot_phase": {
+            "type": "CurriculumSampleOnReset",
+            "params": {
+                "dim": 2,
+                "min_value": -1.0,
+                "max_value": 1.0,
+                "num_bins": 2,
+                "group": "phase",
+                "noise_scale": 0.0,
+            },
+        },
+    }
+    curriculum = CurriculumManager(
+        num_envs=32,
+        context=runtime_context,
+        model_context=model_context,
+        terms={"command_reward": {}},
+        manager_configs={
+            "command_manager_config": {"terms": terms},
+        },
+    )
+    command = CommandManager(
+        num_envs=32,
+        context=runtime_context,
+        model_context=model_context,
+        curriculum_manager=curriculum,
+        terms=terms,
+    )
+
+    curriculum.reset()
+    command.reset()
+
+    term = cast(CommandReward, curriculum.get_term("command_reward"))
+    buffer = term.buffers["phase"]
+    expected = buffer.command_values[buffer.assigned_cell_ids]
+
+    assert buffer.dimension_names == ("foot_phase[0]", "foot_phase[1]")
+    assert buffer.term_slices == {"foot_phase": slice(0, 2)}
+    assert buffer.command_values.shape == (4, 2)
+    assert command.command["foot_phase"].shape == (32, 2)
+    torch.testing.assert_close(command.command["foot_phase"], expected)
+    assert torch.any(expected[:, 0] != expected[:, 1])
+
+
+def test_multidimensional_curriculum_noise_is_independent(
+    runtime_context,
+    model_context,
+):
+    num_envs = 10_000
+
+    class FixedSampler:
+        buffers = {}
+
+        def resample(self, space_names, env_ids=None):
+            pass
+
+        def get_command(self, space_name, dimension, env_ids=None):
+            selected_count = num_envs if env_ids is None else env_ids.numel()
+            return torch.zeros(selected_count, 4)
+
+    term = CurriculumSampleOnReset(
+        num_envs=num_envs,
+        context=runtime_context,
+        model_context=model_context,
+        curriculum_sampler=FixedSampler(),
+        term_name="foot_phase",
+        group="phase",
+        dim=4,
+        min_value=-1.0,
+        max_value=1.0,
+        num_bins=3,
+        noise_scale=0.5,
+    )
+    torch.manual_seed(0)
+
+    term.reset()
+
+    noise = term.command - term.command_center
+    assert noise.shape == (num_envs, 4)
+    assert abs(noise.std().item() - 0.5) < 0.02
+    assert not torch.equal(noise[:, 0], noise[:, 1])

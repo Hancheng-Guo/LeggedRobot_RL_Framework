@@ -29,6 +29,7 @@ def test_mujoco_builds_observation_indices_from_model(runtime_context):
     assert context.base_ang_vel_qvel_ids.tolist() == [3, 4, 5]
     assert context.joint_qpos_ids.tolist() == list(range(7, 19))
     assert context.joint_qvel_ids.tolist() == list(range(6, 18))
+    assert context.joint_default_pos.shape == (12,)
     assert context.geom_foot_ids.tolist() == [
         context.geom_names.index(name)
         for name in ("FR", "FL", "RR", "RL")

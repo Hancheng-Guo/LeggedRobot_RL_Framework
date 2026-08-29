@@ -36,6 +36,7 @@ def model_context() -> ModelContext:
         gravity=torch.tensor([0.0, 0.0, -9.81]),
         joint_qpos_ids=torch.tensor([0, 8]),
         joint_qvel_ids=torch.tensor([0, 7]),
+        joint_default_pos=torch.tensor([0.0, 0.0]),
         joint_pos_limits=torch.tensor(
             [[-1.0, 1.0], [-2.0, 2.0]],
             dtype=torch.float32,

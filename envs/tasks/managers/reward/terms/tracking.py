@@ -4,27 +4,8 @@ from collections.abc import Sequence
 from envs.simulators.utils.context import ModelContext
 from envs.tasks.managers.reward.terms.base import BaseRewardTerm
 from envs.tasks.managers.reward.terms.registry import register_reward
+from envs.tasks.managers.reward.terms.utils import command_vector
 from envs.tasks.utils.context import TaskContext
-
-
-def _command_vector(
-    task_context: TaskContext,
-    names: Sequence[str] | None,
-) -> torch.Tensor:
-    
-    if names is None:
-        names = tuple(task_context.command)
-    else:
-        missing_names = tuple(
-            name
-            for name in names
-            if name not in task_context.command
-        )
-        if missing_names:
-            raise ValueError(f"Unknown command name(s): {missing_names}.")
-
-    values = [task_context.command[name] for name in names]
-    return torch.cat(values, dim=-1)
 
 
 def _command_target_check(
@@ -59,7 +40,7 @@ class _BaseCommandTracking(BaseRewardTerm):
         task_context: TaskContext
     ) -> torch.Tensor:
         
-        return _command_vector(task_context, self.command_names)
+        return command_vector(task_context, self.command_names)
 
 
 @register_reward

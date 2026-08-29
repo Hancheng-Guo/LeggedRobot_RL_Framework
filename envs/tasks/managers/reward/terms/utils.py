@@ -2,6 +2,7 @@ import torch
 from collections.abc import Sequence
 
 from envs.simulators.utils.context import ModelContext
+from envs.tasks.utils.context import TaskContext
 
 
 def geom_ids_from_names(
@@ -35,3 +36,26 @@ def geom_ids_from_names(
             else model_context.geom_body_ids.device
         ),
     )
+
+
+def command_vector(
+    task_context: TaskContext,
+    names: Sequence[str] | None,
+) -> torch.Tensor:
+    
+    if names is None:
+        names = tuple(task_context.command)
+    else:
+        missing_names = tuple(
+            name
+            for name in names
+            if name not in task_context.command
+        )
+        if missing_names:
+            raise ValueError(f"Unknown command name(s): {missing_names}.")
+
+    values = [task_context.command[name] for name in names]
+    if values:
+        return torch.cat(values, dim=-1)
+    
+    raise RuntimeError("Empty command vector.")

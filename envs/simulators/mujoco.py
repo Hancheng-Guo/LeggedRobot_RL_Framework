@@ -113,6 +113,7 @@ class MujocoSimulator(BaseSimulator):
             self._find_base_joint_info(model)
         )
         actuator_joint_ids = self._find_actuated_joint_ids(model)
+        joint_qpos_ids = model.jnt_qposadr[actuator_joint_ids]
         joint_pos_limits = self._joint_pos_limits(
             model,
             actuator_joint_ids,
@@ -144,12 +145,11 @@ class MujocoSimulator(BaseSimulator):
             ),
             
             # joint_names=names(mujoco.mjtObj.mjOBJ_JOINT, model.njnt),
-            joint_qpos_ids=self._indices(
-                model.jnt_qposadr[actuator_joint_ids]
-            ),
+            joint_qpos_ids=self._indices(joint_qpos_ids),
             joint_qvel_ids=self._indices(
                 model.jnt_dofadr[actuator_joint_ids]
             ),
+            joint_default_pos=self._tensor(model.qpos0[joint_qpos_ids]),
             joint_pos_limits=self._tensor(joint_pos_limits),
 
             # actuator_names=names(mujoco.mjtObj.mjOBJ_ACTUATOR, model.nu),

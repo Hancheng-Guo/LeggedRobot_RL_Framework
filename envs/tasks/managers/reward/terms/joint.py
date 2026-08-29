@@ -37,21 +37,13 @@ class JointPositionL2(BaseRewardTerm):
     def __init__(
         self,
         model_context: ModelContext,
-        default_position: float | list[float] | None = None,
         *args, **kwargs,
     ) -> None:
         
         super().__init__(*args, **kwargs)
 
         self.qpos_ids = model_context.joint_qpos_ids
-        if default_position is None:
-            self.default_position = None
-        else:
-            self.default_position = torch.as_tensor(
-                default_position,
-                dtype=self.context.dtype,
-                device=self.context.device,
-            )
+        self.default_position = model_context.joint_default_pos
 
 
     def compute(
@@ -60,10 +52,7 @@ class JointPositionL2(BaseRewardTerm):
     ) -> torch.Tensor:
         
         position = task_context.state["qpos"][:, self.qpos_ids]
-        if self.default_position is None:
-            error = position
-        else:
-            error = position - self.default_position
+        error = position - self.default_position
         return torch.sum(error.square(), dim=-1)
 
 
@@ -111,7 +100,7 @@ class JointLimitViolationL1(BaseRewardTerm):
 
 
 @register_reward
-class JointPowerAbs(BaseRewardTerm):
+class JointPowerL1(BaseRewardTerm):
 
     def __init__(
         self,

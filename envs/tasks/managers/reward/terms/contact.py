@@ -13,6 +13,7 @@ class IllegalContactL1(BaseRewardTerm):
     def __init__(
         self,
         model_context: ModelContext,
+        num_envs: int,
         geom_legal_names: list[str] | None = None,
         *args, **kwargs,
     ) -> None:
@@ -23,6 +24,7 @@ class IllegalContactL1(BaseRewardTerm):
             raise ValueError(
                 "IllegalContactL1 requires 'model_context.geom_floor_ids'."
             )
+        self.num_envs = num_envs
         self.legal_geom_ids = geom_ids_from_names(
             model_context,
             geom_legal_names or [],
@@ -38,14 +40,11 @@ class IllegalContactL1(BaseRewardTerm):
         
         contact_geom_ids = task_context.state["contact_geom_ids"]
         if contact_geom_ids.shape[1] == 0:
-            return task_context.action.new_zeros(task_context.action.shape[0])
-            # equa to the following express:
-            # num_envs = task_context.action.shape[0]
-            # return torch.zeros(
-            #     num_envs,
-            #     dtype=task_context.action.dtype,
-            #     device=task_context.action.device
-            # )
+            return torch.zeros(
+                self.num_envs,
+                dtype=self.context.dtype,
+                device=self.context.device,
+            )
 
         geom1 = contact_geom_ids[..., 0]
         geom2 = contact_geom_ids[..., 1]
@@ -53,4 +52,4 @@ class IllegalContactL1(BaseRewardTerm):
             (~torch.isin(geom1, self.legal_geom_ids) & torch.isin(geom2, self.ground_geom_ids))
             | (torch.isin(geom1, self.ground_geom_ids) & ~torch.isin(geom2, self.legal_geom_ids))
         )
-        return illegal_ground.sum(dim=-1).to(task_context.action.dtype)
+        return illegal_ground.sum(dim=-1).to(dtype=self.context.dtype)

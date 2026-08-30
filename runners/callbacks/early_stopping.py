@@ -1,10 +1,10 @@
 import math
-from fnmatch import fnmatchcase
 from collections.abc import Mapping
 from typing import Any, Literal
 
 from runners.base import BaseRunner
 from runners.callbacks.base import BaseCallback
+from utils.matching import resolve_metric_name
 from utils.scalar import scalar_value
 
 
@@ -63,7 +63,11 @@ class EarlystoppingCallback(BaseCallback):
         *args, **kwargs,
     ) -> bool:
         
-        metric_name = self._resolve_metric_name(info)
+        metric_name = resolve_metric_name(
+            info=info,
+            pattern=self.monitor,
+            owner="Early-stopping",
+        )
         value = scalar_value(info[metric_name])
         if value is None:
             raise TypeError(
@@ -87,33 +91,6 @@ class EarlystoppingCallback(BaseCallback):
             self.no_improve_iters
             < self.max_no_improve_iters
         )
-
-
-    def _resolve_metric_name(
-        self,
-        info: Mapping[str, Any]
-    ) -> str:
-        
-        matches = [
-            name
-            for name in info
-            if fnmatchcase(name, self.monitor)
-        ]
-
-        if not matches:
-            raise KeyError(
-                f"Training info has no metric matching early-stopping "
-                f"pattern {self.monitor!r}."
-            )
-        
-        if len(matches) > 1:
-            raise ValueError(
-                f"Early-stopping pattern {self.monitor!r} is ambiguous; "
-                f"matched: {', '.join(matches)}."
-            )
-        
-        return matches[0]
-
 
     def _improved(self, value: float) -> bool:
         assert self.best_value is not None

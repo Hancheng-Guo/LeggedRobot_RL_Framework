@@ -4,6 +4,7 @@ from runners.callbacks.checkpoint import CheckpointCallback
 from runners.callbacks.tensorboard import TensorboardCallback
 from runners.callbacks.early_stopping import EarlystoppingCallback
 from runners.callbacks.logging import LoggingCallback
+from runners.callbacks.adaptive_learning_rate import AdaptiveLearningRateCallback
 
 
 CALLBACK_TYPE_MAP: dict[str, type[BaseCallback]] = {
@@ -12,4 +13,5 @@ CALLBACK_TYPE_MAP: dict[str, type[BaseCallback]] = {
     "tensorboard": TensorboardCallback,
     "early_stopping": EarlystoppingCallback,
     "logging": LoggingCallback,
+    "adaptive_learning_rate": AdaptiveLearningRateCallback,
 }

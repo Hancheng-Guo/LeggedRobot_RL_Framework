@@ -11,6 +11,9 @@ from runners.callbacks.logging import LoggingCallback
 from runners.callbacks.progress_bar import ProgressBarCallback
 from runners.callbacks import tensorboard as tensorboard_module
 from runners.callbacks.tensorboard import TensorboardCallback
+from runners.callbacks.adaptive_learning_rate import (
+    AdaptiveLearningRateCallback,
+)
 from runners.base import BaseRunner
 from runners.on_policy import OnPolicyRunner
 from app.utils.context import RuntimeContext
@@ -50,6 +53,98 @@ def test_early_stopping_stops_at_no_improvement_limit() -> None:
     assert callback._on_iteration_end({"score": 1.0}) is True
     assert callback._on_iteration_end({"score": 0.9}) is True
     assert callback._on_iteration_end({"score": 0.8}) is False
+
+
+def test_adaptive_learning_rate_tracks_metric_range() -> None:
+    runner = make_runner()
+    algorithm = cast(Any, runner.algorithm)
+    algorithm.learning_rate = 0.001
+    callback = AdaptiveLearningRateCallback(
+        runner=runner,
+        monitor="rollout/approx_kl",
+        allowed_range=(0.01, 0.02),
+        factor=0.5,
+    )
+    callback._on_train_start()
+
+    low_info = {"rollout/approx_kl": 0.005}
+    callback._on_iteration_end(low_info)
+    assert algorithm.learning_rate == pytest.approx(0.002)
+    assert algorithm.optimizer.param_groups[0]["lr"] == pytest.approx(
+        0.002
+    )
+    assert "rollout/learning_rate" not in low_info
+
+    in_range_info = {"rollout/approx_kl": 0.015}
+    callback._on_iteration_end(in_range_info)
+    assert algorithm.learning_rate == pytest.approx(0.002)
+
+    high_info = {"rollout/approx_kl": 0.03}
+    callback._on_iteration_end(high_info)
+    assert algorithm.learning_rate == pytest.approx(0.001)
+    assert "rollout/learning_rate" not in high_info
+
+
+def test_adaptive_learning_rate_rejects_invalid_range() -> None:
+    with pytest.raises(ValueError, match="lower bound"):
+        AdaptiveLearningRateCallback(
+            runner=make_runner(),
+            monitor="rollout/approx_kl",
+            allowed_range=(0.02, 0.01),
+            factor=0.5,
+        )
+
+
+def test_adaptive_learning_rate_supports_reverse_direction() -> None:
+    runner = make_runner()
+    algorithm = cast(Any, runner.algorithm)
+    algorithm.learning_rate = 0.001
+    callback = AdaptiveLearningRateCallback(
+        runner=runner,
+        monitor="rollout/entropy",
+        allowed_range=(1.0, 2.0),
+        factor=0.5,
+    )
+    callback._on_train_start()
+
+    callback._on_iteration_end({"rollout/entropy": 0.5})
+    assert algorithm.learning_rate == pytest.approx(0.0005)
+
+    callback._on_iteration_end({"rollout/entropy": 2.5})
+    assert algorithm.learning_rate == pytest.approx(0.001)
+
+
+def test_adaptive_learning_rate_rejects_unsupported_monitor() -> None:
+    with pytest.raises(KeyError, match="rollout/loss"):
+        AdaptiveLearningRateCallback(
+            runner=make_runner(),
+            monitor="rollout/loss",
+            allowed_range=(0.1, 1.0),
+            factor=0.5,
+        )
+
+
+def test_runner_builds_adaptive_learning_rate_from_yaml_style_config(
+    runtime_context: RuntimeContext,
+) -> None:
+    runner = OnPolicyRunner(context=runtime_context)
+    runner.max_iterations = 10
+    runner.rollout_length = 4
+
+    runner._build_callbacks(callbacks=[{
+        "adaptive_learning_rate": {
+            "monitor": "rollout/approx_kl",
+            "allowed_range": [0.005, 0.02],
+            "factor": 0.5,
+        }
+    }])
+
+    assert len(runner.callbacks) == 1
+    callback = runner.callbacks[0]
+    assert isinstance(callback, AdaptiveLearningRateCallback)
+    assert callback.lower_bound == pytest.approx(0.005)
+    assert callback.upper_bound == pytest.approx(0.02)
+    assert callback.factor == pytest.approx(0.5)
 
 
 def test_early_stopping_rejects_missing_metric() -> None:

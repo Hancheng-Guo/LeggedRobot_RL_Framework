@@ -226,6 +226,7 @@ def test_ppo_update_optimizes_and_reports_metrics(
     algorithm.policy = policy
     algorithm.storage = storage
     algorithm.optimizer = torch.optim.Adam(policy.parameters(), lr=0.01)
+    algorithm.learning_rate = 0.01
     algorithm.clip_range = 0.2
     algorithm.entropy_coef = 0.01
     algorithm.value_coef = 0.5
@@ -261,7 +262,9 @@ def test_ppo_update_optimizes_and_reports_metrics(
         "rollout/approx_kl",
         "rollout/clip_fraction",
         "rollout/grad_norm",
+        "rollout/learning_rate",
     }
+    assert info["rollout/learning_rate"] == 0.01
 
 
 def test_ppo_closes_owned_components(

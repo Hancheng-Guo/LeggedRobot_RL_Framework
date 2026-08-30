@@ -260,6 +260,7 @@ def test_ppo_updates_recurrent_actor_sequences(
     algorithm.policy = policy
     algorithm.storage = RolloutStorage(context=runtime_context)
     algorithm.optimizer = torch.optim.Adam(policy.parameters(), lr=3e-4)
+    algorithm.learning_rate = 3e-4
     algorithm.gamma = 0.99
     algorithm.gae_lambda = 0.95
     algorithm.clip_range = 0.2
@@ -339,7 +340,7 @@ def test_ppo_builds_policy_before_optimizer(
         component=make_component(config_path),
         obs_dim=3,
         action_dim=2,
-        learning_rate=3e-4,
+        init_learning_rate=3e-4,
         gamma=0.99,
         gae_lambda=0.95,
         clip_range=0.2,
@@ -351,5 +352,7 @@ def test_ppo_builds_policy_before_optimizer(
     )
 
     assert isinstance(algorithm.policy, ConfigurableActorCritic)
+    assert algorithm.init_learning_rate == 3e-4
+    assert algorithm.learning_rate == 3e-4
     assert algorithm.optimizer.param_groups[0]["lr"] == 3e-4
     assert len(algorithm.optimizer.param_groups[0]["params"]) > 0

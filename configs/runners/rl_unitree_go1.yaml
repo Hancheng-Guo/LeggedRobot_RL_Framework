@@ -3,11 +3,15 @@ rollout_length: 64
 rollout_length_history_size: 50
 callbacks:
   - progress_bar
+  - adaptive_learning_rate:
+      monitor: "*/approx_kl"
+      allowed_range: [0.01, 0.3]
+      factor: 0.5
   - checkpoint:
       save_interval: 100
   - logging
   - tensorboard:
-      histogram_log_interval: 1
+      histogram_log_interval: 100
       step_metrics:
         "reward": [value]
         "reward/*": [mean]

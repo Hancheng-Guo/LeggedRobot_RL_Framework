@@ -27,6 +27,7 @@ class PPO(OnPolicyAlgorithm):
         self.optimizer: torch.optim.Optimizer
         self._pending_recurrent_state: RecurrentState
 
+        self.init_learning_rate: float
         self.learning_rate: float
         self.obs_dim: int
         self.action_dim: int
@@ -45,7 +46,7 @@ class PPO(OnPolicyAlgorithm):
         component: Component,
         obs_dim: int | None = None,
         action_dim: int | None = None,
-        learning_rate: float | None = None,
+        init_learning_rate: float | None = None,
         gamma: float | None = None,
         gae_lambda: float | None = None,
         clip_range: float | None = None,
@@ -60,7 +61,7 @@ class PPO(OnPolicyAlgorithm):
             self,
             obs_dim=obs_dim,
             action_dim=action_dim,
-            learning_rate=learning_rate,
+            init_learning_rate=init_learning_rate,
             gamma=gamma,
             gae_lambda=gae_lambda,
             clip_range=clip_range,
@@ -70,14 +71,15 @@ class PPO(OnPolicyAlgorithm):
             num_epochs=num_epochs,
             num_mini_batches=num_mini_batches,
         )
+        self.learning_rate = self.init_learning_rate
         self._validate_config()
         self._build(component=component)
 
 
     def _validate_config(self) -> None:
         
-        if self.learning_rate <= 0.0:
-            raise ValueError("'learning_rate' must be greater than 0.")
+        if self.init_learning_rate <= 0.0:
+            raise ValueError("'init_learning_rate' must be greater than 0.")
         if self.obs_dim <= 0:
             raise ValueError("'obs_dim' must be greater than 0.")
         if self.action_dim <= 0:
@@ -326,6 +328,8 @@ class PPO(OnPolicyAlgorithm):
         info = {
             f"rollout/{name}": value / num_updates
             for name, value in totals.items()
+        } | {
+            "rollout/learning_rate": self.learning_rate,
         }
         self.storage.clear()
         return info

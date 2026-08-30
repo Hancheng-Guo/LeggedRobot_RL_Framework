@@ -78,6 +78,8 @@ class TensorboardCallback(BaseCallback):
                     "tensorboard",
                     "--logdir",
                     str(self.tensorboard_log_dir),
+                    "--host",
+                    "0.0.0.0",
                 )
             )
             self.tensorboard_url = self._tensorboard.launch()

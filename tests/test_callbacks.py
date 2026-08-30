@@ -304,6 +304,8 @@ def test_tensorboard_starts_server_and_logs_returned_url(
         "tensorboard",
         "--logdir",
         str(tensorboard.tensorboard_log_dir),
+        "--host",
+        "0.0.0.0",
     )
 
 

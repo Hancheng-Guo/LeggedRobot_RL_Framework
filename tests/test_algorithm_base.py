@@ -254,13 +254,13 @@ def test_ppo_update_optimizes_and_reports_metrics(
 
     assert storage.obs == []
     assert set(info) == {
-        "ppo/loss",
-        "ppo/policy_loss",
-        "ppo/value_loss",
-        "ppo/entropy",
-        "ppo/approx_kl",
-        "ppo/clip_fraction",
-        "ppo/grad_norm",
+        "rollout/loss",
+        "rollout/policy_loss",
+        "rollout/value_loss",
+        "rollout/entropy",
+        "rollout/approx_kl",
+        "rollout/clip_fraction",
+        "rollout/grad_norm",
     }
 
 

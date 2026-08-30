@@ -33,6 +33,7 @@ class BaseRunner(ABC):
         self,
         max_iterations: int | None = None,
         rollout_length: int | None = None,
+        rollout_length_history_size: int | None = None,
         callbacks: Sequence[str | Mapping[str, Any]] | None = None,
         *args, **kwargs
     ) -> None:

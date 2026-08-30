@@ -324,7 +324,7 @@ class PPO(OnPolicyAlgorithm):
             raise RuntimeError("storage produced no mini-batches.")
 
         info = {
-            f"ppo/{name}": value / num_updates
+            f"rollout/{name}": value / num_updates
             for name, value in totals.items()
         }
         self.storage.clear()

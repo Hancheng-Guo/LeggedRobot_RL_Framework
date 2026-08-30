@@ -1,6 +1,7 @@
 import warnings
 import torch
 import numpy as np
+from collections import deque
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -34,6 +35,12 @@ class OnPolicyRunner(BaseRunner):
 
         self.max_iterations: int
         self.rollout_length: int
+        self.rollout_length_history_size = 50
+        self._recent_rollout_lengths: deque[int] = deque(
+            [0] * self.rollout_length_history_size,
+            maxlen=self.rollout_length_history_size,
+        )
+        self._environment_rollout_lengths: torch.Tensor
         self.callbacks: list[BaseCallback] = []
         self.stop_callback: list[BaseCallback] = []
 
@@ -43,6 +50,7 @@ class OnPolicyRunner(BaseRunner):
         component: Component, 
         max_iterations: int | None = None,
         rollout_length: int | None = None,
+        rollout_length_history_size: int | None = None,
         callbacks: Sequence[str | Mapping[str, Any]] | None = None,
     ) -> None:
 
@@ -51,6 +59,9 @@ class OnPolicyRunner(BaseRunner):
             self,
             max_iterations=max_iterations,
             rollout_length=rollout_length,
+        )
+        self._update_rollout_length_history_size(
+            rollout_length_history_size
         )
         self._build_callbacks(callbacks=callbacks)
         self._build_environment(component=component)
@@ -304,6 +315,15 @@ class OnPolicyRunner(BaseRunner):
         self.algorithm.set_train_mode()
         obs = self.environment.reset()
         self.stop_callback.clear()
+        self._recent_rollout_lengths = deque(
+            [0] * self.rollout_length_history_size,
+            maxlen=self.rollout_length_history_size,
+        )
+        self._environment_rollout_lengths = torch.zeros(
+            self.environment.num_envs,
+            dtype=torch.long,
+            device=self.context.device,
+        )
         
         if not self._run_callbacks("_on_train_start"):
             self._run_callbacks("_on_train_end")
@@ -350,6 +370,10 @@ class OnPolicyRunner(BaseRunner):
 
                 obs = next_obs
                 collected_steps += 1
+                self._record_environment_rollout_lengths(
+                    terminated=terminated,
+                    truncated=truncated,
+                )
 
                 if not self._run_callbacks("_on_step_end", info=info):
                     callback_step_break = True
@@ -379,9 +403,53 @@ class OnPolicyRunner(BaseRunner):
     def _get_info(self) -> dict:
 
         info = {
-            "runner/current_iter": self.current_iteration
+            "runner/current_iter": self.current_iteration,
+            "rollout/mean_len": (
+                sum(self._recent_rollout_lengths)
+                / len(self._recent_rollout_lengths)
+            ),
         }
         return info
+
+
+    def _record_environment_rollout_lengths(
+        self,
+        terminated: torch.Tensor,
+        truncated: torch.Tensor,
+    ) -> None:
+
+        self._environment_rollout_lengths += 1
+        done = terminated | truncated
+        completed_lengths = self._environment_rollout_lengths[done]
+        self._recent_rollout_lengths.extend(
+            int(length)
+            for length in completed_lengths.tolist()
+        )
+        self._environment_rollout_lengths[done] = 0
+
+
+    def _update_rollout_length_history_size(
+        self,
+        rollout_length_history_size: int | None,
+    ) -> None:
+        
+        if rollout_length_history_size is None:
+            return
+        if rollout_length_history_size <= 0:
+            raise ValueError(
+                "'rollout_length_history_size' must be greater than 0."
+            )
+        
+        self.rollout_length_history_size = rollout_length_history_size
+        recorded_lengths = [
+            length
+            for length in self._recent_rollout_lengths
+        ][-rollout_length_history_size:]
+        self._recent_rollout_lengths = deque(
+            [0] * (rollout_length_history_size - len(recorded_lengths))
+            + recorded_lengths,
+            maxlen=rollout_length_history_size,
+        )
 
 
     def test(

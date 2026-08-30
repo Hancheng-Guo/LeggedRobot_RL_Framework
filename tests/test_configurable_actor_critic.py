@@ -295,7 +295,7 @@ def test_ppo_updates_recurrent_actor_sequences(
     algorithm.compute_returns(last_obs=obs)
     info = algorithm.update()
 
-    assert "ppo/loss" in info
+    assert "rollout/loss" in info
     assert algorithm.storage.obs == []
 
 

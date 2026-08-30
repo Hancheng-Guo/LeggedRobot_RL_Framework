@@ -1,5 +1,6 @@
 max_iterations: 2000
 rollout_length: 64
+rollout_length_history_size: 50
 callbacks:
   - progress_bar
   - checkpoint:
@@ -12,8 +13,8 @@ callbacks:
         "reward/*": [mean]
         "termination/*": [mean]
         "command/*": [histogram]
-  - early_stopping: 
-      monitor: "*/loss"
-      mode: min
-      max_no_improve_iters: 20
-      min_delta: 0.0
+#   - early_stopping: 
+#       monitor: "*/loss"
+#       mode: min
+#       max_no_improve_iters: 20
+#       min_delta: 0.0

@@ -125,6 +125,85 @@ def test_train_stops_before_empty_rollout_update(
     assert runner.stop_callback == [callback]
 
 
+def test_runner_reports_recent_rollout_length_mean(
+    runtime_context: RuntimeContext,
+) -> None:
+    runner = OnPolicyRunner(context=runtime_context)
+    runner.current_iteration = 3
+    runner._update_rollout_length_history_size(3)
+    runner._recent_rollout_lengths.extend((8, 6, 4, 2))
+
+    info = runner._get_info()
+
+    assert info["runner/current_iter"] == 3
+    assert info["rollout/mean_len"] == pytest.approx(4.0)
+
+
+def test_runner_initializes_rollout_length_history_with_zeros(
+    runtime_context: RuntimeContext,
+) -> None:
+    runner = OnPolicyRunner(context=runtime_context)
+
+    assert len(runner._recent_rollout_lengths) == 50
+    assert set(runner._recent_rollout_lengths) == {0}
+
+
+def test_runner_tracks_rollout_length_for_each_environment(
+    runtime_context: RuntimeContext,
+) -> None:
+    runner = OnPolicyRunner(context=runtime_context)
+    runner.current_iteration = 0
+    runner._environment_rollout_lengths = torch.zeros(
+        2,
+        dtype=torch.long,
+    )
+
+    runner._record_environment_rollout_lengths(
+        terminated=torch.tensor([False, False]),
+        truncated=torch.tensor([False, False]),
+    )
+    assert set(runner._recent_rollout_lengths) == {0}
+
+    runner._record_environment_rollout_lengths(
+        terminated=torch.tensor([True, False]),
+        truncated=torch.tensor([False, False]),
+    )
+    runner._record_environment_rollout_lengths(
+        terminated=torch.tensor([False, False]),
+        truncated=torch.tensor([False, True]),
+    )
+
+    assert [
+        length
+        for length in runner._recent_rollout_lengths
+        if length > 0
+    ] == [2, 3]
+    assert runner._environment_rollout_lengths.tolist() == [1, 0]
+    info = runner._get_info()
+    assert info["rollout/mean_len"] == pytest.approx(0.1)
+
+
+def test_runner_reports_zero_mean_before_any_environment_finishes(
+    runtime_context: RuntimeContext,
+) -> None:
+    runner = OnPolicyRunner(context=runtime_context)
+    runner.current_iteration = 0
+
+    assert runner._get_info() == {
+        "runner/current_iter": 0,
+        "rollout/mean_len": 0.0,
+    }
+
+
+def test_runner_rejects_invalid_rollout_length_history_size(
+    runtime_context: RuntimeContext,
+) -> None:
+    runner = OnPolicyRunner(context=runtime_context)
+
+    with pytest.raises(ValueError, match="rollout_length_history_size"):
+        runner._update_rollout_length_history_size(0)
+
+
 def test_play_restores_original_environment_after_failure(
     runtime_context: RuntimeContext,
     tmp_path: Path,

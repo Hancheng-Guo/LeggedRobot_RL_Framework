@@ -64,10 +64,13 @@ def test_adaptive_learning_rate_tracks_metric_range() -> None:
         monitor="rollout/approx_kl",
         allowed_range=(0.01, 0.02),
         factor=0.5,
+        buffer_len=2,
     )
     callback._on_train_start()
 
     low_info = {"rollout/approx_kl": 0.005}
+    callback._on_iteration_end(low_info)
+    assert algorithm.learning_rate == pytest.approx(0.001)
     callback._on_iteration_end(low_info)
     assert algorithm.learning_rate == pytest.approx(0.002)
     assert algorithm.optimizer.param_groups[0]["lr"] == pytest.approx(
@@ -104,14 +107,40 @@ def test_adaptive_learning_rate_supports_reverse_direction() -> None:
         monitor="rollout/entropy",
         allowed_range=(1.0, 2.0),
         factor=0.5,
+        buffer_len=2,
     )
     callback._on_train_start()
 
     callback._on_iteration_end({"rollout/entropy": 0.5})
+    assert algorithm.learning_rate == pytest.approx(0.001)
+    callback._on_iteration_end({"rollout/entropy": 0.5})
     assert algorithm.learning_rate == pytest.approx(0.0005)
 
     callback._on_iteration_end({"rollout/entropy": 2.5})
+    assert algorithm.learning_rate == pytest.approx(0.0005)
+    callback._on_iteration_end({"rollout/entropy": 2.5})
     assert algorithm.learning_rate == pytest.approx(0.001)
+
+
+def test_adaptive_learning_rate_ignores_nonfinite_metric() -> None:
+    runner = make_runner()
+    algorithm = cast(Any, runner.algorithm)
+    algorithm.learning_rate = 0.001
+    callback = AdaptiveLearningRateCallback(
+        runner=runner,
+        monitor="rollout/approx_kl",
+        allowed_range=(0.01, 0.02),
+        factor=0.5,
+        buffer_len=2,
+    )
+    callback._on_train_start()
+
+    callback._on_iteration_end({"rollout/approx_kl": float("nan")})
+    callback._on_iteration_end({"rollout/approx_kl": 0.005})
+    assert algorithm.learning_rate == pytest.approx(0.001)
+
+    callback._on_iteration_end({"rollout/approx_kl": 0.005})
+    assert algorithm.learning_rate == pytest.approx(0.002)
 
 
 def test_adaptive_learning_rate_rejects_unsupported_monitor() -> None:

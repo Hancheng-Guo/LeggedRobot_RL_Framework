@@ -1,5 +1,6 @@
-import math
 import torch
+import math
+from collections import deque
 from collections.abc import Sequence
 from enum import Enum, auto
 from numbers import Real
@@ -47,6 +48,7 @@ class AdaptiveLearningRateCallback(BaseCallback):
         factor: float,
         min_learning_rate: float | None = None,
         max_learning_rate: float | None = None,
+        buffer_len: int = 10,
         *args, **kwargs,
     ) -> None:
         
@@ -75,6 +77,8 @@ class AdaptiveLearningRateCallback(BaseCallback):
             raise ValueError(
                 "'min_learning_rate' cannot exceed 'max_learning_rate'."
             )
+        if buffer_len <= 0:
+            raise ValueError("'buffer_len' must be greater than 0.")
 
         self.runner = runner
         self.monitor = resolve_metric_name(
@@ -87,8 +91,13 @@ class AdaptiveLearningRateCallback(BaseCallback):
         self.factor = factor
         self.min_learning_rate = min_learning_rate
         self.max_learning_rate = max_learning_rate
+
         self._algorithm: LearningRateAdjustable
         self._optimizer: torch.optim.Optimizer
+        self._buffer: deque[float]
+        self._hold_current_iters: int
+        self._buffer_len = int(buffer_len)
+        
 
 
     def _on_train_start(
@@ -118,6 +127,9 @@ class AdaptiveLearningRateCallback(BaseCallback):
 
         self._algorithm = algorithm
         self._optimizer = optimizer
+        self._buffer = deque(maxlen=self._buffer_len)
+        self._hold_current_iters = self._buffer_len - 1
+
         return True
 
 
@@ -138,37 +150,55 @@ class AdaptiveLearningRateCallback(BaseCallback):
                 f"Learning-rate metric {self.monitor!r} "
                 "must be a numeric scalar."
             )
+        if not math.isfinite(metric_value):
+            return True
+        self._buffer.append(metric_value)
 
-        new_learning_rate = float(self._algorithm.learning_rate)
-        if math.isfinite(metric_value):
+        if not self._hold_current_iters:
+            new_learning_rate = float(self._algorithm.learning_rate)
             lower_adjustment, upper_adjustment = (
                 self._MONITOR_ADJUSTMENT_MAP[self.monitor]
             )
-            if metric_value < self.lower_bound:
+
+            learning_rate_changed = False
+            metric_value_mean = (
+                sum(self._buffer)
+                / len(self._buffer)
+            )
+            if metric_value_mean < self.lower_bound:
                 new_learning_rate = self._adjust_learning_rate(
                     new_learning_rate,
                     lower_adjustment,
                 )
-            elif metric_value > self.upper_bound:
+                learning_rate_changed = True
+            elif metric_value_mean > self.upper_bound:
                 new_learning_rate = self._adjust_learning_rate(
                     new_learning_rate,
                     upper_adjustment,
                 )
+                learning_rate_changed = True
 
-        if self.min_learning_rate is not None:
-            new_learning_rate = max(
-                new_learning_rate,
-                self.min_learning_rate,
-            )
-        if self.max_learning_rate is not None:
-            new_learning_rate = min(
-                new_learning_rate,
-                self.max_learning_rate,
-            )
+            if learning_rate_changed:
 
-        self._algorithm.learning_rate = new_learning_rate
-        for param_group in self._optimizer.param_groups:
-            param_group["lr"] = new_learning_rate
+                if self.min_learning_rate is not None:
+                    new_learning_rate = max(
+                        new_learning_rate,
+                        self.min_learning_rate,
+                    )
+                if self.max_learning_rate is not None:
+                    new_learning_rate = min(
+                        new_learning_rate,
+                        self.max_learning_rate,
+                    )
+
+                self._algorithm.learning_rate = new_learning_rate
+                for param_group in self._optimizer.param_groups:
+                    param_group["lr"] = new_learning_rate
+
+                self._hold_current_iters = self._buffer_len - 1
+
+        else:
+            self._hold_current_iters -= 1
 
         return True
 

@@ -25,14 +25,15 @@ command_manager_config:
 
 
 observation_manager_config:
-  clip: 100.0
+  clip: 10.0
   terms:
-    base_angular_velocity: {scale: 0.25}
+    base_angular_velocity: {scale: 0.05}
     projected_gravity: {scale: 1.0}
-    command: {scale: 1.0}
-    joint_position: {scale: 1.0}
+    command: {scale: 0.5}
+    joint_position: {scale: 0.3}
     joint_velocity: {scale: 0.05}
-    last_action: {scale: 1.0}
+    last_action: {scale: 0.3}
+    second_last_action: {scale: 0.3}
 
 
 reward_manager_config:

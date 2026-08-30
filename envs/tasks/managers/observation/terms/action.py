@@ -22,3 +22,22 @@ class LastAction(BaseObservationTerm):
 
     def compute(self, task_context: TaskContext) -> torch.Tensor:
         return task_context.action
+
+
+@register_observation
+class SecondLastAction(BaseObservationTerm):
+
+    def __init__(
+        self,
+        action_dim: int,
+        *args,
+        **kwargs,
+    ) -> None:
+        
+        super().__init__(*args, **kwargs)
+        
+        self.output_dim = action_dim
+
+
+    def compute(self, task_context: TaskContext) -> torch.Tensor:
+        return task_context.last_action

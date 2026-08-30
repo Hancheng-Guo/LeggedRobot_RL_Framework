@@ -17,6 +17,7 @@ callbacks:
         "reward/*": [mean]
         "termination/*": [mean]
         "command/*": [histogram]
+        "observation/*": [histogram]
 #   - early_stopping: 
 #       monitor: "*/loss"
 #       mode: min

@@ -19,8 +19,7 @@ class ObservationManager:
         action_dim: int,
         terms: dict[str, dict[str, Any] | None],
         clip: float | None = None,
-        *args,
-        **kwargs,
+        *args, **kwargs,
     ) -> None:
 
         if clip is not None and clip <= 0.0:

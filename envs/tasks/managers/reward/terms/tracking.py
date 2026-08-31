@@ -77,7 +77,7 @@ class TrackLinearVelocityXyL2Exp(_BaseCommandTracking):
 
 
 @register_reward
-class TrackLinearVelocityXyL2ExpAndLogCosh(_BaseCommandTracking):
+class TrackLinearVelocityXyL2ExpAndLogcosh(_BaseCommandTracking):
 
     def __init__(
         self,
@@ -203,7 +203,7 @@ class TrackAngularVelocityZL2Exp(_BaseCommandTracking):
 
 
 @register_reward
-class TrackAngularVelocityZL2ExpAndLogCosh(TrackAngularVelocityZL2Exp):
+class TrackAngularVelocityZL2ExpAndLogcosh(TrackAngularVelocityZL2Exp):
 
     def __init__(
         self,

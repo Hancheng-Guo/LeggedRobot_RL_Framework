@@ -25,22 +25,22 @@ command_manager_config:
 
 
 observation_manager_config:
-  clip: 10.0
+  clip: 3.0
   terms:
     base_angular_velocity: {scale: 0.05}
     projected_gravity: {scale: 1.0}
     command: {scale: 0.5}
     joint_position: {scale: 0.3}
     joint_velocity: {scale: 0.05}
-    last_action: {scale: 0.3}
-    second_last_action: {scale: 0.3}
+    last_action: {scale: 0.1}
+    second_last_action: {scale: 0.1}
 
 
 reward_manager_config:
   terms:
     illegal_contact_l1: {weight: -1.0}
-    track_linear_velocity_xy_l2_exp: {weight: 10.0, params: {x_std: 0.5, y_std: 0.5}}
-    track_angular_velocity_z_l2_exp: {weight: 10.0, params: {std: 0.5}}
+    track_linear_velocity_xy_l2_exp_and_logcosh: {weight: 10.0, params: {logcosh_weight: 0.75}}
+    track_angular_velocity_z_l2_exp_and_logcosh: {weight: 10.0, params: {logcosh_weight: 0.75, std: 2.5}}
     track_linear_velocity_xy_error_integral_l2: {weight: -1.0e-3, params: {integral_length: 25}}
     track_angular_velocity_z_error_integral_l2: {weight: -1.0e-3, params: {integral_length: 25}}
     base_linear_velocity_z_l2: {weight: -2.0}
@@ -62,13 +62,12 @@ reward_manager_config:
 
 termination_manager_config:
   terms:
-    base_height: {min_height: 0.20}
     body_contact: {body_names: [trunk, FR_thigh, FL_thigh, RR_thigh, RL_thigh]}
 
 
 curriculum_manager_config:
   terms:
-    command_reward: {temperature: 1.0, exploration: 0.05, max_cells: 100000}
+    command_reward: {max_cells: 100000}
 
 
 event_manager_config:

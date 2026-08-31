@@ -2,13 +2,14 @@ import torch
 import operator
 import statistics
 from collections import deque
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from numbers import Real
 from typing import Any
 
 
 from runners.callbacks.base import BaseCallback
+from utils.matching import resolve_metric_name
 
 
 AGGREGATION_MAP: dict[
@@ -16,6 +17,8 @@ AGGREGATION_MAP: dict[
     Callable[[Iterable[float]], float],
 ] = {
     "mean": statistics.fmean,
+    "max": max,
+    "min": min,
 }
 
 
@@ -32,7 +35,6 @@ OPERATOR_MAP: dict[str, Callable[[float, float], bool]] = {
 @dataclass(slots=True)
 class _StageCondition:
     metric: str
-    info_key: str
     aggregate: Callable[[Iterable[float]], float]
     compare: Callable[[float, float], bool]
     threshold: float
@@ -54,52 +56,57 @@ class StageCallback(BaseCallback):
 
     def __init__(
         self,
-        condition: Mapping[str, Any],
+        condition: Sequence[Mapping[str, Any]],
         *args, **kwargs,
     ) -> None:
         self.runner = None
         self.stop_training = False
         self._conditions = self._build_conditions(
-            dict(condition)
+            condition
         )
 
 
     @staticmethod
     def _build_conditions(
-        config: Mapping[str, Any],
+        config: Sequence[Mapping[str, Any]],
     ) -> list[_StageCondition]:
         
-        if not config:
-            raise ValueError("Stage condition cannot be empty.")
+        if not isinstance(config, list) or not config:
+            raise ValueError("Stage condition must be a non-empty list.")
 
         conditions: list[_StageCondition] = []
-        for metric, detail in config.items():
-
+        for detail in config:
             if not isinstance(detail, Mapping):
                 raise TypeError(
-                    f"Stage condition {metric!r} must be a mapping."
+                    "Each stage transition condition must be a mapping."
                 )
 
-            aggregation_name, _, reward_term = metric.partition("_")
-
-            if not reward_term:
+            expected_keys = {
+                "metric", "method", "operator", "threshold", "window"
+            }
+            if set(detail) != expected_keys:
                 raise ValueError(
-                    f"Invalid stage metric: {metric!r}. Expected "
-                    "'<aggregation>_<reward_term>'."
+                    "Each stage transition condition must contain exactly: "
+                    "metric, method, operator, threshold, window."
                 )
-            if aggregation_name not in AGGREGATION_MAP:
+
+            metric = detail["metric"]
+            if not isinstance(metric, str) or not metric:
+                raise ValueError(
+                    "Stage metric must be a non-empty string."
+                )
+
+            method_name = detail["method"]
+            if (
+                not isinstance(method_name, str)
+                or method_name not in AGGREGATION_MAP
+            ):
                 valid_aggregations = ", ".join(AGGREGATION_MAP)
                 raise ValueError(
-                    f"Unsupported stage aggregation: "
-                    f"{aggregation_name!r}. Expected one of: "
+                    f"Unsupported stage method: "
+                    f"{method_name!r}. Expected one of: "
                     f"{valid_aggregations}."
                 )
-
-            info_key = (
-                "reward"
-                if reward_term == "reward"
-                else f"reward/{reward_term}"
-            )
 
             operator_name = detail.get("operator")
             if operator_name not in OPERATOR_MAP:
@@ -130,8 +137,7 @@ class StageCallback(BaseCallback):
 
             conditions.append(_StageCondition(
                 metric=metric,
-                info_key=info_key,
-                aggregate=AGGREGATION_MAP[aggregation_name],
+                aggregate=AGGREGATION_MAP[method_name],
                 compare=OPERATOR_MAP[operator_name],
                 threshold=float(threshold),
                 window=window,
@@ -156,17 +162,37 @@ class StageCallback(BaseCallback):
         *args, **kwargs,
     ) -> bool:
         
+        return self._update_conditions(info)
+
+
+    def _on_iteration_end(
+        self,
+        info: Mapping[str, Any],
+        *args, **kwargs,
+    ) -> bool:
+        return self._update_conditions(info)
+
+
+    def _update_conditions(
+        self,
+        info: Mapping[str, Any]
+    ) -> bool:
+
         if self.stop_training:
             return False
 
         for condition in self._conditions:
-            if condition.info_key not in info:
-                raise KeyError(
-                    f"Training info is missing {condition.info_key!r} "
-                    f"required by stage metric {condition.metric!r}."
-                )
+            metric_name = resolve_metric_name(
+                info=info,
+                pattern=condition.metric,
+                owner="Stage",
+                require_match=False,
+            )
+            if metric_name is None:
+                continue
+
             condition.values.append(
-                self._to_scalar(info[condition.info_key], condition.metric)
+                self._to_scalar(info[metric_name], condition.metric)
             )
 
         self.stop_training = all(
@@ -176,19 +202,36 @@ class StageCallback(BaseCallback):
         return not self.stop_training
 
 
-    @staticmethod
     def _to_scalar(
+        self,
         value: Any,
         metric: str
     ) -> float:
         
         if isinstance(value, torch.Tensor):
-            if value.numel() != 1:
+            value_count = value.numel()
+            if value_count == 0:
                 raise ValueError(
-                    f"Stage metric {metric!r} must be scalar, got tensor "
-                    f"shape {tuple(value.shape)}."
+                    f"Stage metric {metric!r} must not be empty."
                 )
-            return float(value.detach().item())
+            if value_count == 1:
+                return float(value.detach().item())
+
+            if self.runner is None or not hasattr(self.runner, "environment"):
+                raise RuntimeError(
+                    "StageCallback must be attached to a runner before "
+                    "processing a vector metric."
+                )
+
+            num_envs = self.runner.environment.num_envs
+            if value_count != num_envs:
+                raise ValueError(
+                    f"Stage metric {metric!r} must contain either one value "
+                    f"or num_envs ({num_envs}) values, got {value_count}."
+                )
+            return float(value.detach().float().mean().item())
+        
         if isinstance(value, Real) and not isinstance(value, bool):
             return float(value)
+        
         raise TypeError(f"Stage metric {metric!r} must be numeric.")

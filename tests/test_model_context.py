@@ -15,6 +15,7 @@ def test_mujoco_builds_observation_indices_from_model(runtime_context):
     )
     simulator = MujocoSimulator(runtime_context)
     simulator.geom_foot_names = ("FR", "FL", "RR", "RL")
+    simulator.geom_floor_names = ()
     simulator.models = [
         mujoco.MjModel.from_xml_path(str(model_path))   # pyright: ignore[reportAttributeAccessIssue]
     ]
@@ -47,6 +48,7 @@ def test_mujoco_scene_exposes_ground_and_body_geom_mapping(runtime_context):
         / "scene.xml"
     )
     simulator = MujocoSimulator(runtime_context)
+    simulator.geom_foot_names = ()
     simulator.geom_floor_names = ("floor",)
     simulator.models = [
         mujoco.MjModel.from_xml_path(str(model_path))  # pyright: ignore[reportAttributeAccessIssue]
@@ -71,6 +73,8 @@ def test_mujoco_state_exposes_base_velocity_in_body_frame(runtime_context):
         / "go1.xml"
     )
     simulator = MujocoSimulator(runtime_context)
+    simulator.geom_foot_names = ()
+    simulator.geom_floor_names = ()
     simulator.models = [
         mujoco.MjModel.from_xml_path(str(model_path))  # pyright: ignore[reportAttributeAccessIssue]
     ]

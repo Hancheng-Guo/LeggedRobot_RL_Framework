@@ -30,6 +30,9 @@ class OnPolicyRunner(BaseRunner):
         self.context = context
         self.environment: BaseEnv
         self.algorithm: OnPolicyAlgorithm
+        self.stage_index: int | None = None
+        self._component: Component | None = None
+        self._callback_configs: Sequence[str | Mapping[str, Any]] | None = None
         
         self.current_iteration: int
 
@@ -52,8 +55,10 @@ class OnPolicyRunner(BaseRunner):
         rollout_length: int | None = None,
         rollout_length_history_size: int | None = None,
         callbacks: Sequence[str | Mapping[str, Any]] | None = None,
+        stage_index: int | None = None,
     ) -> None:
 
+        self.stage_index = stage_index
         self._merge_component(component=component)
         update_attributes(
             self,
@@ -73,7 +78,7 @@ class OnPolicyRunner(BaseRunner):
         component: Component
     ) -> None:
         
-        previous = getattr(self, "_component", None)
+        previous = self._component
         if previous is None:
             self._component = component
             return
@@ -95,10 +100,11 @@ class OnPolicyRunner(BaseRunner):
         
         if num_envs <= 0:
             raise ValueError("'num_envs' must be greater than 0.")
-        if not hasattr(self, "_component"):
+        component = self._component
+        if component is None:
             raise RuntimeError("Runner component configuration is missing.")
 
-        environment_info = self._component.environment
+        environment_info = component.environment
         if environment_info is None:
             raise RuntimeError("Environment configuration is missing.")
         if environment_info.type not in ENV_TYPE_MAP:
@@ -112,7 +118,7 @@ class OnPolicyRunner(BaseRunner):
             context=self.context,
         )
         environment.config_update(
-            component=self._component,
+            component=component,
             **environment_config,
         )
         return environment
@@ -138,6 +144,12 @@ class OnPolicyRunner(BaseRunner):
         callbacks: Sequence[str | Mapping[str, Any]] | None,
     ) -> None:
 
+        if callbacks is None:
+            callbacks = self._callback_configs
+        else:
+            self._callback_configs = callbacks
+
+        self._close_callbacks()
         self.callbacks = []
 
         if callbacks is not None:
@@ -190,9 +202,15 @@ class OnPolicyRunner(BaseRunner):
                             max_iterations=self.max_iterations,
                             rollout_length=self.rollout_length,
                             context=self.context,
+                            stage_index=self.stage_index,
                             **callback_config,
                         )
                     )
+
+
+    def _close_callbacks(self) -> None:
+        for callback in self.callbacks:
+            callback._on_close()
 
 
     def _build_environment(

@@ -7,6 +7,7 @@ from envs.base import BaseEnv
 from rl.algorithms.base import OnPolicyAlgorithm
 from runners.callbacks.base import BaseCallback
 from runners.callbacks.stage import StageCallback
+from utils.component import Component
 
 
 class BaseRunner(ABC):
@@ -31,10 +32,12 @@ class BaseRunner(ABC):
     @abstractmethod
     def config_update(
         self,
+        component: Component, 
         max_iterations: int | None = None,
         rollout_length: int | None = None,
         rollout_length_history_size: int | None = None,
         callbacks: Sequence[str | Mapping[str, Any]] | None = None,
+        stage_index: int | None = None,
         *args, **kwargs
     ) -> None:
         raise NotImplementedError

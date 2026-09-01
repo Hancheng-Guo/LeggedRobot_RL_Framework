@@ -18,6 +18,8 @@ logger = get_logger(__name__)
 
 class TensorboardCallback(BaseCallback):
 
+    _SERVER_URLS: dict[Path, str] = {}
+
     _METRIC_REDUCTIONS = frozenset((
         "value",
         "mean",
@@ -35,6 +37,7 @@ class TensorboardCallback(BaseCallback):
         step_log_interval: int = 1,
         histogram_log_interval: int = 100,
         step_metrics: Mapping[str, Sequence[str]] | None = None,
+        stage_index: int | None = None,
         *args, **kwargs,
     ) -> None:
         
@@ -51,11 +54,15 @@ class TensorboardCallback(BaseCallback):
         self.step_log_interval = step_log_interval
         self.histogram_log_interval = histogram_log_interval
         self.step_metrics = self._validate_step_metrics(step_metrics)
+        self.tensorboard_root_dir = Path(context.save_dir) / log_dir
         self.tensorboard_log_dir = (
-            Path(context.save_dir) / log_dir
-        ).resolve()
+            self.tensorboard_root_dir
+            if stage_index is None
+            else self.tensorboard_root_dir / f"stage_{stage_index:03d}"
+        )
+
         self.writer = SummaryWriter(
-            log_dir=str(self.tensorboard_log_dir)
+            log_dir=str((self.tensorboard_log_dir).resolve())
         )
         
         self.global_step = 0
@@ -72,17 +79,21 @@ class TensorboardCallback(BaseCallback):
     ) -> bool:
 
         if not self._server_started:
-            self._tensorboard = TensorBoard()
-            self._tensorboard.configure(
-                argv=(
-                    "tensorboard",
-                    "--logdir",
-                    str(self.tensorboard_log_dir),
-                    "--host",
-                    "0.0.0.0",
+            if self.tensorboard_root_dir not in self._SERVER_URLS:
+                self._tensorboard = TensorBoard()
+                self._tensorboard.configure(
+                    argv=(
+                        "tensorboard",
+                        "--logdir",
+                        str((self.tensorboard_root_dir).resolve()),
+                        "--host",
+                        "0.0.0.0",
+                    )
                 )
-            )
-            self.tensorboard_url = self._tensorboard.launch()
+                self._SERVER_URLS[self.tensorboard_root_dir] = (
+                    self._tensorboard.launch()
+                )
+            self.tensorboard_url = self._SERVER_URLS[self.tensorboard_root_dir]
             self._server_started = True
 
         logger.info(f"TensorBoard dir: {self.tensorboard_log_dir}")

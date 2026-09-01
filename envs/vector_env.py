@@ -34,8 +34,8 @@ class VectorEnv(BaseEnv):
     def config_update(
         self,
         component: Component,
-        num_envs: int,
-        max_episode_steps: int,
+        num_envs: int | None = None,
+        max_episode_steps: int | None = None,
     ) -> None:
 
         update_attributes(

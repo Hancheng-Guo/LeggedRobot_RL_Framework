@@ -26,9 +26,9 @@ class MujocoSimulator(BaseSimulator):
         self.model_path: Path
         self.sim_dt: float
         self.frame_skip: int
+        self.geom_foot_names: tuple[str, ...]
+        self.geom_floor_names: tuple[str, ...]
         self.render_mode: str | None = None
-        self.geom_foot_names: tuple[str, ...] = ()
-        self.geom_floor_names: tuple[str, ...] = ()
 
         self.models: list[mujoco.MjModel] = []  # pyright: ignore[reportAttributeAccessIssue]
         self.datas: list[mujoco.MjData] = []    # pyright: ignore[reportAttributeAccessIssue]
@@ -67,17 +67,26 @@ class MujocoSimulator(BaseSimulator):
             model_path=None if model_path is None else Path(model_path),
             sim_dt=sim_dt,
             frame_skip=frame_skip,
-            geom_foot_names=tuple(geom_foot_names or ()),
-            geom_floor_names=tuple(geom_floor_names or ()),
+            geom_foot_names=(
+                tuple(geom_foot_names)
+                if geom_foot_names is not None
+                else None
+            ),
+            geom_floor_names=(
+                tuple(geom_floor_names)
+                if geom_floor_names is not None
+                else None
+            ),
         )
 
-        if render_mode in self._RENDER_TYPE_MAP:
-            self.render_mode = render_mode
-        else:
-            warnings.warn(
-                f"Unsupported render mode: {render_mode!r}."
-            )
-            self.render_mode = None
+        if render_mode is not None:
+            if render_mode in self._RENDER_TYPE_MAP:
+                self.render_mode = render_mode
+            else:
+                warnings.warn(
+                    f"Unsupported render mode: {render_mode!r}."
+                )
+                self.render_mode = None
 
         self.models = [
             mujoco.MjModel.from_xml_path(   # pyright: ignore[reportAttributeAccessIssue]

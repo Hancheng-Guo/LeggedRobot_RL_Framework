@@ -62,7 +62,7 @@ class LoggingCallback(BaseCallback):
         if sorted_metrics:
             name_width = max(len(name) for name, _ in sorted_metrics)
             message_lines.extend(
-                f"\t{name:<{name_width}} : {value:>12.6g}"
+                f"    {name:<{name_width}} : {value:>12.6g}"
                 for name, value in sorted_metrics
             )
         message = "\n".join(message_lines)

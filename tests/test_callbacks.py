@@ -259,6 +259,28 @@ def test_runner_rejects_invalid_callback_mapping(
         runner._build_callbacks(callbacks=[{"logging": True}])
 
 
+def test_runner_rebuilds_previous_callbacks_when_config_is_none(
+    runtime_context: RuntimeContext,
+) -> None:
+    runner = OnPolicyRunner(context=runtime_context)
+    runner.max_iterations = 10
+    runner.rollout_length = 4
+
+    runner._build_callbacks(callbacks=["progress_bar"])
+    original_callback = runner.callbacks[0]
+    assert isinstance(original_callback, ProgressBarCallback)
+    original_callback._completed_steps = 7
+
+    runner.max_iterations = 20
+    runner._build_callbacks(callbacks=None)
+
+    rebuilt_callback = runner.callbacks[0]
+    assert isinstance(rebuilt_callback, ProgressBarCallback)
+    assert rebuilt_callback is not original_callback
+    assert rebuilt_callback.max_iterations == 20
+    assert rebuilt_callback._completed_steps == 0
+
+
 def test_logging_callback_writes_scalar_metrics(tmp_path: Path) -> None:
     runner = make_runner()
     callback = LoggingCallback(
@@ -316,6 +338,27 @@ def test_tensorboard_callback_writes_event_file(tmp_path: Path) -> None:
     event_files = list((tmp_path / "tensorboard").glob("events.out.*"))
     assert event_files
     assert event_files[0].stat().st_size > 0
+
+
+def test_tensorboard_callback_writes_stage_event_file(
+    tmp_path: Path,
+) -> None:
+    callback = TensorboardCallback(
+        runner=make_runner(),
+        context=make_context(tmp_path),
+        stage_index=1,
+    )
+    callback._on_iteration_end({"ppo/loss": 1.0})
+    callback._on_close()
+
+    event_files = list(
+        (
+            tmp_path
+            / "tensorboard"
+            / "stage_001"
+        ).glob("events.out.*")
+    )
+    assert event_files
 
 
 def test_tensorboard_reduces_configured_vector_metrics(
@@ -433,6 +476,62 @@ def test_tensorboard_starts_server_and_logs_returned_url(
     )
 
 
+def test_tensorboard_reuses_server_across_stage_callbacks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeTensorBoard:
+        configured_argvs: list[tuple[str, ...]] = []
+        launches = 0
+
+        def configure(self, argv: tuple[str, ...]) -> None:
+            FakeTensorBoard.configured_argvs.append(argv)
+
+        def launch(self) -> str:
+            FakeTensorBoard.launches += 1
+            return "http://127.0.0.1:43123/"
+
+    monkeypatch.setattr(
+        tensorboard_module,
+        "TensorBoard",
+        FakeTensorBoard,
+    )
+    monkeypatch.setattr(TensorboardCallback, "_SERVER_URLS", {})
+    runner = make_runner()
+    context = make_context(tmp_path)
+
+    first = TensorboardCallback(
+        runner=runner,
+        context=context,
+        stage_index=0,
+    )
+    second = TensorboardCallback(
+        runner=runner,
+        context=context,
+        stage_index=1,
+    )
+
+    first._on_train_start()
+    second._on_train_start()
+    first._on_close()
+    second._on_close()
+
+    assert FakeTensorBoard.launches == 1
+    assert FakeTensorBoard.configured_argvs == [(
+        "tensorboard",
+        "--logdir",
+        str((tmp_path / "tensorboard").resolve()),
+        "--host",
+        "0.0.0.0",
+    )]
+    assert first.tensorboard_log_dir == (
+        tmp_path / "tensorboard" / "stage_000"
+    ).resolve()
+    assert second.tensorboard_log_dir == (
+        tmp_path / "tensorboard" / "stage_001"
+    ).resolve()
+
+
 def test_checkpoint_callback_saves_policy_and_optimizer(
     tmp_path: Path,
 ) -> None:
@@ -457,6 +556,32 @@ def test_checkpoint_callback_saves_policy_and_optimizer(
     assert "policy_state_dict" in payload
     assert "optimizer_state_dict" in payload
     assert not list((tmp_path / "checkpoints").glob("*.tmp"))
+
+
+def test_checkpoint_callback_uses_stage_directory(
+    tmp_path: Path,
+) -> None:
+    runner = make_runner()
+    callback = CheckpointCallback(
+        runner=runner,
+        context=make_context(tmp_path),
+        save_interval=1,
+        stage_index=1,
+    )
+    callback._on_iteration_end({"ppo/loss": 1.0})
+
+    checkpoint_path = (
+        tmp_path
+        / "checkpoints"
+        / "stage_001"
+        / "checkpoint_00000001.pt"
+    )
+    payload: dict[str, Any] = torch.load(
+        checkpoint_path,
+        weights_only=False,
+    )
+    assert checkpoint_path.is_file()
+    assert payload["stage_index"] == 1
 
 
 def test_progress_bar_reports_completed_iteration(

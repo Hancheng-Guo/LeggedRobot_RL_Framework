@@ -161,6 +161,7 @@ class StageManager:
             component=current_component,
             stage_callback=current_stage_callback,
             max_iterations=self._get_current_max_iterations(),
+            stage_index=self.current_stage,
         )
         self.runner.train()
 
@@ -180,7 +181,7 @@ class StageManager:
 
             if stage <= len(detail) - 1:
 
-                if stage > 0 and detail[stage] == detail[stage - 1]:
+                if stage >= 1 and detail[stage] == detail[stage - 1]:
                     continue
             
                 current_component[name] = detail[stage]
@@ -210,6 +211,7 @@ class StageManager:
         component: Component,
         max_iterations: int,
         stage_callback: StageCallback | None = None,
+        stage_index: int | None = None,
     ) -> None:
 
         if component.runner is None:
@@ -220,6 +222,7 @@ class StageManager:
             self.runner.config_update(
                 component=component,
                 max_iterations=max_iterations,
+                stage_index=stage_index,
             )
 
         else:
@@ -242,6 +245,7 @@ class StageManager:
             self.runner.config_update(
                 component=component,
                 max_iterations=max_iterations,
+                stage_index=stage_index,
                 **runner_config
             )
 

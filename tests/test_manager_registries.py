@@ -33,4 +33,7 @@ def test_manager_registries_use_snake_case_keys():
     assert OBSERVATION_CLASS_MAP["last_action"].__name__ == "LastAction"
     assert REWARD_CLASS_MAP["action_diff_l2"].__name__ == "ActionDiffL2"
     assert TERMINATION_CLASS_MAP["base_height"].__name__ == "BaseHeight"
-    assert CURRICULUM_CLASS_MAP["command_reward"].__name__ == "CommandReward"
+    assert (
+        CURRICULUM_CLASS_MAP["lrpc_command_reward"].__name__
+        == "LrpcCommandReward"
+    )

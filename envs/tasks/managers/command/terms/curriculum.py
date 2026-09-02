@@ -6,14 +6,11 @@ from envs.tasks.managers.curriculum.types import CommandCurriculumSampler
 from envs.tasks.utils.context import TaskContext
 
 
-@register_command
 class CurriculumSampleOnReset(BaseCommandTerm):
-
-    curriculum_term_name = "command_reward"
 
     def __init__(
         self,
-        curriculum_sampler: CommandCurriculumSampler | None,
+        curriculum_sampler: CommandCurriculumSampler,
         term_name: str,
         min_value: float,
         max_value: float,
@@ -25,14 +22,6 @@ class CurriculumSampleOnReset(BaseCommandTerm):
         
         super().__init__(*args, **kwargs)
 
-        if curriculum_sampler is None:
-            raise ValueError(
-                "CurriculumSampleOnReset requires a curriculum sampler."
-            )
-        if group is None:
-            raise ValueError(
-                "CurriculumSampleOnReset requires a curriculum group."
-            )
         if min_value > max_value:
             raise ValueError("'min_value' cannot exceed 'max_value'.")
         if num_bins <= 0:
@@ -94,3 +83,15 @@ class CurriculumSampleOnReset(BaseCommandTerm):
         self.command[env_ids] = (
             center + torch.randn_like(center) * self.noise_std
         )
+
+
+@register_command
+class LrpcSampleOnReset(CurriculumSampleOnReset):
+
+    curriculum_term_name = "lrpc_command_reward"
+
+
+@register_command
+class LpacSampleOnReset(CurriculumSampleOnReset):
+
+    curriculum_term_name = "lpac_command_reward"

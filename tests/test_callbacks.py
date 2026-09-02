@@ -302,7 +302,7 @@ def test_logging_callback_writes_scalar_metrics(tmp_path: Path) -> None:
     )
     assert "Iteration 1" in content
     assert " | INFO | Training started.\n" in content
-    assert "\tloss" in content
+    assert "\n    loss" in content
     assert ":         1.25" in content
     assert "runner/current_iter" in content
     assert "structured" not in content

@@ -11,12 +11,12 @@ action_manager_config:
 
 command_manager_config:
   terms:
-    lin_vel_x: {type: CurriculumSampleOnReset, params: {group: locomotion, min_value: 0.0, max_value: 0.5, num_bins: 3, noise_scale: 0.05}}
-    lin_vel_y: {type: CurriculumSampleOnReset, params: {group: locomotion, min_value: -0.1, max_value: 0.1, num_bins: 3, noise_scale: 0.05}}
-    ang_vel_z: {type: CurriculumSampleOnReset, params: {group: locomotion, min_value: -0.3, max_value: 0.3, num_bins: 3, noise_scale: 0.05}}
-    half_period_duration: {type: CurriculumSampleOnReset, params: {group: duration, min_value: 0.1, max_value: 1.0, num_bins: 10, noise_scale: 0.167}}
-    foot_phase_real: {type: CurriculumSampleOnReset, params: {group: phase, dim: 4, min_value: -1.0, max_value: 1.0, num_bins: 3, noise_scale: 0.167}}
-    foot_phase_imag: {type: CurriculumSampleOnReset, params: {group: phase, dim: 4, min_value: -1.0, max_value: 1.0, num_bins: 3, noise_scale: 0.167}}
+    lin_vel_x: {type: LpacSampleOnReset, params: {group: locomotion, min_value: 0.0, max_value: 0.5, num_bins: 3, noise_scale: 0.167}}
+    lin_vel_y: {type: LpacSampleOnReset, params: {group: locomotion, min_value: -0.1, max_value: 0.1, num_bins: 3, noise_scale: 0.167}}
+    ang_vel_z: {type: LpacSampleOnReset, params: {group: locomotion, min_value: -0.3, max_value: 0.3, num_bins: 3, noise_scale: 0.167}}
+    half_period_duration: {type: LpacSampleOnReset, params: {group: duration, min_value: 0.1, max_value: 1.0, num_bins: 10, noise_scale: 0.167}}
+    foot_phase_real: {type: LpacSampleOnReset, params: {group: phase, dim: 4, min_value: -1.0, max_value: 1.0, num_bins: 3, noise_scale: 0.167}}
+    foot_phase_imag: {type: LpacSampleOnReset, params: {group: phase, dim: 4, min_value: -1.0, max_value: 1.0, num_bins: 3, noise_scale: 0.167}}
 
   constraints:
     foot_phase_real:
@@ -39,8 +39,8 @@ observation_manager_config:
 reward_manager_config:
   terms:
     illegal_contact_l1: {weight: -1.0}
-    track_linear_velocity_xy_l2_exp_and_logcosh: {weight: 3.0, params: {logcosh_weight: 0.0}}
-    track_angular_velocity_z_l2_exp_and_logcosh: {weight: 5.0, params: {logcosh_weight: 0.25, std: 2.5}}
+    track_linear_velocity_xy_l2_exp_and_logcosh: {weight: 5.0, params: {logcosh_weight: 0.1}}
+    track_angular_velocity_z_l2_exp_and_logcosh: {weight: 5.0, params: {logcosh_weight: 0.1, std: 2.5}}
     track_linear_velocity_xy_error_integral_l2: {weight: -1.0e-3, params: {integral_length: 25}}
     track_angular_velocity_z_error_integral_l2: {weight: -1.0e-3, params: {integral_length: 25}}
     base_linear_velocity_z_l2: {weight: -2.0}
@@ -67,7 +67,7 @@ termination_manager_config:
 
 curriculum_manager_config:
   terms:
-    command_reward: {max_cells: 100000}
+    lpac_command_reward: {max_cells: 100000}
 
 
 event_manager_config:

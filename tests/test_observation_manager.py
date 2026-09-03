@@ -17,10 +17,24 @@ def make_task_context(num_envs: int = 2) -> TaskContext:
 
     qvel = torch.zeros(num_envs, 8)
     qvel[:, 1:4] = torch.tensor([1.0, 2.0, 3.0])
+    qvel[:, 4:7] = torch.tensor([0.5, -0.25, 0.1])
     qvel[:, [0, 7]] = torch.tensor([4.0, 5.0])
 
     return TaskContext(
-        state={"qpos": qpos, "qvel": qvel},
+        state={
+            "qpos": qpos,
+            "qvel": qvel,
+            "actuator_force": torch.tensor(
+                [[2.0, -3.0]],
+            ).repeat(num_envs, 1),
+            "contact_geom_ids": torch.tensor(
+                [[[3, 0], [1, 2]]],
+            ).repeat(num_envs, 1, 1),
+            "contact_forces": torch.tensor(
+                [[[12.0, 1.0, 2.0, 0.0, 0.0, 0.0],
+                  [50.0, 0.0, 0.0, 0.0, 0.0, 0.0]]],
+            ).repeat(num_envs, 1, 1),
+        },
         command={
             "lin_vel_x": torch.full((num_envs, 1), 0.1),
             "lin_vel_y": torch.full((num_envs, 1), 0.2),
@@ -177,3 +191,59 @@ def test_projected_gravity_rejects_zero_model_gravity(
             action_dim=2,
             terms={"projected_gravity": {}},
         )
+
+
+def test_additional_state_observation_terms(
+    runtime_context,
+    model_context,
+):
+    manager = ObservationManager(
+        num_envs=2,
+        context=runtime_context,
+        model_context=model_context,
+        command_dim=3,
+        action_dim=2,
+        terms={
+            "base_linear_velocity": {},
+            "base_position": {},
+            "base_height": {},
+            "joint_position_diff": {},
+            "actuator_force": {},
+        },
+    )
+
+    observation, _ = manager.compute(make_task_context())
+
+    expected = torch.tensor([
+        0.5, -0.25, 0.1,
+        0.0, 0.0, 0.0,
+        0.0,
+        0.25, -0.5,
+        2.0, -3.0,
+    ])
+    torch.testing.assert_close(observation[0], expected)
+    assert observation.shape == (2, 11)
+
+
+def test_foot_contact_observation_terms(
+    runtime_context,
+    model_context,
+):
+    manager = ObservationManager(
+        num_envs=2,
+        context=runtime_context,
+        model_context=model_context,
+        command_dim=3,
+        action_dim=2,
+        terms={
+            "foot_contact_normal_force": {},
+            "foot_contact_state": {"threshold": 10.0},
+        },
+    )
+
+    observation, _ = manager.compute(make_task_context())
+
+    torch.testing.assert_close(
+        observation,
+        torch.tensor([[12.0, 1.0]]).repeat(2, 1),
+    )

@@ -10,13 +10,14 @@ callbacks:
       save_interval: 100
   - logging
   - tensorboard:
-      histogram_log_interval: 100
+      histogram_log_interval: 500
       step_metrics:
         "reward": [value]
         "reward/*": [mean]
         "termination/*": [mean]
         "command/*": [histogram]
         "observation/*": [histogram]
+        "curriculum/*": [histogram]
 #   - early_stopping: 
 #       monitor: "*/loss"
 #       mode: min

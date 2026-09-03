@@ -26,8 +26,8 @@ class CommandRewardCurriculum(BaseCurriculumTerm, ABC):
         self,
         command_manager_config: dict[str, Any],
         command_term_type: str,
-        temperature: float = 1.0,
-        exploration: float = 0.05,
+        temperature: float = 100.0,
+        exploration: float = 0.1,
         max_cells: int = 100_000,
         *args, **kwargs,
     ) -> None:
@@ -525,7 +525,10 @@ class LpacCommandReward(CommandRewardCurriculum):
         self.episode_reward_sum += reward
         self.episode_step_count += 1
 
-        return {}
+        return {
+            f"{name}/learning_progress": learning_progress
+            for name, learning_progress in self.learning_progress.items()
+        }
 
 
     def reset(

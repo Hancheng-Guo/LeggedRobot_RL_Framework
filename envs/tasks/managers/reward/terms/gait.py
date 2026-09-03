@@ -70,12 +70,12 @@ class QuadrupedalGaitPhaseL2Exp(BaseRewardTerm):
             half_period_durations / task_context.step_dt
         ).clamp_min(1.0)
         target_phase_steps = self._update_phase_steps(half_period_steps)
-        target_phase = torch.sin(
+        target_phase = torch.pi * torch.sin(
             torch.pi * target_phase_steps / half_period_steps.unsqueeze(-1)
         )
 
         foot_height = self._foot_height_from_base_plane(task_context)
-        foot_phase = torch.cos(
+        foot_phase = torch.pi * torch.cos(
             torch.pi * (
                 (foot_height - _LIFTED_DISTANCE_FACTOR * self.target_height) /
                 (

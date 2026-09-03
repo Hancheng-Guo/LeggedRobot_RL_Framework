@@ -29,6 +29,8 @@ class MujocoSimulator(BaseSimulator):
         self.geom_foot_names: tuple[str, ...]
         self.geom_floor_names: tuple[str, ...]
         self.render_mode: str | None = None
+        self.reset_keyframe: str | None = None
+        self.reset_keyframe_id: int = -1
 
         self.models: list[mujoco.MjModel] = []  # pyright: ignore[reportAttributeAccessIssue]
         self.datas: list[mujoco.MjData] = []    # pyright: ignore[reportAttributeAccessIssue]
@@ -54,6 +56,7 @@ class MujocoSimulator(BaseSimulator):
         render_mode: str | None = None,
         geom_foot_names: list[str] | tuple[str, ...] | None = None,
         geom_floor_names: list[str] | tuple[str, ...] | None = None,
+        reset_keyframe: str | None = None,
     ) -> None:
 
         if num_envs is not None and num_envs <= 0:
@@ -79,6 +82,14 @@ class MujocoSimulator(BaseSimulator):
             ),
         )
 
+        # A simulator config that supplies a model path owns the complete reset
+        # configuration. Incremental updates (for example, changing num_envs)
+        # keep the previously selected keyframe.
+        if model_path is not None:
+            self.reset_keyframe = reset_keyframe
+        elif reset_keyframe is not None:
+            self.reset_keyframe = reset_keyframe
+
         if render_mode is not None:
             if render_mode in self._RENDER_TYPE_MAP:
                 self.render_mode = render_mode
@@ -101,6 +112,20 @@ class MujocoSimulator(BaseSimulator):
             mujoco.MjData(model)    # pyright: ignore[reportAttributeAccessIssue]
             for model in self.models
         ]
+
+        self.reset_keyframe_id = -1
+        if self.reset_keyframe is not None:
+            reset_keyframe_id = mujoco.mj_name2id(  # pyright: ignore[reportAttributeAccessIssue]
+                self.models[0],
+                mujoco.mjtObj.mjOBJ_KEY,            # pyright: ignore[reportAttributeAccessIssue]
+                self.reset_keyframe,
+            )
+            if reset_keyframe_id == -1:
+                raise ValueError(
+                    f"Keyframe '{self.reset_keyframe}' was not found."
+                )
+            self.reset_keyframe_id = reset_keyframe_id
+
         self._build_model_context()
 
 
@@ -123,6 +148,11 @@ class MujocoSimulator(BaseSimulator):
         )
         actuator_joint_ids = self._find_actuated_joint_ids(model)
         joint_qpos_ids = model.jnt_qposadr[actuator_joint_ids]
+        joint_default_pos = (
+            model.qpos0[joint_qpos_ids]
+            if self.reset_keyframe_id == -1
+            else model.key_qpos[self.reset_keyframe_id, joint_qpos_ids]
+        )
         joint_pos_limits = self._joint_pos_limits(
             model,
             actuator_joint_ids,
@@ -158,7 +188,7 @@ class MujocoSimulator(BaseSimulator):
             joint_qvel_ids=self._indices(
                 model.jnt_dofadr[actuator_joint_ids]
             ),
-            joint_default_pos=self._tensor(model.qpos0[joint_qpos_ids]),
+            joint_default_pos=self._tensor(joint_default_pos),
             joint_pos_limits=self._tensor(joint_pos_limits),
 
             # actuator_names=names(mujoco.mjtObj.mjOBJ_ACTUATOR, model.nu),
@@ -339,15 +369,19 @@ class MujocoSimulator(BaseSimulator):
             )
 
         for env_id in env_ids.tolist():
-            mujoco.mj_resetData(    # pyright: ignore[reportAttributeAccessIssue]
-                self.models[env_id],
-                self.datas[env_id],
-            )
+            model = self.models[env_id]
+            data = self.datas[env_id]
 
-            mujoco.mj_forward(      # pyright: ignore[reportAttributeAccessIssue]
-                self.models[env_id],
-                self.datas[env_id],
-            )
+            if self.reset_keyframe_id == -1:
+                mujoco.mj_resetData(model, data)    # pyright: ignore[reportAttributeAccessIssue]
+            else:
+                mujoco.mj_resetDataKeyframe(        # pyright: ignore[reportAttributeAccessIssue]
+                    model,
+                    data,
+                    self.reset_keyframe_id
+                )
+
+            mujoco.mj_forward(model, data)      # pyright: ignore[reportAttributeAccessIssue]
 
 
     def step(

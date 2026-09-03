@@ -283,6 +283,13 @@ class PPO(OnPolicyAlgorithm):
             gamma=self.gamma,
             gae_lambda=self.gae_lambda,
         )
+
+        advantage_mean = advantages.mean()
+        advantage_std = advantages.std(unbiased=False)
+        advantages = (
+            advantages - advantage_mean
+        ) / advantage_std.clamp_min(1.0e-8)
+
         self.storage.set_returns(
             returns=returns,
             advantages=advantages,

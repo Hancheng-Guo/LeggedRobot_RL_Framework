@@ -1,8 +1,39 @@
 from pathlib import Path
 
 import mujoco
+import numpy as np
+import pytest
+import torch
 
 from envs.simulators.mujoco import MujocoSimulator
+from utils.component import Component
+
+
+def _configure_go1_simulator(
+    runtime_context,
+    *,
+    num_envs: int = 1,
+    reset_keyframe: str | None = None,
+) -> MujocoSimulator:
+    model_path = (
+        Path(__file__).parents[1]
+        / "assets"
+        / "unitree_go1"
+        / "MJCF"
+        / "go1.xml"
+    )
+    simulator = MujocoSimulator(runtime_context)
+    simulator.config_update(
+        component=Component(None, None, None, None, None, None),
+        num_envs=num_envs,
+        model_path=model_path,
+        sim_dt=0.002,
+        frame_skip=1,
+        geom_foot_names=(),
+        geom_floor_names=(),
+        reset_keyframe=reset_keyframe,
+    )
+    return simulator
 
 
 def test_mujoco_builds_observation_indices_from_model(runtime_context):
@@ -92,3 +123,100 @@ def test_mujoco_state_exposes_base_velocity_in_body_frame(runtime_context):
 
     assert state["base_lin_vel_body"].shape == (1, 3)
     assert state["base_ang_vel_body"].shape == (1, 3)
+
+
+def test_mujoco_reset_uses_configured_keyframe(runtime_context):
+    simulator = _configure_go1_simulator(
+        runtime_context,
+        reset_keyframe="home",
+    )
+    model = simulator.models[0]
+    data = simulator.datas[0]
+    keyframe_id = simulator.reset_keyframe_id
+
+    data.qpos[:] = 0.0
+    data.qvel[:] = 1.0
+    data.ctrl[:] = 0.0
+    data.time = 1.0
+    simulator.reset()
+
+    np.testing.assert_allclose(data.qpos, model.key_qpos[keyframe_id])
+    np.testing.assert_allclose(data.qvel, model.key_qvel[keyframe_id])
+    np.testing.assert_allclose(data.ctrl, model.key_ctrl[keyframe_id])
+    assert data.time == pytest.approx(model.key_time[keyframe_id])
+    np.testing.assert_allclose(
+        simulator.model_context.joint_default_pos.cpu().numpy(),
+        model.key_qpos[
+            keyframe_id,
+            simulator.model_context.joint_qpos_ids.cpu().numpy(),
+        ],
+    )
+
+
+def test_mujoco_reset_only_changes_selected_environments(runtime_context):
+    simulator = _configure_go1_simulator(
+        runtime_context,
+        num_envs=2,
+        reset_keyframe="home",
+    )
+    untouched_qpos = simulator.datas[1].qpos.copy()
+    simulator.datas[0].qpos[:] = 0.0
+    simulator.datas[1].qpos[:] += 0.25
+    modified_untouched_qpos = simulator.datas[1].qpos.copy()
+
+    simulator.reset(torch.tensor([0]))
+
+    np.testing.assert_allclose(
+        simulator.datas[0].qpos,
+        simulator.models[0].key_qpos[simulator.reset_keyframe_id],
+    )
+    np.testing.assert_allclose(
+        simulator.datas[1].qpos,
+        modified_untouched_qpos,
+    )
+    assert not np.allclose(untouched_qpos, modified_untouched_qpos)
+
+
+def test_mujoco_reset_without_keyframe_uses_model_defaults(runtime_context):
+    simulator = _configure_go1_simulator(runtime_context)
+    model = simulator.models[0]
+    data = simulator.datas[0]
+    data.qpos[:] = 0.0
+    data.qvel[:] = 1.0
+
+    simulator.reset()
+
+    assert simulator.reset_keyframe_id == -1
+    np.testing.assert_allclose(data.qpos, model.qpos0)
+    np.testing.assert_allclose(data.qvel, 0.0)
+
+
+def test_mujoco_rejects_unknown_reset_keyframe(runtime_context):
+    with pytest.raises(ValueError, match="Keyframe 'missing' was not found"):
+        _configure_go1_simulator(
+            runtime_context,
+            reset_keyframe="missing",
+        )
+
+
+def test_mujoco_reconfiguration_does_not_reuse_stale_keyframe_id(
+    runtime_context,
+):
+    simulator = _configure_go1_simulator(
+        runtime_context,
+        reset_keyframe="home",
+    )
+    model_path = simulator.model_path
+
+    simulator.config_update(
+        component=Component(None, None, None, None, None, None),
+        model_path=model_path,
+    )
+    simulator.reset()
+
+    assert simulator.reset_keyframe is None
+    assert simulator.reset_keyframe_id == -1
+    np.testing.assert_allclose(
+        simulator.datas[0].qpos,
+        simulator.models[0].qpos0,
+    )

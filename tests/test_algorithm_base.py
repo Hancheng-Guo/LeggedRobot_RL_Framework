@@ -263,6 +263,7 @@ def test_ppo_update_optimizes_and_reports_metrics(
         "rollout/clip_fraction",
         "rollout/grad_norm",
         "rollout/learning_rate",
+        "rollout/explained_variance",
     }
     assert info["rollout/learning_rate"] == 0.01
 

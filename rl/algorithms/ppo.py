@@ -7,6 +7,7 @@ from rl.algorithms.base import OnPolicyAlgorithm, PolicyOutput
 from rl.policies.base import BasePolicy, RecurrentPolicy, RecurrentState
 from rl.policies.registry import POLICY_TYPE_MAP
 from rl.utils.gae import compute_gae
+from rl.utils.metrics import explained_variance
 from rl.utils.storage import RolloutBatch, RolloutStorage
 from utils.param import update_attributes
 from utils.component import Component, ComponentInfo
@@ -298,6 +299,14 @@ class PPO(OnPolicyAlgorithm):
 
     def update(self) -> dict[str, float]:
 
+        if self.storage.returns is None:
+            raise RuntimeError("returns have not been computed.")
+        rollout = self.storage.tensors()
+        rollout_explained_variance = explained_variance(
+            values=rollout.values,
+            returns=self.storage.returns,
+        )
+
         totals = {
             "loss": 0.0,
             "policy_loss": 0.0,
@@ -337,6 +346,7 @@ class PPO(OnPolicyAlgorithm):
             for name, value in totals.items()
         } | {
             "rollout/learning_rate": self.learning_rate,
+            "rollout/explained_variance": rollout_explained_variance,
         }
         self.storage.clear()
         return info

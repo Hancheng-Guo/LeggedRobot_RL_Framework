@@ -1,7 +1,39 @@
+import math
+
+import pytest
 import torch
 
 from rl.utils.gae import compute_gae
+from rl.utils.metrics import explained_variance
 from rl.utils.storage import RolloutStorage
+
+
+def test_explained_variance_for_perfect_values() -> None:
+    returns = torch.tensor([1.0, 2.0, 4.0])
+
+    result = explained_variance(values=returns, returns=returns)
+
+    assert result == pytest.approx(1.0)
+
+
+def test_explained_variance_for_constant_values() -> None:
+    returns = torch.tensor([1.0, 2.0, 4.0])
+    values = torch.full_like(returns, 2.0)
+
+    result = explained_variance(values=values, returns=returns)
+
+    assert result == pytest.approx(0.0)
+
+
+def test_explained_variance_is_nan_for_constant_returns() -> None:
+    returns = torch.ones(3)
+
+    result = explained_variance(
+        values=torch.zeros_like(returns),
+        returns=returns,
+    )
+
+    assert math.isnan(result)
 
 
 def test_compute_gae_bootstraps_truncation_without_crossing_reset():

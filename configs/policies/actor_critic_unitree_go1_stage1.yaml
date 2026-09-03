@@ -25,6 +25,10 @@ actor:
 critic:
   - type: linear
     in_features: obs_dim
+    out_features: 512
+  - type: elu
+  - type: linear
+    in_features: 512
     out_features: 256
   - type: elu
   - type: linear
@@ -33,8 +37,4 @@ critic:
   - type: elu
   - type: linear
     in_features: 128
-    out_features: 64
-  - type: elu
-  - type: linear
-    in_features: 64
     out_features: 1

@@ -40,6 +40,7 @@ class PPO(OnPolicyAlgorithm):
         self.max_grad_norm: float
         self.num_epochs: int
         self.num_mini_batches: int
+        self.advantage_norm: bool = False
 
 
     def config_update(
@@ -56,6 +57,7 @@ class PPO(OnPolicyAlgorithm):
         max_grad_norm: float | None = None,
         num_epochs: int | None = None,
         num_mini_batches: int | None = None,
+        advantage_norm: bool | None = None,
     ) -> None:
 
         update_attributes(
@@ -71,6 +73,7 @@ class PPO(OnPolicyAlgorithm):
             max_grad_norm=max_grad_norm,
             num_epochs=num_epochs,
             num_mini_batches=num_mini_batches,
+            advantage_norm=advantage_norm,
         )
         self.learning_rate = self.init_learning_rate
         self._validate_config()
@@ -285,11 +288,12 @@ class PPO(OnPolicyAlgorithm):
             gae_lambda=self.gae_lambda,
         )
 
-        advantage_mean = advantages.mean()
-        advantage_std = advantages.std(unbiased=False)
-        advantages = (
-            advantages - advantage_mean
-        ) / advantage_std.clamp_min(1.0e-8)
+        if self.advantage_norm:
+            advantage_mean = advantages.mean()
+            advantage_std = advantages.std(unbiased=False)
+            advantages = (
+                advantages - advantage_mean
+            ) / advantage_std.clamp_min(1.0e-8)
 
         self.storage.set_returns(
             returns=returns,

@@ -1,10 +1,10 @@
-rollout_length: 64
+rollout_length: 256
 rollout_length_history_size: 50
 callbacks:
   - progress_bar
   - adaptive_learning_rate:
       monitor: "*/approx_kl"
-      allowed_range: [0.01, 0.3]
+      allowed_range: [0.005, 0.1]
       factor: 0.5
   - checkpoint:
       save_interval: 100

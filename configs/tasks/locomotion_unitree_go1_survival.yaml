@@ -36,8 +36,10 @@ observation_manager_config:
     base_height: {scale: 2.0}
     projected_gravity: {scale: 1.0}
     command: {scale: 0.5}
+    joint_position: {scale: 0.3}
     joint_position_diff: {scale: 0.5}
     joint_velocity: {scale: 0.05}
+    foot_height: {scale: 3.0}
     last_action: {scale: 0.1}
     second_last_action: {scale: 0.1}
 

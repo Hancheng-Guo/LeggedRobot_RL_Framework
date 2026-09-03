@@ -27,6 +27,12 @@ def make_task_context(num_envs: int = 2) -> TaskContext:
             "actuator_force": torch.tensor(
                 [[2.0, -3.0]],
             ).repeat(num_envs, 1),
+            "geom_xpos": torch.tensor(
+                [[[0.0, 0.0, 0.0],
+                  [0.0, 0.0, 0.2],
+                  [0.0, 0.0, 0.4],
+                  [0.0, 0.0, 0.125]]],
+            ).repeat(num_envs, 1, 1),
             "contact_geom_ids": torch.tensor(
                 [[[3, 0], [1, 2]]],
             ).repeat(num_envs, 1, 1),
@@ -246,4 +252,25 @@ def test_foot_contact_observation_terms(
     torch.testing.assert_close(
         observation,
         torch.tensor([[12.0, 1.0]]).repeat(2, 1),
+    )
+
+
+def test_foot_height_observation_term(
+    runtime_context,
+    model_context,
+):
+    manager = ObservationManager(
+        num_envs=2,
+        context=runtime_context,
+        model_context=model_context,
+        command_dim=3,
+        action_dim=2,
+        terms={"foot_height": {}},
+    )
+
+    observation, _ = manager.compute(make_task_context())
+
+    torch.testing.assert_close(
+        observation,
+        torch.full((2, 1), 0.125),
     )

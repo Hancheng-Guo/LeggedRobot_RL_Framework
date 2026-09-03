@@ -6,6 +6,33 @@ from envs.tasks.managers.observation.terms.registry import register_observation
 from envs.tasks.utils.context import TaskContext
 
 
+@register_observation
+class FootHeight(BaseObservationTerm):
+
+    def __init__(
+        self,
+        model_context: ModelContext,
+        *args, **kwargs,
+    ) -> None:
+        
+        super().__init__(*args, **kwargs)
+
+        if model_context.geom_foot_ids.numel() == 0:
+            raise ValueError(
+                "FootHeight requires at least one foot geom."
+            )
+
+        self.geom_foot_ids = model_context.geom_foot_ids
+        self.output_dim = self.geom_foot_ids.numel()
+
+
+    def compute(
+        self,
+        task_context: TaskContext,
+    ) -> torch.Tensor:
+        return task_context.state["geom_xpos"][:, self.geom_foot_ids, 2]
+
+
 class _FootContactObservation(BaseObservationTerm):
 
     def __init__(
@@ -88,7 +115,7 @@ class FootContactState(_FootContactObservation):
 
     def __init__(
         self,
-        threshold: float = 1.0,
+        threshold: float = 15.0,
         *args, **kwargs,
     ) -> None:
         

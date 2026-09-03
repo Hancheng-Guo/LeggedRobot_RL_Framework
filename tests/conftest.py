@@ -45,6 +45,7 @@ def model_context() -> ModelContext:
             [[0.0, 2.0], [-2.0, 2.0]],
             dtype=torch.float32,
         ),
+        actuator_default_ctrl=torch.tensor([0.5, -0.5]),
         geom_names=("floor", "base", "thigh", "foot"),
         geom_body_ids=torch.tensor([0, 1, 2, 3]),
         geom_foot_ids=torch.tensor([3]),

@@ -31,6 +31,7 @@ class ModelContext:
     # actuator_names: tuple[str, ...]
     # actuator_ids: torch.Tensor
     actuator_ctrl_range: torch.Tensor
+    actuator_default_ctrl: torch.Tensor
 
     geom_names: tuple[str | None, ...]
     geom_body_ids: torch.Tensor

@@ -51,3 +51,37 @@ def test_action_manager_tracks_history_and_partial_reset(
     assert torch.count_nonzero(manager.action[1]) == 0
     assert torch.count_nonzero(manager.last_action[1]) == 0
 
+
+def test_keyframe_centered_linear_map_uses_asymmetric_scales(
+    runtime_context,
+    model_context,
+):
+    manager = ActionManager(
+        num_envs=5,
+        context=runtime_context,
+        model_context=model_context,
+        terms={"keyframe_centered_linear_map": {}},
+    )
+
+    control, _ = manager.process(
+        torch.tensor(
+            [
+                [-1.0, -1.0],
+                [-0.5, -0.5],
+                [0.0, 0.0],
+                [0.5, 0.5],
+                [1.0, 1.0],
+            ]
+        )
+    )
+
+    expected = torch.tensor(
+        [
+            [0.0, -2.0],
+            [0.25, -1.25],
+            [0.5, -0.5],
+            [1.25, 0.75],
+            [2.0, 2.0],
+        ]
+    )
+    torch.testing.assert_close(control, expected)

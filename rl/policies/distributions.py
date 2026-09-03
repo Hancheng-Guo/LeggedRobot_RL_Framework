@@ -20,7 +20,9 @@ class DiagonalGaussian(BaseActionDistribution):
     def __init__(
         self,
         action_dim: int,
-        initial_std: float = 1.0,
+        initial_std: float = 0.5,
+        min_std: float = 0.1,
+        max_std: float = 1.0,
     ) -> None:
         
         super().__init__()
@@ -35,6 +37,9 @@ class DiagonalGaussian(BaseActionDistribution):
             torch.full((action_dim,), math.log(initial_std))
         )
 
+        self.min_log_std = math.log(min_std)
+        self.max_log_std = math.log(max_std)
+
 
     def forward(
         self,
@@ -47,7 +52,11 @@ class DiagonalGaussian(BaseActionDistribution):
                 "Actor output must have shape [batch, action_dim] with "
                 f"action_dim {self.action_dim}, got {tuple(mean.shape)}."
             )
-        std = self.log_std.exp().expand_as(mean)
+        log_std = self.log_std.clamp(
+            self.min_log_std,
+            self.max_log_std,
+        )
+        std = log_std.exp().expand_as(mean)
         return torch.distributions.Normal(mean, std)
 
 

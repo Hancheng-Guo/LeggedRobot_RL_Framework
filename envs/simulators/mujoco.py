@@ -147,6 +147,11 @@ class MujocoSimulator(BaseSimulator):
             self._find_base_joint_info(model)
         )
         actuator_joint_ids = self._find_actuated_joint_ids(model)
+        actuator_default_ctrl = (
+            np.zeros(model.nu, dtype=model.qpos0.dtype)
+            if self.reset_keyframe_id == -1
+            else model.key_ctrl[self.reset_keyframe_id, :]
+        )
         joint_qpos_ids = model.jnt_qposadr[actuator_joint_ids]
         joint_default_pos = (
             model.qpos0[joint_qpos_ids]
@@ -193,6 +198,7 @@ class MujocoSimulator(BaseSimulator):
 
             # actuator_names=names(mujoco.mjtObj.mjOBJ_ACTUATOR, model.nu),
             actuator_ctrl_range = self._tensor(model.actuator_ctrlrange),
+            actuator_default_ctrl = self._tensor(actuator_default_ctrl),
 
             geom_names=geom_names,
             geom_body_ids=self._indices(model.geom_bodyid),

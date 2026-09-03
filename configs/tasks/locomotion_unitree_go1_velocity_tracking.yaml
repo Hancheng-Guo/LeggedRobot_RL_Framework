@@ -5,8 +5,8 @@ constants:
 
 action_manager_config:
   terms:
-    hard_clamp: {min_value: -1.0, max_value: 1.0}
-    linear_map: {}
+    tanh_map: {}
+    keyframe_centered_linear_map: {}
 
 
 command_manager_config:

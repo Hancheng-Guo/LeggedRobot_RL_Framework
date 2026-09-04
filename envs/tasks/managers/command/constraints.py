@@ -128,12 +128,12 @@ class CommandConstraintSet:
                     )
 
 
-    def apply(
+    def correct(
         self,
         commands: dict[str, torch.Tensor],
         target_names: set[str] | None = None,
     ) -> dict[str, torch.Tensor]:
-        
+
         checked_commands = dict(commands)
 
         for constraint in self.constraints:
@@ -206,3 +206,134 @@ class CommandConstraintSet:
             checked_commands[constraint.target] = checked_command
 
         return checked_commands
+    
+
+    def filter(
+        self,
+        command_starts: dict[str, torch.Tensor],
+        cell_interval: dict[str, torch.Tensor],
+        target_names: set[str] | None = None,
+    ) -> dict[str, torch.Tensor]:
+
+        filtered_starts = dict(command_starts)
+
+        missing_intervals = set(filtered_starts) - cell_interval.keys()
+        if missing_intervals:
+            raise ValueError(
+                "Missing cell intervals for command term(s): "
+                f"{sorted(missing_intervals)}."
+            )
+
+        for constraint in self.constraints:
+            if (
+                target_names is not None
+                and constraint.target not in target_names
+            ):
+                continue
+
+            target_start = filtered_starts[constraint.target]
+            target_end = (
+                target_start
+                + cell_interval[constraint.target]
+            )
+            boundary_min, boundary_max, boundary_is_nan = (
+                self._expression_bounds(
+                    constraint,
+                    filtered_starts,
+                    cell_interval,
+                    target_start,
+                )
+            )
+
+            if constraint.operator in {"<=", "<"}:
+                valid = target_end <= boundary_min
+            elif constraint.operator == ">=":
+                valid = target_start >= boundary_max
+            elif constraint.operator == ">":
+                valid = target_start > boundary_max
+            else:
+                valid = (
+                    (target_end <= boundary_min)
+                    | (target_start > boundary_max)
+                    | boundary_is_nan
+                )
+
+            valid_cells = valid.all(dim=-1)
+            filtered_starts = {
+                name: starts[valid_cells]
+                for name, starts in filtered_starts.items()
+            }
+
+        return filtered_starts
+
+
+
+    def _expression_bounds(
+        self,
+        constraint: CommandConstraint,
+        command_starts: dict[str, torch.Tensor],
+        cell_interval: dict[str, torch.Tensor],
+        target: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+
+        referenced_terms = tuple(sorted(constraint.referenced_terms))
+        referenced_dim = sum(
+            command_starts[name].shape[-1]
+            for name in referenced_terms
+        )
+        if referenced_dim > 20:
+            raise ValueError(
+                f"Constraint '{constraint.target}' references "
+                f"{referenced_dim} scalar dimensions; interval checking "
+                "supports at most 20."
+            )
+
+        boundaries: list[torch.Tensor] = []
+        for corner_id in range(1 << referenced_dim):
+            expression_commands: dict[str, torch.Tensor] = {}
+            dimension_offset = 0
+            for name in referenced_terms:
+                starts = command_starts[name]
+                interval = cell_interval[name]
+                use_end = torch.tensor(
+                    [
+                        bool(corner_id & (1 << (dimension_offset + index)))
+                        for index in range(starts.shape[-1])
+                    ],
+                    dtype=torch.bool,
+                    device=starts.device,
+                )
+                expression_commands[name] = torch.where(
+                    use_end,
+                    starts + interval,
+                    starts,
+                )
+                dimension_offset += starts.shape[-1]
+
+            try:
+                boundary = eval(
+                    constraint.compiled_expression,
+                    {"__builtins__": {}},
+                    {
+                        "commands": expression_commands,
+                        **_ALLOWED_COMMAND,
+                    },
+                )
+                boundary = torch.as_tensor(
+                    boundary,
+                    dtype=target.dtype,
+                    device=target.device,
+                )
+                boundaries.append(torch.broadcast_to(boundary, target.shape))
+            except Exception as error:
+                raise ValueError(
+                    f"Error evaluating constraint "
+                    f"'{constraint.target}': {error}"
+                ) from error
+
+        stacked = torch.stack(boundaries)
+        boundary_is_nan = stacked.isnan().all(dim=0)
+        boundary_min = stacked.nan_to_num(nan=torch.inf).amin(dim=0)
+        boundary_max = stacked.nan_to_num(nan=-torch.inf).amax(dim=0)
+
+        return boundary_min, boundary_max, boundary_is_nan

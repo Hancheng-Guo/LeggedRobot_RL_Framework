@@ -222,11 +222,12 @@ class VectorEnv(BaseEnv):
         ) # old_command, action, last_action
 
         reward, reward_info = self.task.compute_reward(task_context)
+        scaled_reward = reward * self.simulator.control_dt
         terminated, terminated_info = self.task.check_terminated(task_context)
         truncated = (self.current_episode_steps >= self.max_episode_steps)
 
         step_result = TaskStepResult(
-            reward=reward,
+            reward=scaled_reward,
             terminated=terminated,
             truncated=truncated,
         )
@@ -259,7 +260,7 @@ class VectorEnv(BaseEnv):
         return (
             next_obs,
             transition_next_obs,
-            reward,
+            scaled_reward,
             terminated,
             truncated,
             info,

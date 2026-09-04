@@ -4,6 +4,7 @@ from typing import Any
 from dataclasses import dataclass
 
 from envs.tasks.managers.command.constraints import CommandConstraintSet
+from envs.tasks.managers.command.terms.registry import get_command_class
 from envs.tasks.managers.curriculum.terms.base import BaseCurriculumTerm
 from envs.tasks.managers.curriculum.terms.registry import register_curriculum
 
@@ -12,7 +13,8 @@ from envs.tasks.managers.curriculum.terms.registry import register_curriculum
 class CommandCurriculumBuffer:
     dimension_names: tuple[str, ...]
     term_slices: dict[str, slice]
-    command_values: torch.Tensor
+    cell_starts: torch.Tensor
+    cell_interval: torch.Tensor
     reward_sum: torch.Tensor
     sample_count: torch.Tensor
     assigned_cell_ids: torch.Tensor
@@ -26,9 +28,9 @@ class CommandRewardCurriculum(BaseCurriculumTerm, ABC):
         self,
         command_manager_config: dict[str, Any],
         command_term_type: str,
-        temperature: float = 100.0,
+        temperature: float = 1.0,
         exploration: float = 0.1,
-        max_cells: int = 100_000,
+        max_cells: int = 1000,
         *args, **kwargs,
     ) -> None:
         
@@ -61,6 +63,12 @@ class CommandRewardCurriculum(BaseCurriculumTerm, ABC):
         if not isinstance(command_terms, dict):
             raise ValueError("Command manager must define 'terms'.")
 
+        curriculum_term_name = getattr(
+            get_command_class(self.command_term_type),
+            "curriculum_term_name",
+            None,
+        )
+
         spaces: dict[str, dict[str, Any]] = {}
         for term_name, term_config in command_terms.items():
 
@@ -68,7 +76,19 @@ class CommandRewardCurriculum(BaseCurriculumTerm, ABC):
                 raise TypeError(
                     f"Config of command term '{term_name}' must be a dict."
                 )
-            if term_config.get("type") != self.command_term_type:
+
+            command_type = term_config.get("type")
+            if not isinstance(command_type, str):
+                raise ValueError(
+                    f"'type' is missing for command term '{term_name}'."
+                )
+            if (
+                getattr(
+                    get_command_class(command_type),
+                    "curriculum_term_name",
+                    None
+                ) != curriculum_term_name
+            ):
                 continue
 
             params = term_config.get("params", {})
@@ -90,7 +110,7 @@ class CommandRewardCurriculum(BaseCurriculumTerm, ABC):
             spaces.setdefault(group, {})[term_name] = {
                 "min_value": params.get("min_value"),
                 "max_value": params.get("max_value"),
-                "num_bins": params.get("num_bins"),
+                "num_cell": params.get("num_cell", 1),
                 "dim": params.get("dim", 1),
             }
 
@@ -144,39 +164,40 @@ class CommandRewardCurriculum(BaseCurriculumTerm, ABC):
 
         # get the axes for each dimension and validate the configuration
         axes: list[torch.Tensor] = []
+        cell_intervals: list[torch.Tensor] = []
         dimension_names: list[str] = []
         term_slices: dict[str, slice] = {}
         raw_num_cells = 1
         for term_name, config in dimensions.items():
 
-            num_bins = int(config.get("num_bins") or 0)
-            if num_bins <= 0:
+            num_cell = int(config.get("num_cell") or 1)
+            if num_cell < 1:
                 raise ValueError(
-                    f"'num_bins' of command term '{term_name}' "
+                    f"'num_cell' of command term '{term_name}' "
                     "must be positive."
                 )
 
-            command_dim = config.get("dim", 1)
+            command_dim = config.get("dim")
             if (
                 not isinstance(command_dim, int)
                 or isinstance(command_dim, bool)
                 or command_dim <= 0
             ):
                 raise ValueError(
-                    f"'command_dim' of command term '{term_name}' must be "
-                    "a positive integer."
+                    f"'command_dim' of command term '{term_name}' "
+                    "must be a positive integer."
                 )
 
-            raw_num_cells *= num_bins ** command_dim
+            raw_num_cells *= num_cell ** command_dim
             if raw_num_cells > self.max_cells:
                 raise ValueError(
                     f"Curriculum space '{name}' has at least "
                     f"{raw_num_cells} raw cells, exceeding "
-                    f"max_cells={self.max_cells}. Reduce 'num_bins' or "
+                    f"max_cells={self.max_cells}. Reduce 'num_cell' or "
                     "'command_dim', or split the command terms into "
                     "different groups."
                 )
-            
+
             min_value = float(config["min_value"])
             max_value = float(config["max_value"])
             if min_value > max_value:
@@ -185,12 +206,22 @@ class CommandRewardCurriculum(BaseCurriculumTerm, ABC):
                     "cannot exceed 'max_value'."
                 )
 
-            axis = torch.linspace(
-                min_value,
-                max_value,
-                num_bins,
-                dtype=self.context.dtype,
-                device=self.context.device,
+            interval = (max_value - min_value) / num_cell
+            cell_intervals.append(
+                torch.full(
+                    (command_dim,),
+                    interval,
+                    dtype=self.context.dtype,
+                    device=self.context.device,
+                )
+            )
+            axis = (
+                torch.arange(
+                    num_cell,
+                    dtype=self.context.dtype,
+                    device=self.context.device,
+                ) * interval
+                + min_value
             )
             start = len(axes)
             axes.extend([axis] * command_dim)
@@ -205,34 +236,39 @@ class CommandRewardCurriculum(BaseCurriculumTerm, ABC):
             )
 
         # compute command value of each cell
-        all_command_values = (
+        all_cell_starts = (
             axes[0].unsqueeze(-1)
             if len(axes) == 1
             else torch.cartesian_prod(*axes)
         )
-        all_commands = {
-            term_name: all_command_values[:, term_slice]
+        all_command_starts = {
+            term_name: all_cell_starts[:, term_slice]
             for term_name, term_slice in term_slices.items()
         }
 
-        # apply constraints to command values
-        checked_commands = constraint_set.apply(
-            all_commands,
+        cell_interval = torch.cat(cell_intervals)
+        command_interval = {
+            term_name: cell_interval[term_slice]
+            for term_name, term_slice in term_slices.items()
+        }
+
+        # Keep only cells whose complete intervals satisfy every constraint.
+        filtered_command_starts = constraint_set.filter(
+            command_starts=all_command_starts,
+            cell_interval=command_interval,
             target_names=set(dimensions),
         )
-        checked_command_values = torch.cat(
-            [checked_commands[name] for name in dimensions],
+        filtered_cell_starts = torch.cat(
+            [filtered_command_starts[name] for name in dimensions],
             dim=-1,
         )
 
-        # filter out any cells that violate constraints
-        filtered_command_values = self._filter_command_values(
-            all_command_values,
-            checked_command_values,
-        )
-
-        # check if the number of cells exceeds max_cells
-        num_cells = filtered_command_values.shape[0]
+        num_cells = filtered_cell_starts.shape[0]
+        if num_cells == 0:
+            raise ValueError(
+                f"Curriculum space '{name}' has no command cells "
+                "remained after applying constraints."
+            )
         if num_cells > self.max_cells:
             raise ValueError(
                 f"Curriculum space '{name}' has {num_cells} cells, "
@@ -242,7 +278,8 @@ class CommandRewardCurriculum(BaseCurriculumTerm, ABC):
         return CommandCurriculumBuffer(
             dimension_names=tuple(dimension_names),
             term_slices=term_slices,
-            command_values=filtered_command_values,
+            cell_starts=filtered_cell_starts,
+            cell_interval=cell_interval,
             reward_sum=torch.zeros(
                 num_cells,
                 dtype=self.context.dtype,
@@ -262,42 +299,12 @@ class CommandRewardCurriculum(BaseCurriculumTerm, ABC):
         )
 
 
-    def _filter_command_values(
-        self,
-        all_command_values: torch.Tensor,
-        checked_command_values: torch.Tensor,
-    ) -> torch.Tensor:
-
-        combined_values = torch.cat(
-            (all_command_values, checked_command_values),
-            dim=0,
-        )
-        _, inverse_ids = torch.unique(
-            combined_values,
-            dim=0,
-            return_inverse=True,
-        )
-
-        num_all_values = all_command_values.shape[0]
-        all_value_ids = inverse_ids[:num_all_values]
-        checked_value_ids = inverse_ids[num_all_values:]
-        valid = torch.isin(checked_value_ids, all_value_ids)
-
-        filtered_command_values = checked_command_values[valid].unique(dim=0)
-        if filtered_command_values.shape[0] == 0:
-            raise ValueError(
-                "No command values remain after applying constraints."
-            )
-
-        return filtered_command_values
-
-
     def get_command(
         self,
         space_name: str,
         dimension: str,
         env_ids: torch.Tensor | None = None,
-    ) -> torch.Tensor:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         
         buffer = self.buffers[space_name]
 
@@ -317,7 +324,10 @@ class CommandRewardCurriculum(BaseCurriculumTerm, ABC):
                 f"Curriculum space '{space_name}' has not been sampled."
             )
         
-        return buffer.command_values[cell_ids, term_slice]
+        command_start = buffer.cell_starts[cell_ids, term_slice]
+        command_end = command_start + buffer.cell_interval[term_slice]
+
+        return command_start, command_end
 
 
     @abstractmethod
@@ -365,118 +375,111 @@ class CommandRewardCurriculum(BaseCurriculumTerm, ABC):
         )
 
 
-@register_curriculum
-class LrpcCommandReward(CommandRewardCurriculum):
+# @register_curriculum
+# class LrpcCommandReward(CommandRewardCurriculum):
+
+#     def __init__(
+#         self,
+#         *args, **kwargs,
+#     ) -> None:
+
+#         super().__init__(
+#             command_term_type="LrpcSampleOnReset",
+#             *args, **kwargs
+#         )
+
+
+#     def update(     # update rewards to cell buffer
+#         self,
+#         reward: torch.Tensor
+#     ) -> dict[str, torch.Tensor]:
+
+#         info: dict[str, torch.Tensor] = {}
+
+#         for name, buffer in self.buffers.items():
+
+#             valid = buffer.assigned_cell_ids >= 0
+#             cell_ids = buffer.assigned_cell_ids[valid]
+
+#             buffer.reward_sum.scatter_add_(0, cell_ids, reward[valid])
+#             buffer.sample_count.scatter_add_(0, cell_ids, torch.ones_like(cell_ids))
+
+#             info[f"{name}/probabilities"] = self._get_probabilities(name)
+
+#         return info
+
+
+#     def reset(
+#         self,
+#         env_ids: torch.Tensor | None = None
+#     ) -> None:
+        
+#         for buffer in self.buffers.values():
+
+#             if env_ids is None:
+#                 buffer.assigned_cell_ids.fill_(-1)
+#             else:
+#                 buffer.assigned_cell_ids[env_ids] = -1
+
+#         self.resample(set(self.buffers), env_ids)
+
+
+#     def resample(
+#         self,
+#         space_names: set[str],
+#         env_ids: torch.Tensor | None = None,
+#     ) -> None:
+        
+#         selected_count = self.num_envs if env_ids is None else env_ids.numel()
+
+#         for space_name in space_names:
+
+#             buffer = self.buffers[space_name]
+#             sampled_ids = torch.multinomial(
+#                 self._get_probabilities(space_name),    # propabilities of each cell
+#                 selected_count,                         # number of cells to sample
+#                 replacement=True,                       # allow duplicates
+#             )
+
+#             if env_ids is None:
+#                 buffer.assigned_cell_ids.copy_(sampled_ids)
+#             else:
+#                 buffer.assigned_cell_ids[env_ids] = sampled_ids
+
+
+#     def _get_probabilities(
+#         self,
+#         space_name: str
+#     ) -> torch.Tensor:
+        
+#         buffer = self.buffers[space_name]
+
+#         # avoid division by zero by clamping sample counts to at least 1
+#         counts = buffer.sample_count.clamp_min(1).to(self.context.dtype)
+
+#         reward_mean = buffer.reward_sum / counts
+#         probabilities = torch.softmax(
+#             -reward_mean / self.temperature,
+#             dim=0,
+#         )
+
+#         return (
+#             (1.0 - self.exploration) * probabilities
+#             + self.exploration / probabilities.numel()
+#         )
+
+
+
+class BaseLpacCommandReward(CommandRewardCurriculum, ABC):
 
     def __init__(
         self,
-        *args, **kwargs,
-    ) -> None:
-
-        super().__init__(
-            command_term_type="LrpcSampleOnReset",
-            *args, **kwargs
-        )
-
-
-    def update(     # update rewards to cell buffer
-        self,
-        reward: torch.Tensor
-    ) -> dict[str, torch.Tensor]:
-
-        info: dict[str, torch.Tensor] = {}
-
-        for name, buffer in self.buffers.items():
-
-            valid = buffer.assigned_cell_ids >= 0
-            cell_ids = buffer.assigned_cell_ids[valid]
-
-            buffer.reward_sum.scatter_add_(0, cell_ids, reward[valid])
-            buffer.sample_count.scatter_add_(0, cell_ids, torch.ones_like(cell_ids))
-
-            info[f"{name}/probabilities"] = self._get_probabilities(name)
-
-        return info
-
-
-    def reset(
-        self,
-        env_ids: torch.Tensor | None = None
-    ) -> None:
-        
-        for buffer in self.buffers.values():
-
-            if env_ids is None:
-                buffer.assigned_cell_ids.fill_(-1)
-            else:
-                buffer.assigned_cell_ids[env_ids] = -1
-
-        self.resample(set(self.buffers), env_ids)
-
-
-    def resample(
-        self,
-        space_names: set[str],
-        env_ids: torch.Tensor | None = None,
-    ) -> None:
-        
-        selected_count = self.num_envs if env_ids is None else env_ids.numel()
-
-        for space_name in space_names:
-
-            buffer = self.buffers[space_name]
-            sampled_ids = torch.multinomial(
-                self._get_probabilities(space_name),    # propabilities of each cell
-                selected_count,                         # number of cells to sample
-                replacement=True,                       # allow duplicates
-            )
-
-            if env_ids is None:
-                buffer.assigned_cell_ids.copy_(sampled_ids)
-            else:
-                buffer.assigned_cell_ids[env_ids] = sampled_ids
-
-
-    def _get_probabilities(
-        self,
-        space_name: str
-    ) -> torch.Tensor:
-        
-        buffer = self.buffers[space_name]
-
-        # avoid division by zero by clamping sample counts to at least 1
-        counts = buffer.sample_count.clamp_min(1).to(self.context.dtype)
-
-        reward_mean = buffer.reward_sum / counts
-        probabilities = torch.softmax(
-            -reward_mean / self.temperature,
-            dim=0,
-        )
-
-        return (
-            (1.0 - self.exploration) * probabilities
-            + self.exploration / probabilities.numel()
-        )
-
-
-
-@register_curriculum
-class LpacCommandReward(CommandRewardCurriculum):
-
-    def __init__(
-        self,
-        min_coverage: float = 0.8,
         min_samples_per_cell: int = 5,
         *args, **kwargs,
     ) -> None:
 
-        super().__init__(
-            command_term_type="LpacSampleOnReset",
-            *args, **kwargs
-        )
+        super().__init__(*args, **kwargs)
 
-        if not 0.0 < min_coverage <= 1.0:
-            raise ValueError("'min_coverage' must be in (0, 1].")
         if (
             not isinstance(min_samples_per_cell, int)
             or isinstance(min_samples_per_cell, bool)
@@ -486,15 +489,10 @@ class LpacCommandReward(CommandRewardCurriculum):
                 "'min_samples_per_cell' must be a positive integer."
             )
 
-        self.min_coverage = min_coverage
         self.min_samples_per_cell = min_samples_per_cell
 
         self.last_reward_mean = {
-            name: torch.zeros_like(buffer.reward_sum)
-            for name, buffer in self.buffers.items()
-        }
-        self.has_previous = {
-            name: torch.zeros_like(buffer.sample_count, dtype=torch.bool)
+            name: torch.full_like(buffer.reward_sum, torch.nan)
             for name, buffer in self.buffers.items()
         }
         self.learning_progress = {
@@ -517,7 +515,7 @@ class LpacCommandReward(CommandRewardCurriculum):
         )
 
 
-    def update(     # update rewards to cell buffer
+    def update(
         self,
         reward: torch.Tensor
     ) -> dict[str, torch.Tensor]:
@@ -551,36 +549,14 @@ class LpacCommandReward(CommandRewardCurriculum):
 
         for name, buffer in self.buffers.items():
             cell_ids = buffer.assigned_cell_ids[done]
-            buffer.reward_sum.scatter_add_(0, cell_ids, self.episode_reward_sum[done])
+            episode_reward_mean = (
+                self.episode_reward_sum[done]
+                / self.episode_step_count[done]
+            )
+            buffer.reward_sum.scatter_add_(0, cell_ids, episode_reward_mean)
             buffer.sample_count.scatter_add_(0, cell_ids, torch.ones_like(cell_ids))
             buffer.assigned_cell_ids[done] = -1
-
-            count_satisfied = (
-                buffer.sample_count >= self.min_samples_per_cell
-            )
-            coverage = (
-                torch.count_nonzero(count_satisfied).item()
-                / buffer.sample_count.numel()
-            )
-            if coverage >= self.min_coverage:
-                reward_mean = self._calculate_reward_mean(name)
-                has_previous = self.has_previous[name]
-                first_window = count_satisfied & ~has_previous
-                later_window = count_satisfied & has_previous
-
-                self.learning_progress[name][first_window] = 0.0
-                self.learning_progress[name][later_window] = (
-                    reward_mean[later_window]
-                    - self.last_reward_mean[name][later_window]
-                )
-                self.last_reward_mean[name][count_satisfied] = (
-                    reward_mean[count_satisfied]
-                )
-                has_previous[count_satisfied] = True
-                self.probabilities[name] = self._calculate_probabilities(name)
-
-                buffer.sample_count[count_satisfied] = 0
-                buffer.reward_sum[count_satisfied] = 0
+            self._update_space(name)
 
         if env_ids is None:
             self.episode_step_count.fill_(0)
@@ -590,6 +566,11 @@ class LpacCommandReward(CommandRewardCurriculum):
             self.episode_reward_sum[done] = 0
 
         self.resample(set(self.buffers), env_ids)
+
+
+    @abstractmethod
+    def _update_space(self, space_name: str) -> None:
+        raise NotImplementedError
 
 
     def resample(
@@ -649,3 +630,104 @@ class LpacCommandReward(CommandRewardCurriculum):
             (1.0 - self.exploration) * probabilities
             + self.exploration / probabilities.numel()
         )
+
+
+@register_curriculum
+class LpacCommandReward(BaseLpacCommandReward):
+
+    def __init__(
+        self,
+        *args, **kwargs,
+    ) -> None:
+
+        self.min_coverage = 1.0
+        super().__init__(
+            command_term_type="LpacSampleOnReset",
+            *args, **kwargs,
+        )
+        self.last_reward_mean = {
+            name: torch.zeros_like(buffer.reward_sum)
+            for name, buffer in self.buffers.items()
+        }
+
+
+    def _update_space(
+        self,
+        space_name: str
+    ) -> None:
+        
+        buffer = self.buffers[space_name]
+        ready = buffer.sample_count >= self.min_samples_per_cell
+
+        if not torch.all(ready):
+            return
+
+        reward_mean = self._calculate_reward_mean(space_name)
+        last_reward_mean = self.last_reward_mean[space_name]
+
+        self.learning_progress[space_name].copy_(
+            reward_mean - last_reward_mean
+        )
+
+        last_reward_mean.copy_(reward_mean)
+        self.probabilities[space_name] = self._calculate_probabilities(
+            space_name
+        )
+        buffer.sample_count.zero_()
+        buffer.reward_sum.zero_()
+
+
+@register_curriculum
+class FastLpacCommandReward(BaseLpacCommandReward):
+
+    def __init__(
+        self,
+        min_coverage: float = 0.8,
+        *args, **kwargs,
+    ) -> None:
+        
+        if not 0.0 < min_coverage <= 1.0:
+            raise ValueError("'min_coverage' must be in (0, 1].")
+
+        self.min_coverage = min_coverage
+        super().__init__(
+            command_term_type="FastLpacSampleOnReset",
+            *args, **kwargs,
+        )
+
+
+    def _update_space(
+        self,
+        space_name: str
+    ) -> None:
+        
+        buffer = self.buffers[space_name]
+        ready = buffer.sample_count >= self.min_samples_per_cell
+        if not torch.any(ready):
+            return
+
+        reward_mean = self._calculate_reward_mean(space_name)
+        last_reward_mean = self.last_reward_mean[space_name]
+        first_update = torch.isnan(last_reward_mean).all()
+
+        if first_update:
+            coverage = ready.count_nonzero().item() / ready.numel()
+            if coverage < self.min_coverage:
+                return
+
+            baseline = reward_mean[ready].mean()
+            last_reward_mean.fill_(baseline)
+            last_reward_mean[ready] = reward_mean[ready]
+            self.learning_progress[space_name].copy_(last_reward_mean)
+
+        else:
+            self.learning_progress[space_name][ready] = (
+                reward_mean[ready] - last_reward_mean[ready]
+            )
+            last_reward_mean[ready] = reward_mean[ready]
+
+        self.probabilities[space_name] = self._calculate_probabilities(
+            space_name
+        )
+        buffer.sample_count[ready] = 0
+        buffer.reward_sum[ready] = 0

@@ -109,7 +109,7 @@ class CommandManager:
 
         if curriculum_term_name is not None:
 
-            curriculum_manager = kwargs.get("curriculum_manager")
+            curriculum_manager = kwargs.pop("curriculum_manager")
             if not isinstance(curriculum_manager, CurriculumTermProvider):
                 raise ValueError(
                     f"Command term '{name}' requires a "
@@ -128,7 +128,7 @@ class CommandManager:
             term_kwargs["curriculum_sampler"] = curriculum_term
             term_kwargs["term_name"] = name
 
-        return term_kwargs
+        return term_kwargs | kwargs
 
 
     def update(
@@ -140,6 +140,7 @@ class CommandManager:
             term.update(task_context)
 
         checked_command = self._constraints_check(self.proposed_command)
+        self._update_command(checked_command)
 
         return {
             f"command/{name}": value
@@ -155,10 +156,11 @@ class CommandManager:
         for _, term in self.terms.items():
             term.reset(env_ids)
 
-        self._constraints_check(
+        checked_command = self._constraints_check(
             self.proposed_command,
             env_ids=env_ids,
         )
+        self._update_command(checked_command, env_ids=env_ids)
 
 
     def get_command(
@@ -194,7 +196,15 @@ class CommandManager:
                 for name, value in proposed_command.items()
             }
 
-        checked_command = self.constraint_set.apply(checked_command)
+        checked_command = self.constraint_set.correct(checked_command)
+        return checked_command
+
+
+    def _update_command(
+        self,
+        checked_command: dict[str, torch.Tensor],
+        env_ids: torch.Tensor | None = None,
+    ) -> None:
 
         for name, value in checked_command.items():
             if env_ids is None:
@@ -207,5 +217,4 @@ class CommandManager:
                     self.command[name][env_ids]
                 )
                 self.command[name][env_ids].copy_(value)
-
-        return checked_command
+        

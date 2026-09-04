@@ -34,6 +34,10 @@ def test_manager_registries_use_snake_case_keys():
     assert REWARD_CLASS_MAP["action_diff_l2"].__name__ == "ActionDiffL2"
     assert TERMINATION_CLASS_MAP["base_height"].__name__ == "BaseHeight"
     assert (
-        CURRICULUM_CLASS_MAP["lrpc_command_reward"].__name__
-        == "LrpcCommandReward"
+        CURRICULUM_CLASS_MAP["lpac_command_reward"].__name__
+        == "LpacCommandReward"
+    )
+    assert (
+        CURRICULUM_CLASS_MAP["fast_lpac_command_reward"].__name__
+        == "FastLpacCommandReward"
     )

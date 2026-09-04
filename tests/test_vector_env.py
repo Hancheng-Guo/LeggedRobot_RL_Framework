@@ -44,6 +44,7 @@ class FakeTask:
         self.last_action = torch.zeros(num_envs, 1)
         self.action_manager = SimpleNamespace(input_dim=1)
         self.observation_manager = SimpleNamespace(output_dim=3)
+        self.last_step_result: TaskStepResult | None = None
 
     def reset(self, env_ids: torch.Tensor | None = None) -> None:
         if env_ids is None:
@@ -95,7 +96,11 @@ class FakeTask:
         self,
         task_context: TaskContext,
     ) -> tuple[torch.Tensor, dict]:
-        return task_context.command["target"].squeeze(-1).clone(), {}
+        reward = task_context.command["target"].squeeze(-1).clone()
+        return reward, {
+            "reward": reward.mean(),
+            "reward/test": reward.clone(),
+        }
 
     def check_terminated(
         self,
@@ -111,6 +116,7 @@ class FakeTask:
         task_context: TaskContext,
         step_result: TaskStepResult,
     ) -> dict:
+        self.last_step_result = step_result
         self.command += 1.0
         return {}
 
@@ -168,6 +174,21 @@ def test_action_dim_comes_from_action_manager_input() -> None:
     env = make_env()
 
     assert env.action_dim == 1
+
+
+def test_reward_is_scaled_for_consumers_but_not_info() -> None:
+    env = make_env()
+    task = cast(FakeTask, env.task)
+    task.command[:, 0] = torch.tensor([2.0, 3.0])
+
+    _, _, reward, _, _, info = env.step(torch.zeros(2, 1))
+
+    expected_scaled = torch.tensor([0.04, 0.06])
+    torch.testing.assert_close(reward, expected_scaled)
+    assert task.last_step_result is not None
+    torch.testing.assert_close(task.last_step_result.reward, expected_scaled)
+    torch.testing.assert_close(info["reward/test"], torch.tensor([2.0, 3.0]))
+    torch.testing.assert_close(info["reward"], torch.tensor(2.5))
 
 
 def test_done_env_returns_terminal_and_reset_observations_separately():

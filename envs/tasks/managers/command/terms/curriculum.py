@@ -14,9 +14,8 @@ class CurriculumSampleOnReset(BaseCommandTerm):
         term_name: str,
         min_value: float,
         max_value: float,
-        num_bins: int,
+        num_cell: int,
         group: str,
-        noise_scale: float,
         *args, **kwargs,
     ) -> None:
         
@@ -24,28 +23,21 @@ class CurriculumSampleOnReset(BaseCommandTerm):
 
         if min_value > max_value:
             raise ValueError("'min_value' cannot exceed 'max_value'.")
-        if num_bins <= 0:
-            raise ValueError("'num_bins' must be positive.")
-        if noise_scale < 0.0:
-            raise ValueError("'noise_scale' cannot be negative.")
+        if num_cell <= 0:
+            raise ValueError("'num_cell' must be positive.")
         
         self.curriculum_sampler = curriculum_sampler
         self.curriculum_space = group
         self.dimension = term_name
-        bin_width = (
-            (max_value - min_value) / (num_bins - 1)
-            if num_bins > 1
-            else max_value - min_value
-        )
-        self.noise_std = noise_scale * bin_width
-        self.command_center = torch.zeros_like(self.command)
+        self.command_start = torch.zeros_like(self.command)
+        self.command_end = torch.zeros_like(self.command)
 
 
     def update(
         self,
         task_context: TaskContext
     ) -> None:
-        self._update_command_noise()
+        pass
 
 
     def reset(
@@ -53,45 +45,145 @@ class CurriculumSampleOnReset(BaseCommandTerm):
         env_ids: torch.Tensor | None = None
     ) -> None:
         
-        center = self.curriculum_sampler.get_command(
+        command_start, command_end = self.curriculum_sampler.get_command(
             self.curriculum_space,
             self.dimension,
             env_ids,
         )
         
         if env_ids is None:
-            self.command_center.copy_(center)
+            self.command_start.copy_(command_start)
+            self.command_end.copy_(command_end)
         else:
-            self.command_center[env_ids] = center
+            self.command_start[env_ids] = command_start
+            self.command_end[env_ids] = command_end
 
-        self._update_command_noise(env_ids)
+        self._update_command(env_ids)
 
 
-    def _update_command_noise(
+    def _update_command(
         self,
         env_ids: torch.Tensor | None = None,
     ) -> None:
 
         if env_ids is None:
             self.command.copy_(
-                self.command_center
-                + torch.randn_like(self.command_center) * self.noise_std
+                self.command_start +
+                (
+                    (self.command_end - self.command_start)
+                    * torch.rand_like(self.command_start)
+                )
             )
-            return
 
-        center = self.command_center[env_ids]
-        self.command[env_ids] = (
-            center + torch.randn_like(center) * self.noise_std
-        )
+        else:
+            command_start = self.command_start[env_ids]
+            command_end = self.command_end[env_ids]
+            self.command[env_ids] = (
+                command_start +
+                (
+                    (command_end - command_start)
+                    * torch.rand_like(command_start)
+                )
+            )
 
 
-@register_command
-class LrpcSampleOnReset(CurriculumSampleOnReset):
+# @register_command
+# class LrpcSampleOnReset(CurriculumSampleOnReset):
 
-    curriculum_term_name = "lrpc_command_reward"
+#     curriculum_term_name = "lrpc_command_reward"
 
 
 @register_command
 class LpacSampleOnReset(CurriculumSampleOnReset):
 
     curriculum_term_name = "lpac_command_reward"
+
+
+@register_command
+class SymmetricLpacSampleOnReset(LpacSampleOnReset):
+
+    def __init__(
+        self,
+        min_value: float,
+        max_value: float,
+        *args, **kwargs,
+    ) -> None:
+
+        if min_value < 0 or max_value < 0:
+            raise ValueError("'min_value' and 'max_value' must be positive.")
+        
+        super().__init__(
+            min_value=min_value,
+            max_value=max_value,
+            *args, **kwargs
+        )
+
+
+    def _update_command(
+        self,
+        env_ids: torch.Tensor | None = None,
+    ) -> None:
+
+        super()._update_command(env_ids)
+
+        if env_ids is None:
+            self.command *= torch.where(
+                torch.rand_like(self.command) < 0.5,
+                -torch.ones_like(self.command),
+                torch.ones_like(self.command),
+            )
+
+        else:
+            self.command[env_ids] *= torch.where(
+                torch.rand_like(self.command[env_ids]) < 0.5,
+                -torch.ones_like(self.command[env_ids]),
+                torch.ones_like(self.command[env_ids]),
+            )
+
+
+@register_command
+class FastLpacSampleOnReset(CurriculumSampleOnReset):
+
+    curriculum_term_name = "fast_lpac_command_reward"
+
+
+@register_command
+class SymmetricFastLpacSampleOnReset(FastLpacSampleOnReset):
+
+    def __init__(
+        self,
+        min_value: float,
+        max_value: float,
+        *args, **kwargs,
+    ) -> None:
+
+        if min_value < 0 or max_value < 0:
+            raise ValueError("'min_value' and 'max_value' must be positive.")
+
+        super().__init__(
+            min_value=min_value,
+            max_value=max_value,
+            *args, **kwargs
+        )
+
+
+    def _update_command(
+        self,
+        env_ids: torch.Tensor | None = None,
+    ) -> None:
+
+        super()._update_command(env_ids)
+
+        if env_ids is None:
+            self.command *= torch.where(
+                torch.rand_like(self.command) < 0.5,
+                -torch.ones_like(self.command),
+                torch.ones_like(self.command),
+            )
+
+        else:
+            self.command[env_ids] *= torch.where(
+                torch.rand_like(self.command[env_ids]) < 0.5,
+                -torch.ones_like(self.command[env_ids]),
+                torch.ones_like(self.command[env_ids]),
+            )

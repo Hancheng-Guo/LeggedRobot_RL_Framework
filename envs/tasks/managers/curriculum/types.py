@@ -28,5 +28,5 @@ class CommandCurriculumSampler(Protocol):
         space_name: str,
         dimension: str,
         env_ids: torch.Tensor | None = None,
-    ) -> torch.Tensor:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         ...

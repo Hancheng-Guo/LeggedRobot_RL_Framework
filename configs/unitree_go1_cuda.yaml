@@ -11,11 +11,11 @@ stage:
       max_iterations: 2000
       transition:
         - {metric: "rollout/mean_len", method: mean, operator: ">=", threshold: 600.0, window: 50}
-  - velocity_tracking:
-      max_iterations: 2000
-      transition:
-        - {metric: "reward/track_linear_velocity_xy_l2_exp_and_logcosh", method: mean, operator: ">=", threshold: 6.0, window: 100}
-        - {metric: "reward/track_angular_velocity_z_l2_exp_and_logcosh", method: mean, operator: ">=", threshold: 6.0, window: 100}
+  # - velocity_tracking:
+  #     max_iterations: 2000
+  #     transition:
+  #       - {metric: "reward/track_linear_velocity_xy_l2_exp_and_logcosh", method: mean, operator: ">=", threshold: 6.0, window: 100}
+  #       - {metric: "reward/track_angular_velocity_z_l2_exp_and_logcosh", method: mean, operator: ">=", threshold: 6.0, window: 100}
 
 
 component:
@@ -43,5 +43,5 @@ component:
   task:
     - type: "locomotion"
       config: "locomotion_unitree_go1_survival"
-    - type: "locomotion"
-      config: "locomotion_unitree_go1_velocity_tracking"
+    # - type: "locomotion"
+    #   config: "locomotion_unitree_go1_velocity_tracking"

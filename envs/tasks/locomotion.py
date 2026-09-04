@@ -78,11 +78,13 @@ class LocomotionTaskLogic(BaseTaskLogic):
         command_manager_config: dict,
     ) -> None:
 
+        if hasattr(self, "curriculum_manager"):
+            command_manager_config["curriculum_manager"] = self.curriculum_manager
+
         self.command_manager = CommandManager(
             num_envs=self.num_envs,
             context=self.context,
             model_context=self.model_context,
-            curriculum_manager=self.curriculum_manager,
             **command_manager_config,
         )
 

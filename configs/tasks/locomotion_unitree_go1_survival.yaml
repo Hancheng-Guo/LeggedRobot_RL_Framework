@@ -11,20 +11,20 @@ action_manager_config:
 
 command_manager_config:
   terms:
-    lin_vel_x: {type: LpacSampleOnReset, params: {group: locomotion, min_value: 0.0, max_value: 0.5, num_bins: 3, noise_scale: 0.167}}
-    lin_vel_y: {type: LpacSampleOnReset, params: {group: locomotion, min_value: -0.1, max_value: 0.1, num_bins: 3, noise_scale: 0.167}}
-    ang_vel_z: {type: LpacSampleOnReset, params: {group: locomotion, min_value: -0.3, max_value: 0.3, num_bins: 3, noise_scale: 0.167}}
+    lin_vel_x: {type: SymmetricLpacSampleOnReset, params: {group: locomotion, min_value: 0.0, max_value: 2.5, num_cell: 5}}
+    lin_vel_y: {type: UniformOnReset, params: {min_value: -0.5, max_value: 0.5}}
+    ang_vel_z: {type: SymmetricLpacSampleOnReset, params: {group: locomotion, min_value: 0.0, max_value: 3.0, num_cell: 6}}
     half_period_duration: {type: UniformOnReset, params: {min_value: 0.1, max_value: 1.0}}
-    foot_phase_real: {type: LpacSampleOnReset, params: {group: phase, dim: 4, min_value: -1.0, max_value: 1.0, num_bins: 4, noise_scale: 0.167}}
-    foot_phase_imag: {type: LpacSampleOnReset, params: {group: phase, dim: 4, min_value: -1.0, max_value: 1.0, num_bins: 3, noise_scale: 0.167}}
+    foot_phase_real: {type: LpacSampleOnReset, params: {group: phase, dim: 4, min_value: 0.5, max_value: 1.0, num_cell: 1}}
+    foot_phase_imag: {type: LpacSampleOnReset, params: {group: phase, dim: 4, min_value: -1.0, max_value: 1.0, num_cell: 3}}
 
-  constraints:
-    foot_phase_real:
-      operator: ">"
-      expression: "0"
-    foot_phase_imag:
-      operator: "!="
-      expression: "torch.where({foot_phase_real} < 1.0, torch.zeros_like({foot_phase_real}), torch.full_like({foot_phase_real}, torch.nan))"
+  # constraints:
+  #   foot_phase_real:
+  #     operator: ">"
+  #     expression: "0"
+  #   foot_phase_imag:
+  #     operator: "!="
+  #     expression: "torch.where({foot_phase_real} < 1.0, torch.zeros_like({foot_phase_real}), torch.full_like({foot_phase_real}, torch.nan))"
 
 
 

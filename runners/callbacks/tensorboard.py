@@ -67,6 +67,7 @@ class TensorboardCallback(BaseCallback):
         
         self.global_step = 0
         self.global_iteration = 0
+        self._pending_histograms: dict[str, list[torch.Tensor]] = {}
         self.tensorboard_url: str
         self._tensorboard: TensorBoard
         self._server_started = False
@@ -108,8 +109,7 @@ class TensorboardCallback(BaseCallback):
     ) -> bool:
         
         self.global_step += 1
-        if self.global_step % self.step_log_interval == 0:
-            self._log_step_metrics(info)
+        self._log_step_metrics(info)
         return True
 
 
@@ -140,6 +140,7 @@ class TensorboardCallback(BaseCallback):
     ) -> bool:
         
         if not self._closed:
+            self._pending_histograms.clear()
             self.writer.close()
             self._closed = True
         return True
@@ -150,14 +151,17 @@ class TensorboardCallback(BaseCallback):
         info: Mapping[str, Any],
     ) -> None:
 
+        log = self.global_step % self.step_log_interval == 0
+
         scalar_values = scalar_metrics(info)
         for name, value in info.items():
+            
             reductions = self._matching_reductions(name)
             if not reductions:
                 continue
 
             if name in scalar_values:
-                if "value" in reductions:
+                if log and "value" in reductions:
                     self.writer.add_scalar(
                         name,
                         scalar_values[name],
@@ -175,23 +179,41 @@ class TensorboardCallback(BaseCallback):
                 )
 
             tensor = value.detach().float()
-            for reduction in reductions - {"histogram"}:
-                reduced = self._reduce_tensor(tensor, reduction)
-                self.writer.add_scalar(
-                    f"{name}/{reduction}",
-                    reduced,
-                    self.global_step,
-                )
+            if log:
+                for reduction in reductions - {"histogram"}:
+                    reduced = self._reduce_tensor(tensor, reduction)
+                    self.writer.add_scalar(
+                        f"{name}/{reduction}",
+                        reduced,
+                        self.global_step,
+                    )
 
-            if (
-                "histogram" in reductions
-                and self.global_step % self.histogram_log_interval == 0
-            ):
-                self.writer.add_histogram(
-                    f"{name}/distribution",
-                    tensor,
-                    self.global_step,
-                )
+            if "histogram" in reductions:
+                self._accumulate_histogram(name, tensor)
+
+        if self.global_step % self.histogram_log_interval == 0:
+            self._flush_histograms()
+
+
+    def _accumulate_histogram(
+        self,
+        name: str,
+        tensor: torch.Tensor,
+    ) -> None:
+
+        snapshot = tensor.detach().float().flatten().cpu().clone()
+        self._pending_histograms.setdefault(name, []).append(snapshot)
+
+
+    def _flush_histograms(self) -> None:
+
+        for name, tensors in self._pending_histograms.items():
+            self.writer.add_histogram(
+                f"{name}/distribution",
+                torch.cat(tensors),
+                self.global_step,
+            )
+        self._pending_histograms.clear()
 
 
     def _matching_reductions(

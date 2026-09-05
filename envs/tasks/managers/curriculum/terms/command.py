@@ -28,7 +28,7 @@ class CommandRewardCurriculum(BaseCurriculumTerm, ABC):
         self,
         command_manager_config: dict[str, Any],
         command_term_type: str,
-        temperature: float = 1.0,
+        temperature: float = 0.01,
         exploration: float = 0.1,
         max_cells: int = 1000,
         *args, **kwargs,

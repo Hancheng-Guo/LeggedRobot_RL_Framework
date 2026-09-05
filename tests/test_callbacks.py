@@ -368,6 +368,7 @@ def test_tensorboard_reduces_configured_vector_metrics(
         def __init__(self) -> None:
             self.scalars: dict[str, float] = {}
             self.histograms: list[str] = []
+            self.histogram_values: list[torch.Tensor] = []
 
         def add_scalar(
             self,
@@ -384,6 +385,7 @@ def test_tensorboard_reduces_configured_vector_metrics(
             step: int,
         ) -> None:
             self.histograms.append(name)
+            self.histogram_values.append(value.clone())
 
         def close(self) -> None:
             pass
@@ -425,6 +427,11 @@ def test_tensorboard_reduces_configured_vector_metrics(
 
     callback._on_step_end(info)
     assert writer.histograms == ["action/action/distribution"]
+    torch.testing.assert_close(
+        writer.histogram_values[0],
+        torch.tensor([-1.0, 1.0, 3.0, 5.0] * 2),
+    )
+    assert callback._pending_histograms == {}
     callback._on_close()
 
 

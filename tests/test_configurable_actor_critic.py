@@ -8,6 +8,7 @@ import yaml
 from app.utils.context import RuntimeContext
 from rl.algorithms.ppo import PPO
 from rl.policies.configurable_actor_critic import ConfigurableActorCritic
+from rl.policies.modules.operators import Add
 from rl.policies.modules.registry import build_module
 from rl.policies.modules.recurrent import StatefulGRU
 from rl.policies.registry import POLICY_TYPE_MAP
@@ -553,6 +554,192 @@ def test_network_selects_observation_fields_and_concatenates_branches(
     assert policy.actor.B.in_features == 2
 
 
+def test_network_adds_named_module_outputs(
+    runtime_context: RuntimeContext,
+) -> None:
+    policy = ConfigurableActorCritic(context=runtime_context)
+    policy.config_update(
+        component=make_component(),
+        obs_dim=3,
+        action_dim=2,
+        actor=[
+            {
+                "name": "motor_action",
+                "inputs": "obs",
+                "type": "linear",
+                "in_features": 3,
+                "out_features": 2,
+            },
+            {
+                "name": "actuator_shift",
+                "inputs": "obs",
+                "type": "linear",
+                "in_features": 3,
+                "out_features": 2,
+            },
+            {
+                "name": "final_action",
+                "inputs": ["motor_action", "actuator_shift"],
+                "type": "add",
+            },
+        ],
+        critic=CRITIC_CONFIG,
+        distribution={"type": "diagonal_gaussian"},
+    )
+    obs = torch.randn(4, 3)
+
+    expected = (
+        policy.actor.motor_action(obs)
+        + policy.actor.actuator_shift(obs)
+    )
+
+    torch.testing.assert_close(policy.actor_forward(obs), expected)
+    assert isinstance(policy.actor.final_action, Add)
+    assert list(policy.actor.final_action.parameters()) == []
+    assert policy.actor.final_action.out_features == 2
+
+
+def test_network_add_rejects_different_feature_dimensions(
+    runtime_context: RuntimeContext,
+) -> None:
+    policy = ConfigurableActorCritic(context=runtime_context)
+
+    with pytest.raises(ValueError, match="identical feature dimensions"):
+        policy.config_update(
+            component=make_component(),
+            obs_dim=3,
+            action_dim=2,
+            actor=[
+                {"name": "A", "type": "linear", "in_features": 3,
+                 "out_features": 2},
+                {"name": "B", "inputs": "obs", "type": "linear",
+                 "in_features": 3, "out_features": 3},
+                {"inputs": ["A", "B"], "type": "add"},
+            ],
+            critic=CRITIC_CONFIG,
+            distribution={"type": "diagonal_gaussian"},
+        )
+
+
+def test_network_returns_requested_named_outputs(
+    runtime_context: RuntimeContext,
+) -> None:
+    policy = ConfigurableActorCritic(context=runtime_context)
+    policy.config_update(
+        component=make_component(),
+        obs_dim=3,
+        action_dim=2,
+        actor=[
+            {"name": "features", "type": "linear", "in_features": 3,
+             "out_features": 4},
+            {"name": "action", "type": "linear", "in_features": 4,
+             "out_features": 2},
+        ],
+        critic=CRITIC_CONFIG,
+        distribution={"type": "diagonal_gaussian"},
+    )
+    obs = torch.randn(4, 3)
+
+    final_output, outputs = policy.actor_forward_with_outputs(
+        obs,
+        output_names="features",
+    )
+
+    torch.testing.assert_close(final_output, policy.actor_forward(obs))
+    torch.testing.assert_close(outputs["features"], policy.actor.features(obs))
+    assert list(outputs) == ["features"]
+
+    with pytest.raises(KeyError, match="Unknown module output"):
+        policy.actor_forward_with_outputs(obs, output_names=["missing"])
+
+
+def test_non_trainable_module_keeps_input_gradients(
+    runtime_context: RuntimeContext,
+) -> None:
+    policy = ConfigurableActorCritic(context=runtime_context)
+    policy.config_update(
+        component=make_component(),
+        obs_dim=3,
+        action_dim=2,
+        actor=[
+            {"name": "encoder", "type": "linear", "in_features": 3,
+             "out_features": 4, "trainable": False},
+            {"name": "head", "type": "linear", "in_features": 4,
+             "out_features": 2},
+        ],
+        critic=CRITIC_CONFIG,
+        distribution={"type": "diagonal_gaussian"},
+    )
+    obs = torch.randn(4, 3, requires_grad=True)
+
+    policy.actor_forward(obs).sum().backward()
+
+    assert all(
+        parameter.requires_grad is False
+        for parameter in policy.actor.encoder.parameters()
+    )
+    assert all(
+        parameter.grad is None
+        for parameter in policy.actor.encoder.parameters()
+    )
+    assert all(
+        parameter.grad is not None
+        for parameter in policy.actor.head.parameters()
+    )
+    assert obs.grad is not None
+
+
+def test_inherited_module_can_be_frozen(
+    runtime_context: RuntimeContext,
+) -> None:
+    policy = ConfigurableActorCritic(context=runtime_context)
+    actor = [
+        {"name": "encoder", "type": "linear", "in_features": 3,
+         "out_features": 4},
+        {"name": "head", "type": "linear", "in_features": 4,
+         "out_features": 2},
+    ]
+    policy.config_update(
+        component=make_component(), obs_dim=3, action_dim=2,
+        actor=actor, critic=CRITIC_CONFIG,
+        distribution={"type": "diagonal_gaussian"},
+    )
+    with torch.no_grad():
+        policy.actor.encoder.weight.fill_(1.25)
+
+    next_actor = [dict(module) for module in actor]
+    next_actor[0].update({"inherit": True, "trainable": False})
+    policy.config_update(
+        component=make_component(), obs_dim=3, action_dim=2,
+        actor=next_actor, critic=CRITIC_CONFIG,
+        distribution={"type": "diagonal_gaussian"},
+    )
+
+    torch.testing.assert_close(
+        policy.actor.encoder.weight,
+        torch.full_like(policy.actor.encoder.weight, 1.25),
+    )
+    assert all(
+        parameter.requires_grad is False
+        for parameter in policy.actor.encoder.parameters()
+    )
+
+
+def test_network_rejects_non_boolean_trainable(
+    runtime_context: RuntimeContext,
+) -> None:
+    policy = ConfigurableActorCritic(context=runtime_context)
+
+    with pytest.raises(TypeError, match="'trainable' must be a boolean"):
+        policy.config_update(
+            component=make_component(), obs_dim=3, action_dim=2,
+            actor=[{"type": "linear", "in_features": 3,
+                    "out_features": 2, "trainable": "false"}],
+            critic=CRITIC_CONFIG,
+            distribution={"type": "diagonal_gaussian"},
+        )
+
+
 def test_network_slices_named_module_outputs(
     runtime_context: RuntimeContext,
 ) -> None:
@@ -921,3 +1108,57 @@ def test_ppo_builds_policy_before_optimizer(
     assert algorithm.learning_rate == 3e-4
     assert algorithm.optimizer.param_groups[0]["lr"] == 3e-4
     assert len(algorithm.optimizer.param_groups[0]["params"]) > 0
+
+
+def test_ppo_optimizer_excludes_non_trainable_parameters(
+    runtime_context: RuntimeContext,
+    tmp_path: Path,
+) -> None:
+    actor = [
+        {"name": "frozen_encoder", "type": "linear",
+         "in_features": 3, "out_features": 8, "trainable": False},
+        {"name": "head", "type": "linear", "in_features": 8,
+         "out_features": "action_dim"},
+    ]
+    config_path = tmp_path / "policy.yaml"
+    config_path.write_text(
+        yaml.safe_dump({
+            "actor": actor,
+            "critic": CRITIC_CONFIG,
+            "distribution": {"type": "diagonal_gaussian"},
+        }),
+        encoding="utf-8",
+    )
+    algorithm = PPO(context=runtime_context)
+    algorithm.config_update(
+        component=make_component(config_path),
+        obs_dim=3,
+        action_dim=2,
+        init_learning_rate=3e-4,
+        gamma=0.99,
+        gae_lambda=0.95,
+        clip_range=0.2,
+        entropy_coef=0.01,
+        value_coef=0.5,
+        max_grad_norm=0.5,
+        num_epochs=1,
+        num_mini_batches=1,
+    )
+
+    optimizer_parameters = {
+        id(parameter)
+        for group in algorithm.optimizer.param_groups
+        for parameter in group["params"]
+    }
+    expected_parameters = {
+        id(parameter)
+        for parameter in algorithm.policy.parameters()
+        if parameter.requires_grad
+    }
+    frozen_parameters = {
+        id(parameter)
+        for parameter in algorithm.policy.actor.frozen_encoder.parameters()
+    }
+
+    assert optimizer_parameters == expected_parameters
+    assert optimizer_parameters.isdisjoint(frozen_parameters)

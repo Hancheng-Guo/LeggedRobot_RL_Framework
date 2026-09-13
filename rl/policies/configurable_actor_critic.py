@@ -184,6 +184,17 @@ class ConfigurableActorCritic(ActorCritic):
         return self.actor(obs)
 
 
+    def actor_forward_with_outputs(
+        self,
+        obs: torch.Tensor,
+        output_names: str | Sequence[str] | None = None,
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        return self.actor.forward_with_outputs(
+            input=obs,
+            output_names=output_names,
+        )
+
+
     @property
     def is_recurrent(self) -> bool:
         return self.actor.is_recurrent

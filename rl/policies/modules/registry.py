@@ -2,6 +2,7 @@ import torch.nn as nn
 from collections.abc import Callable, Mapping
 from typing import Any, TypeVar
 
+from rl.policies.modules.operators import Add
 from rl.policies.modules.recurrent import StatefulGRU
 
 
@@ -16,6 +17,7 @@ MODULE_TYPE_MAP: dict[str, type[nn.Module]] = {
     "dropout": nn.Dropout,
     "identity": nn.Identity,
     "gru": StatefulGRU,
+    "add": Add,
 }
 
 

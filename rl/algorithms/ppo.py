@@ -146,9 +146,16 @@ class PPO(OnPolicyAlgorithm):
             **policy_config,
         )
 
-        self.optimizer = torch.optim.Adam(
-            self.policy.parameters(),
-        )
+        trainable_parameters = [
+            parameter
+            for parameter in self.policy.parameters()
+            if parameter.requires_grad
+        ]
+        if not trainable_parameters:
+            raise ValueError(
+                "Policy must contain at least one trainable parameter."
+            )
+        self.optimizer = torch.optim.Adam(trainable_parameters)
         self._update_optimizer_learning_rate()
 
         if hasattr(self, "storage"):

@@ -22,6 +22,7 @@ class _ModuleSpec:
     config: dict[str, Any]
     inputs: tuple[_InputReference, ...]
     inherit: bool
+    trainable: bool
     artifact: Mapping[str, Any] | None
 
 
@@ -177,13 +178,17 @@ class ConfigurableNetwork(torch.nn.Sequential):
                 artifacts=artifacts,
             )
             self._input_sources[spec.name] = spec.inputs
-            input_features = self._resolve_input_features(spec.name)
+            input_dimensions = self._resolve_input_dimensions(spec.name)
+            input_features = sum(input_dimensions)
             module, module_config = self._instantiate_module(
                 spec=spec,
                 input_features=input_features,
+                input_dimensions=input_dimensions,
                 variables=variables,
                 artifacts=artifacts,
             )
+            if not spec.trainable:
+                module.requires_grad_(False)
             named_modules[spec.name] = module
             self._register_module(
                 spec=spec,
@@ -212,6 +217,7 @@ class ConfigurableNetwork(torch.nn.Sequential):
             str(module_type_name) if artifact is not None else str(index)
         )
         inherit = config.pop("inherit", False)
+        trainable = config.pop("trainable", True)
 
         if (
             not isinstance(name, str)
@@ -226,6 +232,8 @@ class ConfigurableNetwork(torch.nn.Sequential):
             raise ValueError(f"Duplicate module name: {name!r}.")
         if not isinstance(inherit, bool):
             raise TypeError("Module 'inherit' must be a boolean.")
+        if not isinstance(trainable, bool):
+            raise TypeError("Module 'trainable' must be a boolean.")
 
         inputs = self._parse_inputs(
             raw_inputs=raw_inputs,
@@ -235,13 +243,16 @@ class ConfigurableNetwork(torch.nn.Sequential):
         if explicit_name is not None or artifact is not None:
             self._explicit_names.add(name)
 
-        return _ModuleSpec(name, config, inputs, inherit, artifact)
+        return _ModuleSpec(
+            name, config, inputs, inherit, trainable, artifact
+        )
 
 
     def _instantiate_module(
         self,
         spec: _ModuleSpec,
         input_features: int,
+        input_dimensions: tuple[int, ...],
         variables: Mapping[str, Any],
         artifacts: Mapping[str, Mapping[str, Any]],
     ) -> tuple[torch.nn.Module, dict[str, Any]]:
@@ -271,6 +282,7 @@ class ConfigurableNetwork(torch.nn.Sequential):
         module = self._build_module(
             module_config,
             input_features=input_features,
+            input_dimensions=input_dimensions,
             variables=variables,
             module_artifacts=artifacts,
             input_slices=(
@@ -413,10 +425,10 @@ class ConfigurableNetwork(torch.nn.Sequential):
         return self._output_features[final_name]
 
 
-    def _resolve_input_features(
+    def _resolve_input_dimensions(
         self,
         module_name: str
-    ) -> int:
+    ) -> tuple[int, ...]:
 
         dimensions: list[int] = []
         for reference in self._input_sources[module_name]:
@@ -449,7 +461,14 @@ class ConfigurableNetwork(torch.nn.Sequential):
                         "available features."
                     )
                 dimensions.append(stop - start)
-        return sum(dimensions)
+        return tuple(dimensions)
+
+
+    def _resolve_input_features(
+        self,
+        module_name: str,
+    ) -> int:
+        return sum(self._resolve_input_dimensions(module_name))
 
 
     @staticmethod
@@ -575,6 +594,7 @@ class ConfigurableNetwork(torch.nn.Sequential):
     def _build_module(
         config: Mapping[str, Any],
         input_features: int,
+        input_dimensions: tuple[int, ...],
         variables: Mapping[str, Any] | None,
         module_artifacts: Mapping[str, Mapping[str, Any]],
         input_slices: Mapping[str, slice],
@@ -605,6 +625,16 @@ class ConfigurableNetwork(torch.nn.Sequential):
                 module_artifacts=module_artifacts,
                 input_slices=input_slices,
             )
+        if module_type_name == "add":
+            configured_dimensions = module_config.pop(
+                "input_features", input_dimensions
+            )
+            if tuple(configured_dimensions) != input_dimensions:
+                raise ValueError(
+                    "Add 'input_features' must match its configured inputs: "
+                    f"{tuple(configured_dimensions)} != {input_dimensions}."
+                )
+            module_config["input_features"] = input_dimensions
         return build_module(module_config, variables=variables)
 
 
@@ -679,6 +709,21 @@ class ConfigurableNetwork(torch.nn.Sequential):
         input: torch.Tensor
     ) -> torch.Tensor:
         return self._forward_step(input)
+
+
+    def forward_with_outputs(
+        self,
+        input: torch.Tensor,
+        output_names: str | Sequence[str] | None = None,
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        """Return the final output and requested named module outputs."""
+
+        requested_names = self._normalize_output_names(output_names)
+        value, outputs = self._forward_step_with_outputs(input)
+        return value, {
+            name: outputs[name]
+            for name in requested_names
+        }
 
 
     def forward_sequence(
@@ -759,7 +804,14 @@ class ConfigurableNetwork(torch.nn.Sequential):
         self,
         inputs: torch.Tensor,
     ) -> torch.Tensor:
-        
+        value, _ = self._forward_step_with_outputs(inputs)
+        return value
+
+
+    def _forward_step_with_outputs(
+        self,
+        inputs: torch.Tensor,
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
         self._validate_root_input_features(inputs)
         value = inputs
         outputs: dict[str, torch.Tensor] = {}
@@ -770,7 +822,34 @@ class ConfigurableNetwork(torch.nn.Sequential):
             else:
                 value = module(value)
             outputs[name] = value
-        return value
+        return value, outputs
+
+
+    def _normalize_output_names(
+        self,
+        output_names: str | Sequence[str] | None,
+    ) -> tuple[str, ...]:
+        if output_names is None:
+            names = tuple(self._modules)
+        elif isinstance(output_names, str):
+            names = (output_names,)
+        elif isinstance(output_names, Sequence):
+            names = tuple(output_names)
+        else:
+            raise TypeError(
+                "'output_names' must be a string, a sequence of strings, "
+                "or None."
+            )
+        if any(not isinstance(name, str) or not name for name in names):
+            raise TypeError("Requested output names must be non-empty strings.")
+        if len(set(names)) != len(names):
+            raise ValueError("Requested output names must be unique.")
+        unknown_names = set(names) - self._modules.keys()
+        if unknown_names:
+            raise KeyError(
+                f"Unknown module output name(s): {sorted(unknown_names)}."
+            )
+        return names
 
 
     def _forward_with_state(

@@ -261,3 +261,8 @@ class BaseTaskLogic(ABC):
     @property
     def observation_dim(self) -> int:
         return self.observation_manager.output_dim
+
+
+    @property
+    def observation_slices(self) -> dict[str, slice]:
+        return dict(self.observation_manager.term_slices)

@@ -278,6 +278,11 @@ class VectorEnv(BaseEnv):
 
 
     @property
+    def render_fps(self) -> float:
+        return 1.0 / self.simulator.control_dt
+
+
+    @property
     def action_dim(self) -> int:
         return self.task.action_manager.input_dim
 
@@ -285,4 +290,9 @@ class VectorEnv(BaseEnv):
     @property
     def observation_dim(self) -> int:
         return self.task.observation_dim
+
+
+    @property
+    def observation_slices(self) -> dict[str, slice]:
+        return self.task.observation_slices
     

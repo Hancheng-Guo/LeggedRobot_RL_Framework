@@ -366,6 +366,27 @@ def test_stage_manager_uses_last_stage_after_completion() -> None:
     assert manager._get_effective_stage() == 1
 
 
+def test_evaluation_checkpoint_is_required_for_historical_run(
+    runtime_context: RuntimeContext,
+    tmp_path: Path,
+) -> None:
+    manager = StageManager.__new__(StageManager)
+    manager.context = runtime_context
+    manager.context = type(runtime_context)(
+        device=runtime_context.device,
+        dtype=runtime_context.dtype,
+        num_threads=runtime_context.num_threads,
+        seed=runtime_context.seed,
+        deterministic_ops=runtime_context.deterministic_ops,
+        load_dir=tmp_path,
+        save_dir=tmp_path,
+    )
+    manager.load_dir = tmp_path
+    manager.stage_detail = [{"stage": {}}]
+
+    with pytest.raises(FileNotFoundError, match="No evaluation checkpoint"):
+        manager._prepare_evaluation_stage()
+
 @pytest.mark.parametrize("current_stage", [-1, 3])
 def test_stage_manager_rejects_invalid_stage_index(
     current_stage: int,

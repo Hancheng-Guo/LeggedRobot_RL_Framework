@@ -63,10 +63,24 @@ class BaseEnv(ABC):
     def render(self) -> np.ndarray | None:
         raise NotImplementedError
 
+
+    @property
+    @abstractmethod
+    def render_fps(self) -> float:
+        """Frequency of frames returned by consecutive environment steps."""
+        raise NotImplementedError
+
     
     @property
     @abstractmethod
     def observation_dim(self) -> int:
+        raise NotImplementedError
+
+
+    @property
+    @abstractmethod
+    def observation_slices(self) -> dict[str, slice]:
+        """Named slices in the flattened observation tensor."""
         raise NotImplementedError
 
 

@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import Path
 from collections.abc import Mapping
@@ -17,8 +18,15 @@ logger = get_logger(__name__)
 
 class StageTrainResult(Enum):
     STAGE_COMPLETED = auto()
+    STAGE_ALREADY_COMPLETED = auto()
     STOPPED_BY_CALLBACK = auto()
     MAX_ITERATIONS_REACHED = auto()
+
+
+@dataclass(frozen=True, slots=True)
+class StageResumeInfo:
+    checkpoint_path: Path
+    stage_completed: bool
 
 
 class StageManager:
@@ -107,11 +115,18 @@ class StageManager:
 
 
     def train(self) -> None:
-        
+
+        resume_info = self._prepare_training_stage()
         while self.continue_training:
-            train_result = self._train_current()
+            train_result = self._train_current(resume_info)
+            resume_info = None
+
+            if train_result is StageTrainResult.STAGE_ALREADY_COMPLETED:
+                self.current_stage += 1
+                continue
 
             if train_result is StageTrainResult.STAGE_COMPLETED:
+                self._save_completed_stage()
                 self.current_stage += 1
                 continue
 
@@ -122,7 +137,7 @@ class StageManager:
                         f"{type(callback).__name__!r} during stage "
                         f"{self.current_stage}."
                     )
-            else:
+            else:   # StageTrainResult.MAX_ITERATIONS_REACHED
                 logger.warning(f"Stage {self.current_stage} timeout.")
             break
 
@@ -149,20 +164,33 @@ class StageManager:
         return len(self.stage_detail) - 1
 
 
-    def _train_current(self) -> StageTrainResult:
+    def _train_current(
+        self,
+        resume_info: StageResumeInfo | None = None,
+    ) -> StageTrainResult:
 
         if not self.continue_training:
             raise RuntimeError("All stages have already been completed.")
 
         current_component = self._get_current_component()
         current_stage_callback = self._build_current_stage_callback()
+        checkpoint_path = (
+            resume_info.checkpoint_path
+            if resume_info is not None
+            else None
+        )
 
         self._build_runner(
             component=current_component,
             stage_callback=current_stage_callback,
             max_iterations=self._get_current_max_iterations(),
             stage_index=self.current_stage,
+            checkpoint_path=checkpoint_path,
         )
+        if checkpoint_path is not None:
+            self.runner.load(load_optimizer=True)
+            if resume_info is not None and resume_info.stage_completed:
+                return StageTrainResult.STAGE_ALREADY_COMPLETED
         self.runner.train()
 
         if current_stage_callback.stop_training:
@@ -172,12 +200,66 @@ class StageManager:
         return StageTrainResult.MAX_ITERATIONS_REACHED
 
 
+    def _prepare_training_stage(self) -> StageResumeInfo | None:
+
+        if hasattr(self, "runner"):
+            return None
+        if self.load_dir.resolve() != Path(self.context.save_dir).resolve():
+            return None
+
+        checkpoint_root = self.load_dir / "checkpoints"
+        candidates: list[tuple[int, Path]] = []
+        for path in checkpoint_root.glob("stage_*/latest.pt"):
+            try:
+                stage_index = int(path.parent.name.removeprefix("stage_"))
+            except ValueError:
+                continue
+            if 0 <= stage_index < len(self.stage_detail):
+                candidates.append((stage_index, path))
+
+        if not candidates:
+            raise FileNotFoundError(
+                "No training checkpoint was found in "
+                f"{checkpoint_root!s}. Expected stage_*/latest.pt."
+            )
+
+        stage_index, checkpoint_path = max(candidates)
+        self.current_stage = stage_index
+        return StageResumeInfo(
+            checkpoint_path=checkpoint_path,
+            stage_completed=(
+                checkpoint_path.parent / "stage_completed"
+            ).is_file(),
+        )
+
+
+    def _save_completed_stage(self) -> None:
+
+        checkpoint_path = self.runner.save()
+        marker_path = checkpoint_path.parent / "stage_completed"
+        temporary_path = marker_path.with_suffix(".tmp")
+        try:
+            temporary_path.write_text(
+                str(self.current_stage),
+                encoding="utf-8",
+            )
+            temporary_path.replace(marker_path)
+        finally:
+            if temporary_path.exists():
+                temporary_path.unlink()
+
+
     def _get_current_component(self) -> Component:
 
         current_component = dict()
         stage = self._get_effective_stage()
+        full_configuration = not hasattr(self, "runner")
 
         for name, detail in self.component.items():
+
+            if full_configuration:
+                current_component[name] = detail[min(stage, len(detail) - 1)]
+                continue
 
             if stage <= len(detail) - 1:
 
@@ -212,10 +294,11 @@ class StageManager:
         max_iterations: int,
         stage_callback: StageCallback | None = None,
         stage_index: int | None = None,
+        checkpoint_path: Path | None = None,
     ) -> None:
 
         if component.runner is None:
-            if self.runner is None:
+            if not hasattr(self, "runner"):
                 raise RuntimeError(
                     f"runner instance is required."
                 )
@@ -235,13 +318,15 @@ class StageManager:
             runner_type = RUNNER_TYPE_MAP[runner_type_name]
             runner_config = load_yaml(component.runner.config)
 
-            if(
+            if (
                 not hasattr(self, "runner")
                 or not isinstance(self.runner, runner_type)
             ):
                 self.runner = runner_type(
                     context=self.context
                 )
+            if checkpoint_path is not None:
+                self.runner.prepare_checkpoint_load(checkpoint_path)
             self.runner.config_update(
                 component=component,
                 max_iterations=max_iterations,
@@ -255,34 +340,90 @@ class StageManager:
         
 
     def test(self, *args, **kwargs) -> None:
-    
+
+        checkpoint_path = self._prepare_evaluation_stage()
         if self.continue_training:
             logger.warning("Model is not trained completely.")
         current_component = self._get_current_component()
         self._build_runner(
             component=current_component,
             max_iterations=self._get_current_max_iterations(),
+            stage_index=self._get_effective_stage(),
+            checkpoint_path=checkpoint_path,
         )
+        if checkpoint_path is not None:
+            self._load_evaluation_checkpoint()
         self.runner.test(*args, **kwargs)
 
 
-    def play(self, *args, **kwargs) -> None:
+    def play(
+        self,
+        *args, **kwargs
+    ) -> None:
 
+        checkpoint_path = self._prepare_evaluation_stage()
         if self.continue_training:
             logger.warning("Model is not trained completely.")
         current_component = self._get_current_component()
         self._build_runner(
             component=current_component,
             max_iterations=self._get_current_max_iterations(),
+            stage_index=self._get_effective_stage(),
+            checkpoint_path=checkpoint_path,
         )
+        if checkpoint_path is not None:
+            self._load_evaluation_checkpoint()
         self.runner.play(*args, **kwargs)
 
 
-    def save(self) -> None:
-        raise NotImplementedError
+    def _prepare_evaluation_stage(self) -> Path | None:
+
+        if hasattr(self, "runner"):
+            return None
+        if self.load_dir.resolve() != Path(self.context.save_dir).resolve():
+            return None
+
+        checkpoint_root = self.load_dir / "checkpoints"
+        candidates: list[tuple[int, Path]] = []
+        for path in checkpoint_root.glob("stage_*/latest.pt"):
+            try:
+                stage_index = int(path.parent.name.removeprefix("stage_"))
+            except ValueError:
+                continue
+            if 0 <= stage_index < len(self.stage_detail):
+                candidates.append((stage_index, path))
+        if candidates:
+            stage_index, checkpoint_path = max(candidates)
+            self.current_stage = stage_index
+            return checkpoint_path
+
+        checkpoint_path = checkpoint_root / "latest.pt"
+        if checkpoint_path.is_file():
+            return checkpoint_path
+        raise FileNotFoundError(
+            "No evaluation checkpoint was found in "
+            f"{checkpoint_root!s}. Expected stage_*/latest.pt or latest.pt."
+        )
+
+
+    def _load_evaluation_checkpoint(
+        self,
+    ) -> None:
+        
+        if not hasattr(self, "runner"):
+            raise RuntimeError("Runner was not built for checkpoint loading.")
+        self.runner.load(load_optimizer=False)
+
+
+    def save(self) -> Path:
+        
+        if not hasattr(self, "runner"):
+            raise RuntimeError("Cannot save before a runner has been built.")
+        return self.runner.save()
 
 
     def close(self) -> None:
 
-        if self.runner is not None:
+        if hasattr(self, "runner"):
             self.runner.close()
+            del self.runner

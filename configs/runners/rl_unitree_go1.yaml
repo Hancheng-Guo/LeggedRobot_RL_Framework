@@ -7,10 +7,10 @@ callbacks:
       allowed_range: [0.005, 0.1]
       factor: 0.5
   - checkpoint:
-      save_interval: 100
+      save_iter_interval: 100
   - logging
   - tensorboard:
-      histogram_log_interval: 500
+      histogram_step_interval: 500
       step_metrics:
         "reward": [value]
         "reward/*": [mean]

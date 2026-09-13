@@ -35,7 +35,7 @@ class TensorboardCallback(BaseCallback):
         context: RuntimeContext,
         log_dir: str = "tensorboard",
         step_log_interval: int = 1,
-        histogram_log_interval: int = 100,
+        histogram_step_interval: int = 100,
         step_metrics: Mapping[str, Sequence[str]] | None = None,
         stage_index: int | None = None,
         *args, **kwargs,
@@ -43,16 +43,16 @@ class TensorboardCallback(BaseCallback):
         
         if step_log_interval <= 0:
             raise ValueError("'step_log_interval' must be greater than 0.")
-        if histogram_log_interval <= 0:
+        if histogram_step_interval <= 0:
             raise ValueError(
-                "'histogram_log_interval' must be greater than 0."
+                "'histogram_step_interval' must be greater than 0."
             )
         if not log_dir:
             raise ValueError("'log_dir_name' cannot be empty.")
 
         self.runner = runner
         self.step_log_interval = step_log_interval
-        self.histogram_log_interval = histogram_log_interval
+        self.histogram_step_interval = histogram_step_interval
         self.step_metrics = self._validate_step_metrics(step_metrics)
         self.tensorboard_root_dir = Path(context.save_dir) / log_dir
         self.tensorboard_log_dir = (
@@ -78,6 +78,10 @@ class TensorboardCallback(BaseCallback):
         self,
         *args, **kwargs,
     ) -> bool:
+
+        completed_iterations = self.runner.current_iteration + 1
+        self.global_iteration = completed_iterations
+        self.global_step = self.global_iteration * self.runner.rollout_length
 
         if not self._server_started:
             if self.tensorboard_root_dir not in self._SERVER_URLS:
@@ -191,7 +195,7 @@ class TensorboardCallback(BaseCallback):
             if "histogram" in reductions:
                 self._accumulate_histogram(name, tensor)
 
-        if self.global_step % self.histogram_log_interval == 0:
+        if self.global_step % self.histogram_step_interval == 0:
             self._flush_histograms()
 
 

@@ -1,4 +1,5 @@
 import warnings
+import shutil
 from pathlib import Path
 from datetime import datetime
 
@@ -21,6 +22,7 @@ class ApplicationEntry:
         self.config: dict
         self.context: RuntimeContext
         self.stage_manager: StageManager
+        self._closed = False
 
         self._setup(app_name, train_time)
 
@@ -109,25 +111,52 @@ class ApplicationEntry:
 
 
     def train(self) -> None:
-
+        self._ensure_open()
         self.stage_manager.train()
 
 
     def test(self, *args, **kwargs) -> None:
-
+        self._ensure_open()
         self.stage_manager.test(*args, **kwargs)
 
 
     def play(self, *args, **kwargs) -> None:
-
+        self._ensure_open()
         self.stage_manager.play(*args, **kwargs)
 
 
-    def save(self) -> None:
-
-        self.stage_manager.save()
+    def save(self) -> Path:
+        self._ensure_open()
+        config_source = self.load_dir / "configs"
+        config_destination = self.save_dir / "configs"
+        if (
+            config_source.is_dir()
+            and config_source.resolve() != config_destination.resolve()
+        ):
+            shutil.copytree(
+                config_source,
+                config_destination,
+                dirs_exist_ok=True,
+            )
+        return self.stage_manager.save()
 
 
     def close(self) -> None:
-
+        if getattr(self, "_closed", False):
+            return
         self.stage_manager.close()
+        self._closed = True
+
+
+    def _ensure_open(self) -> None:
+        if getattr(self, "_closed", False):
+            raise RuntimeError("ApplicationEntry is closed.")
+
+
+    def __enter__(self) -> "ApplicationEntry":
+        self._ensure_open()
+        return self
+
+
+    def __exit__(self, *args) -> None:
+        self.close()

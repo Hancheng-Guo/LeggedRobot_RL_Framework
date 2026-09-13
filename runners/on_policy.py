@@ -1,6 +1,7 @@
 import warnings
 import torch
 import numpy as np
+from pathlib import Path
 from collections import deque
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -10,7 +11,12 @@ from runners.base import BaseRunner
 from runners.callbacks.base import BaseCallback
 from runners.callbacks.stage import StageCallback
 from runners.callbacks.registry import CALLBACK_TYPE_MAP
-from runners.utils.frames import save_frames_to_video
+from utils.save import atomic_save
+from runners.utils.frames import (
+    VideoFormat,
+    VideoFormats,
+    save_frames_to_video,
+)
 from envs.base import BaseEnv
 from envs.registry import ENV_TYPE_MAP
 from rl.algorithms.base import OnPolicyAlgorithm
@@ -33,8 +39,9 @@ class OnPolicyRunner(BaseRunner):
         self.stage_index: int | None = None
         self._component: Component | None = None
         self._callback_configs: Sequence[str | Mapping[str, Any]] | None = None
+        self._pending_checkpoint_payload: Mapping[str, Any] | None = None
         
-        self.current_iteration: int
+        self.current_iteration = -1
 
         self.max_iterations: int
         self.rollout_length: int
@@ -58,7 +65,13 @@ class OnPolicyRunner(BaseRunner):
         stage_index: int | None = None,
     ) -> None:
 
+        previous_stage_index = self.stage_index
         self.stage_index = stage_index
+        if (
+            previous_stage_index != stage_index
+            and self._pending_checkpoint_payload is None
+        ):
+            self.current_iteration = -1
         self._merge_component(component=component)
         update_attributes(
             self,
@@ -268,6 +281,7 @@ class OnPolicyRunner(BaseRunner):
                 component=component,
                 obs_dim=self.environment.observation_dim,
                 action_dim=self.environment.action_dim,
+                observation_slices=self.environment.observation_slices,
             )
 
         else:
@@ -291,10 +305,12 @@ class OnPolicyRunner(BaseRunner):
                 self.algorithm = alg_type(
                     context=self.context,
                 )
+            self._prepare_algorithm_from_pending_checkpoint()
             self.algorithm.config_update(
                 component=component,
                 obs_dim=self.environment.observation_dim,
                 action_dim=self.environment.action_dim,
+                observation_slices=self.environment.observation_slices,
                 **alg_config
             )
 
@@ -347,7 +363,10 @@ class OnPolicyRunner(BaseRunner):
             self._run_callbacks("_on_train_end")
             return
 
-        for iteration in range(self.max_iterations):
+        for iteration in range(
+            self.current_iteration + 1,
+            self.max_iterations,
+        ):
 
             self.current_iteration = iteration
             if not self._run_callbacks("_on_iteration_start"):
@@ -573,7 +592,8 @@ class OnPolicyRunner(BaseRunner):
 
     def play(
         self,
-        num_steps: int = 5000
+        num_steps: int = 5000,
+        formats: VideoFormat | VideoFormats = "gif",
     ) -> None:
         if not hasattr(self, "environment"):
             raise RuntimeError("environment is not instantiated.")
@@ -595,7 +615,7 @@ class OnPolicyRunner(BaseRunner):
         self.environment = temporary_environment
 
         try:
-            self._play_steps(num_steps)
+            self._play_steps(num_steps, formats)
         finally:
             self.algorithm.reset_policy_state()
             temporary_environment.close()
@@ -604,7 +624,8 @@ class OnPolicyRunner(BaseRunner):
 
     def _play_steps(
         self,
-        num_steps: int
+        num_steps: int,
+        formats: VideoFormat | VideoFormats = "gif",
     ) -> None:
         if not hasattr(self, "environment"):
             raise RuntimeError("environment is not instantiated.")
@@ -658,9 +679,23 @@ class OnPolicyRunner(BaseRunner):
             step += 1
 
         if len(frames):
-            save_frames_to_video(frames)
-
+            save_frames_to_video(
+                frames,
+                directory=Path(self.context.save_dir) / "videos",
+                fps=self.environment.render_fps,
+                formats=formats,
+            )
         self._run_callbacks("_on_play_end")
+
+
+    def _prepare_algorithm_from_pending_checkpoint(self) -> None:
+
+        payload = self._pending_checkpoint_payload
+        if payload is None:
+            return
+
+        algorithm_state = payload["runner"]["algorithm"]
+        self.algorithm.prepare_checkpoint_load(algorithm_state)
 
 
     def close(self) -> None:
@@ -676,5 +711,82 @@ class OnPolicyRunner(BaseRunner):
             del self.algorithm
 
 
-    def save(self) -> None:
-        raise NotImplementedError
+    def save(
+        self,
+        path: Path | None = None,
+    ) -> Path:
+        
+        if path is None:
+            directory = Path(self.context.save_dir) / "checkpoints"
+            if self.stage_index is not None:
+                directory = directory / f"stage_{self.stage_index:03d}"
+            path = directory / "latest.pt"
+
+        payload = {
+            "runner_type": type(self).__name__,
+            "runner": self.checkpoint_state_dict(),
+        }
+        checkpoint_path = atomic_save(payload, path)
+        self.algorithm.save_module_artifacts(path.parent / "modules")
+        return checkpoint_path
+
+
+    def checkpoint_state_dict(self) -> dict[str, Any]:
+        return {
+            "current_iteration": self.current_iteration,
+            "stage_index": self.stage_index,
+            "algorithm": self.algorithm.checkpoint_state_dict(),
+        }
+
+
+    def load(
+        self,
+        load_optimizer: bool = False
+    ) -> None:
+        
+        if not hasattr(self, "algorithm"):
+            raise RuntimeError("Runner must be configured before loading.")
+        
+        payload = self._pending_checkpoint_payload
+        if payload is None:
+            raise RuntimeError(
+                "prepare_checkpoint_load() must be called before load()."
+            )
+
+        runner_state = payload["runner"]
+        loaded_stage_index = runner_state.get("stage_index")
+        if loaded_stage_index != self.stage_index:
+            raise RuntimeError(
+                "Checkpoint stage does not match configured stage: "
+                f"{loaded_stage_index!r} != {self.stage_index!r}."
+            )
+        current_iteration = runner_state.get("current_iteration", -1)
+        if (
+            not isinstance(current_iteration, int)
+            or isinstance(current_iteration, bool)
+            or current_iteration < -1
+        ):
+            raise ValueError(
+                "Checkpoint 'current_iteration' must be an integer "
+                "greater than or equal to -1."
+            )
+        self.algorithm.load_checkpoint_state_dict(
+            runner_state["algorithm"],
+            load_optimizer=load_optimizer,
+        )
+        self.current_iteration = current_iteration
+        self._pending_checkpoint_payload = None
+
+
+    def prepare_checkpoint_load(
+        self,
+        path: Path
+    ) -> dict[str, Any]:
+
+        payload = torch.load(
+            path,
+            map_location=self.context.device,
+            weights_only=False,
+        )
+        self._pending_checkpoint_payload = payload
+        return payload

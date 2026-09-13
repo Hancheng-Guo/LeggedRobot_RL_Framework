@@ -1,21 +1,15 @@
-import torch
 import math
 from collections import deque
 from collections.abc import Sequence
 from enum import Enum, auto
 from numbers import Real
-from typing import Any, Protocol, runtime_checkable
+from typing import Any
 
+from rl.algorithms.base import BaseAlgorithm
 from runners.base import BaseRunner
 from runners.callbacks.base import BaseCallback
 from utils.matching import resolve_metric_name
 from utils.scalar import scalar_value
-
-
-@runtime_checkable
-class LearningRateAdjustable(Protocol):
-    learning_rate: float
-    optimizer: torch.optim.Optimizer
 
 
 class LearningRateAdjustment(Enum):
@@ -92,8 +86,7 @@ class AdaptiveLearningRateCallback(BaseCallback):
         self.min_learning_rate = min_learning_rate
         self.max_learning_rate = max_learning_rate
 
-        self._algorithm: LearningRateAdjustable
-        self._optimizer: torch.optim.Optimizer
+        self._algorithm: BaseAlgorithm
         self._buffer: deque[float]
         self._hold_current_iters: int
         self._buffer_len = int(buffer_len)
@@ -106,11 +99,6 @@ class AdaptiveLearningRateCallback(BaseCallback):
     ) -> bool:
 
         algorithm = self.runner.algorithm
-        if not isinstance(algorithm, LearningRateAdjustable):
-            raise RuntimeError(
-                "Algorithm must expose 'learning_rate' and a torch optimizer."
-            )
-
         learning_rate = algorithm.learning_rate
         if (
             not isinstance(learning_rate, Real)
@@ -121,12 +109,7 @@ class AdaptiveLearningRateCallback(BaseCallback):
                 "Algorithm must expose a positive numeric 'learning_rate'."
             )
 
-        optimizer = algorithm.optimizer
-        if not isinstance(optimizer, torch.optim.Optimizer):
-            raise RuntimeError("Algorithm must expose a torch optimizer.")
-
         self._algorithm = algorithm
-        self._optimizer = optimizer
         self._buffer = deque(maxlen=self._buffer_len)
         self._hold_current_iters = self._buffer_len - 1
 
@@ -191,9 +174,7 @@ class AdaptiveLearningRateCallback(BaseCallback):
                         self.max_learning_rate,
                     )
 
-                self._algorithm.learning_rate = new_learning_rate
-                for param_group in self._optimizer.param_groups:
-                    param_group["lr"] = new_learning_rate
+                self._algorithm.set_learning_rate(new_learning_rate)
 
                 self._hold_current_iters = self._buffer_len - 1
 

@@ -18,13 +18,11 @@ class PPO(OnPolicyAlgorithm):
 
     def __init__(
         self,
-        context: RuntimeContext,
         *args, **kwargs,
     ) -> None:
 
-        self.context = context
-        self.policy: BasePolicy
-        self.storage: RolloutStorage
+        super().__init__(*args, **kwargs)
+
         self.optimizer: torch.optim.Optimizer
         self._pending_recurrent_state: RecurrentState
 
@@ -32,6 +30,7 @@ class PPO(OnPolicyAlgorithm):
         self.learning_rate: float
         self.obs_dim: int
         self.action_dim: int
+        self.observation_slices: dict[str, slice] = {}
         self.gamma: float
         self.gae_lambda: float
         self.clip_range: float
@@ -48,6 +47,7 @@ class PPO(OnPolicyAlgorithm):
         component: Component,
         obs_dim: int | None = None,
         action_dim: int | None = None,
+        observation_slices: Mapping[str, slice] | None = None,
         init_learning_rate: float | None = None,
         gamma: float | None = None,
         gae_lambda: float | None = None,
@@ -77,6 +77,8 @@ class PPO(OnPolicyAlgorithm):
         )
         self.learning_rate = self.init_learning_rate
         self._validate_config()
+        if observation_slices is not None:
+            self.observation_slices = dict(observation_slices)
         self._build(component=component)
 
 
@@ -122,7 +124,7 @@ class PPO(OnPolicyAlgorithm):
             if not hasattr(self, "storage"):
                 raise RuntimeError("storage is not built.")
             
-            self._update_optimizer_config()
+            self._update_optimizer_learning_rate()
             self.storage.clear()
             return
 
@@ -132,18 +134,22 @@ class PPO(OnPolicyAlgorithm):
                 self.policy.close()
             self.policy = policy_type(context=self.context)
 
+        pending_state = self._pending_checkpoint_state
+        if pending_state is not None:
+            self.policy.prepare_checkpoint_load(pending_state["policy"])
         policy_config = load_yaml(policy.config)
         self._update_policy_config(
             component=component,
             obs_dim=self.obs_dim,
             action_dim=self.action_dim,
+            observation_slices=self.observation_slices,
             **policy_config,
         )
 
         self.optimizer = torch.optim.Adam(
             self.policy.parameters(),
         )
-        self._update_optimizer_config()
+        self._update_optimizer_learning_rate()
 
         if hasattr(self, "storage"):
             self.storage.clear()
@@ -165,7 +171,42 @@ class PPO(OnPolicyAlgorithm):
         )
 
 
-    def _update_optimizer_config(self) -> None:
+    def checkpoint_state_dict(self) -> dict[str, Any]:
+        state = super().checkpoint_state_dict()
+        state.update({
+            "learning_rate": self.learning_rate,
+            "optimizer": self.optimizer.state_dict(),
+        })
+        return state
+
+
+    def load_checkpoint_state_dict(
+        self,
+        state: Mapping[str, Any],
+        load_optimizer: bool = False,
+    ) -> None:
+        
+        super().load_checkpoint_state_dict(state, load_optimizer)
+        if load_optimizer and "optimizer" in state:
+            self.optimizer.load_state_dict(state["optimizer"])
+        if "learning_rate" in state:
+            self.learning_rate = float(state["learning_rate"])
+            self._update_optimizer_learning_rate()
+
+
+    def set_learning_rate(
+        self,
+        learning_rate: float
+    ) -> None:
+        
+        if learning_rate <= 0.0:
+            raise ValueError("'learning_rate' must be greater than 0.")
+        
+        self.learning_rate = float(learning_rate)
+        self._update_optimizer_learning_rate()
+
+
+    def _update_optimizer_learning_rate(self) -> None:
 
         for param_group in self.optimizer.param_groups:
             param_group["lr"] = self.learning_rate

@@ -33,6 +33,11 @@ class ObservationManager:
         self.clip = clip
         self.terms: dict[str, BaseObservationTerm] = {}
         self._build_terms(terms)
+        self.term_slices: dict[str, slice] = {}
+        start = 0
+        for name, term in self.terms.items():
+            self.term_slices[name] = slice(start, start + term.output_dim)
+            start += term.output_dim
         self.output_dim = sum(
             term.output_dim
             for term in self.terms.values()

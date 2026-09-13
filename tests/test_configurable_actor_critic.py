@@ -110,6 +110,542 @@ def test_configurable_actor_critic_resolves_obs_dim(
     assert policy.critic[0].in_features == 5
 
 
+def test_configurable_actor_critic_resolves_action_shape(
+    runtime_context: RuntimeContext,
+) -> None:
+    policy = ConfigurableActorCritic(context=runtime_context)
+    policy.config_update(
+        component=make_component(),
+        obs_dim=3,
+        action_dim=2,
+        actor=[
+            {"type": "linear", "in_features": "obs.shape",
+             "out_features": "action.shape"},
+        ],
+        critic=CRITIC_CONFIG,
+        distribution={"type": "diagonal_gaussian"},
+    )
+
+    assert policy.actor[0].out_features == 2
+
+
+def test_policy_rejects_invalid_actor_and_critic_output_features(
+    runtime_context: RuntimeContext,
+) -> None:
+    policy = ConfigurableActorCritic(context=runtime_context)
+
+    with pytest.raises(ValueError, match="Actor output features"):
+        policy.config_update(
+            component=make_component(), obs_dim=3, action_dim=2,
+            actor=[{"type": "linear", "in_features": 3,
+                    "out_features": 3}],
+            critic=CRITIC_CONFIG,
+            distribution={"type": "diagonal_gaussian"},
+        )
+    with pytest.raises(ValueError, match="Critic output features"):
+        policy.config_update(
+            component=make_component(), obs_dim=3, action_dim=2,
+            actor=ACTOR_CONFIG,
+            critic=[{"type": "linear", "in_features": 3,
+                     "out_features": 2}],
+            distribution={"type": "diagonal_gaussian"},
+        )
+
+
+def test_failed_distribution_update_preserves_existing_networks(
+    runtime_context: RuntimeContext,
+) -> None:
+    policy = ConfigurableActorCritic(context=runtime_context)
+    policy.config_update(
+        component=make_component(), obs_dim=3, action_dim=2,
+        actor=ACTOR_CONFIG, critic=CRITIC_CONFIG,
+        distribution={"type": "diagonal_gaussian"},
+    )
+    previous_actor = policy.actor
+    previous_critic = policy.critic
+    previous_distribution = policy.action_distribution
+
+    with pytest.raises(ValueError, match="Invalid action distribution"):
+        policy.config_update(
+            component=make_component(), obs_dim=3, action_dim=2,
+            actor=ACTOR_CONFIG, critic=CRITIC_CONFIG,
+            distribution={"type": "missing"},
+        )
+
+    assert policy.actor is previous_actor
+    assert policy.critic is previous_critic
+    assert policy.action_distribution is previous_distribution
+
+
+def test_network_rejects_inconsistent_module_input_features(
+    runtime_context: RuntimeContext,
+) -> None:
+    policy = ConfigurableActorCritic(context=runtime_context)
+
+    with pytest.raises(ValueError, match="configured inputs provide 3"):
+        policy.config_update(
+            component=make_component(),
+            obs_dim=3,
+            action_dim=2,
+            actor=[
+                {"type": "linear", "in_features": 4,
+                 "out_features": "action_dim"},
+            ],
+            critic=CRITIC_CONFIG,
+            distribution={"type": "diagonal_gaussian"},
+        )
+
+
+def test_named_modules_can_inherit_parameters_between_stages(
+    runtime_context: RuntimeContext,
+) -> None:
+    policy = ConfigurableActorCritic(context=runtime_context)
+    actor = [
+        {"name": "encoder", "type": "linear", "in_features": 3,
+         "out_features": 8},
+        {"name": "activation", "type": "tanh"},
+        {"name": "head", "type": "linear", "in_features": 8,
+         "out_features": "action_dim"},
+    ]
+    critic = [
+        {"name": "encoder", "type": "linear", "in_features": 3,
+         "out_features": 8},
+        {"name": "head", "type": "linear", "in_features": 8,
+         "out_features": 1},
+    ]
+    policy.config_update(
+        component=make_component(), obs_dim=3, action_dim=2,
+        actor=actor, critic=critic,
+        distribution={"type": "diagonal_gaussian"},
+    )
+    with torch.no_grad():
+        policy.actor.encoder.weight.fill_(1.25)
+        policy.critic.encoder.weight.fill_(2.5)
+
+    inherited_actor = [dict(module) for module in actor]
+    inherited_critic = [dict(module) for module in critic]
+    inherited_actor[0]["inherit"] = True
+    inherited_critic[0]["inherit"] = True
+    policy.config_update(
+        component=make_component(), obs_dim=3, action_dim=2,
+        actor=inherited_actor, critic=inherited_critic,
+        distribution={"type": "diagonal_gaussian"},
+    )
+
+    torch.testing.assert_close(
+        policy.actor.encoder.weight,
+        torch.full_like(policy.actor.encoder.weight, 1.25),
+    )
+    torch.testing.assert_close(
+        policy.critic.encoder.weight,
+        torch.full_like(policy.critic.encoder.weight, 2.5),
+    )
+
+
+def test_inherited_module_rejects_shape_changes(
+    runtime_context: RuntimeContext,
+) -> None:
+    policy = ConfigurableActorCritic(context=runtime_context)
+    policy.config_update(
+        component=make_component(), obs_dim=3, action_dim=2,
+        actor=ACTOR_CONFIG, critic=CRITIC_CONFIG,
+        distribution={"type": "diagonal_gaussian"},
+    )
+    changed_actor = [dict(module) for module in ACTOR_CONFIG]
+    changed_actor[0].update({"inherit": True, "out_features": 9})
+    changed_actor[2]["in_features"] = 9
+
+    with pytest.raises(ValueError, match="parameter shapes differ"):
+        policy.config_update(
+            component=make_component(), obs_dim=3, action_dim=2,
+            actor=changed_actor, critic=CRITIC_CONFIG,
+            distribution={"type": "diagonal_gaussian"},
+        )
+
+
+def test_stage_can_reuse_named_composite_as_a_module_type(
+    runtime_context: RuntimeContext,
+) -> None:
+    policy = ConfigurableActorCritic(context=runtime_context)
+    stage1_actor = [
+        {
+            "name": "custom1",
+            "type": "sequential",
+            "modules": [
+                {"type": "linear", "in_features": 3, "out_features": 8},
+                {"type": "elu"},
+            ],
+        },
+        {"type": "linear", "in_features": 8,
+         "out_features": "action_dim"},
+    ]
+    policy.config_update(
+        component=make_component(), obs_dim=3, action_dim=2,
+        actor=stage1_actor, critic=CRITIC_CONFIG,
+        distribution={"type": "diagonal_gaussian"},
+    )
+    custom1 = policy.actor.custom1
+    with torch.no_grad():
+        custom1[0].weight.fill_(1.5)
+
+    policy.config_update(
+        component=make_component(), obs_dim=3, action_dim=2,
+        actor=[
+            {"type": "custom1"},
+            {"type": "linear", "in_features": 8,
+             "out_features": "action_dim"},
+        ],
+        critic=CRITIC_CONFIG,
+        distribution={"type": "diagonal_gaussian"},
+    )
+
+    torch.testing.assert_close(
+        policy.actor.custom1[0].weight,
+        torch.full_like(policy.actor.custom1[0].weight, 1.5),
+    )
+
+
+def test_composite_module_can_be_restored_from_artifact(
+    runtime_context: RuntimeContext,
+) -> None:
+    first = ConfigurableActorCritic(context=runtime_context)
+    first.config_update(
+        component=make_component(), obs_dim=3, action_dim=2,
+        actor=[{
+            "name": "custom1",
+            "type": "sequential",
+            "modules": [
+                {"name": "memory", "type": "gru",
+                 "input_size": 3, "hidden_size": 8},
+                {"type": "linear", "in_features": 8,
+                 "out_features": "action_dim"},
+            ],
+        }],
+        critic=CRITIC_CONFIG,
+        distribution={"type": "diagonal_gaussian"},
+    )
+    with torch.no_grad():
+        first.actor.custom1.memory.gru.weight_ih_l0.fill_(0.75)
+    artifacts = first.export_module_artifacts()
+
+    restored = ConfigurableActorCritic(context=runtime_context)
+    restored.config_update(
+        component=make_component(), obs_dim=3, action_dim=2,
+        actor=[{
+            "type": "custom1",
+            "in_features": "obs.shape",
+            "out_features": "action.shape",
+        }],
+        critic=CRITIC_CONFIG,
+        distribution={"type": "diagonal_gaussian"},
+        module_artifacts=artifacts,
+    )
+
+    assert restored.is_recurrent is True
+    assert set(restored.get_recurrent_state(batch_size=2)) == {
+        "custom1.memory"
+    }
+    torch.testing.assert_close(
+        restored.actor.custom1.memory.gru.weight_ih_l0,
+        torch.full_like(
+            restored.actor.custom1.memory.gru.weight_ih_l0, 0.75
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("assertions", "message"),
+    [
+        ({"in_features": 4}, "configured inputs provide 3"),
+        ({"out_features": 7}, "saved module produces 8"),
+    ],
+)
+def test_artifact_module_validates_declared_interface(
+    runtime_context: RuntimeContext,
+    assertions: dict[str, int],
+    message: str,
+) -> None:
+    module = torch.nn.Linear(3, 8)
+    artifact = {
+        "config": {
+            "type": "linear",
+            "in_features": 3,
+            "out_features": 8,
+        },
+        "state_dict": module.state_dict(),
+    }
+    policy = ConfigurableActorCritic(context=runtime_context)
+
+    with pytest.raises(ValueError, match=message):
+        policy.config_update(
+            component=make_component(), obs_dim=3, action_dim=2,
+            actor=[
+                {"type": "custom1", **assertions},
+                {"type": "linear", "in_features": 8,
+                 "out_features": "action.shape"},
+            ],
+            critic=CRITIC_CONFIG,
+            distribution={"type": "diagonal_gaussian"},
+            module_artifacts={"actor.custom1": artifact},
+        )
+
+
+def test_composite_module_cold_starts_from_policy_checkpoint(
+    runtime_context: RuntimeContext,
+) -> None:
+    first = ConfigurableActorCritic(context=runtime_context)
+    first.config_update(
+        component=make_component(), obs_dim=3, action_dim=2,
+        actor=[{
+            "name": "custom1",
+            "type": "sequential",
+            "modules": [
+                {"type": "linear", "in_features": 3,
+                 "out_features": 8},
+                {"type": "elu"},
+            ],
+        }, {
+            "type": "linear", "in_features": 8,
+            "out_features": "action_dim",
+        }],
+        critic=CRITIC_CONFIG,
+        distribution={"type": "diagonal_gaussian"},
+    )
+    with torch.no_grad():
+        first.actor.custom1[0].weight.fill_(0.625)
+    checkpoint = first.checkpoint_state_dict()
+
+    restored = ConfigurableActorCritic(context=runtime_context)
+    restored.prepare_checkpoint_load(checkpoint)
+    restored.config_update(
+        component=make_component(), obs_dim=3, action_dim=2,
+        actor=[
+            {"type": "custom1"},
+            {"type": "linear", "in_features": 8,
+             "out_features": "action_dim"},
+        ],
+        critic=CRITIC_CONFIG,
+        distribution={"type": "diagonal_gaussian"},
+    )
+    restored.load_checkpoint_state_dict(checkpoint)
+
+    torch.testing.assert_close(
+        restored.actor.custom1[0].weight,
+        torch.full_like(restored.actor.custom1[0].weight, 0.625),
+    )
+
+
+def test_named_modules_are_saved_as_portable_files(
+    runtime_context: RuntimeContext,
+    tmp_path: Path,
+) -> None:
+    policy = ConfigurableActorCritic(context=runtime_context)
+    policy.config_update(
+        component=make_component(),
+        obs_dim=3,
+        action_dim=2,
+        actor=[
+            {"name": "encoder", "type": "linear",
+             "in_features": 3, "out_features": 8},
+            {"type": "linear", "in_features": 8,
+             "out_features": "action_dim"},
+        ],
+        critic=[
+            {"name": "value", "type": "linear",
+             "in_features": 3, "out_features": 1},
+        ],
+        distribution={"type": "diagonal_gaussian"},
+    )
+
+    paths = policy.save_module_artifacts(tmp_path / "modules")
+
+    assert paths == [
+        tmp_path / "modules" / "actor" / "encoder.pt",
+        tmp_path / "modules" / "critic" / "value.pt",
+    ]
+    actor_artifact = torch.load(paths[0], weights_only=False)
+    assert actor_artifact["config"]["type"] == "linear"
+    assert set(actor_artifact) == {"config", "state_dict"}
+
+
+def test_nested_named_modules_are_saved_as_portable_files(
+    runtime_context: RuntimeContext,
+    tmp_path: Path,
+) -> None:
+    policy = ConfigurableActorCritic(context=runtime_context)
+    policy.config_update(
+        component=make_component(),
+        obs_dim=3,
+        action_dim=2,
+        actor=[{
+            "name": "custom1",
+            "type": "sequential",
+            "modules": [
+                {"name": "memory", "type": "gru",
+                 "input_size": 3, "hidden_size": 8},
+                {"type": "linear", "in_features": 8,
+                 "out_features": "action_dim"},
+            ],
+        }],
+        critic=CRITIC_CONFIG,
+        distribution={"type": "diagonal_gaussian"},
+    )
+
+    paths = policy.save_module_artifacts(tmp_path / "modules")
+
+    assert tmp_path / "modules" / "actor" / "custom1.pt" in paths
+    assert (
+        tmp_path / "modules" / "actor" / "custom1" / "memory.pt"
+        in paths
+    )
+
+
+def test_network_selects_observation_fields_and_concatenates_branches(
+    runtime_context: RuntimeContext,
+) -> None:
+    policy = ConfigurableActorCritic(context=runtime_context)
+    policy.config_update(
+        component=make_component(),
+        obs_dim=5,
+        action_dim=2,
+        observation_slices={
+            "field_a": slice(0, 3),
+            "field_b": slice(3, 5),
+        },
+        actor=[
+            {
+                "name": "A",
+                "inputs": "obs.field_a",
+                "type": "linear",
+                "in_features": "obs.field_a.shape",
+                "out_features": 10,
+            },
+            {
+                "name": "B",
+                "inputs": "obs.field_b",
+                "type": "linear",
+                "in_features": "obs.field_b.shape",
+                "out_features": 5,
+            },
+            {
+                "name": "C",
+                "inputs": ["A", "B"],
+                "type": "linear",
+                "in_features": 15,
+                "out_features": "action_dim",
+            },
+        ],
+        critic=[
+            {"type": "linear", "in_features": "obs_dim",
+             "out_features": 1},
+        ],
+        distribution={"type": "diagonal_gaussian"},
+    )
+    obs = torch.randn(4, 5)
+
+    expected = policy.actor.C(torch.cat([
+        policy.actor.A(obs[:, :3]),
+        policy.actor.B(obs[:, 3:]),
+    ], dim=-1))
+
+    torch.testing.assert_close(policy.actor_forward(obs), expected)
+    assert policy.actor.A.in_features == 3
+    assert policy.actor.B.in_features == 2
+
+
+def test_network_slices_named_module_outputs(
+    runtime_context: RuntimeContext,
+) -> None:
+    policy = ConfigurableActorCritic(context=runtime_context)
+    policy.config_update(
+        component=make_component(),
+        obs_dim=3,
+        action_dim=2,
+        actor=[
+            {"name": "A", "type": "linear", "in_features": 3,
+             "out_features": 10},
+            {"name": "B", "inputs": "A[0:6]", "type": "linear",
+             "in_features": 6, "out_features": 4},
+            {"name": "C", "inputs": "A[6:10]", "type": "linear",
+             "in_features": 4, "out_features": 3},
+            {"name": "E", "inputs": ["B", "C"], "type": "linear",
+             "in_features": 7, "out_features": "action_dim"},
+        ],
+        critic=CRITIC_CONFIG,
+        distribution={"type": "diagonal_gaussian"},
+    )
+    obs = torch.randn(4, 3)
+
+    a_output = policy.actor.A(obs)
+    expected = policy.actor.E(torch.cat([
+        policy.actor.B(a_output[..., 0:6]),
+        policy.actor.C(a_output[..., 6:10]),
+    ], dim=-1))
+
+    torch.testing.assert_close(policy.actor_forward(obs), expected)
+
+
+def test_network_rejects_out_of_bounds_output_slice(
+    runtime_context: RuntimeContext,
+) -> None:
+    policy = ConfigurableActorCritic(context=runtime_context)
+
+    with pytest.raises(ValueError, match="exceeds its 10 available features"):
+        policy.config_update(
+            component=make_component(),
+            obs_dim=3,
+            action_dim=2,
+            actor=[
+                {"name": "A", "type": "linear", "in_features": 3,
+                 "out_features": 10},
+                {"inputs": "A[5:11]", "type": "linear",
+                 "in_features": 6, "out_features": "action_dim"},
+            ],
+            critic=CRITIC_CONFIG,
+            distribution={"type": "diagonal_gaussian"},
+        )
+
+
+def test_network_resolves_previous_module_output_features(
+    runtime_context: RuntimeContext,
+) -> None:
+    policy = ConfigurableActorCritic(context=runtime_context)
+    policy.config_update(
+        component=make_component(), obs_dim=3, action_dim=2,
+        actor=[
+            {"name": "A", "type": "linear", "in_features": "obs.shape",
+             "out_features": 10},
+            {"name": "B", "type": "linear",
+             "in_features": "A.out_features",
+             "out_features": "action_dim"},
+        ],
+        critic=CRITIC_CONFIG,
+        distribution={"type": "diagonal_gaussian"},
+    )
+
+    assert policy.actor.A.in_features == 3
+    assert policy.actor.B.in_features == 10
+
+
+def test_network_rejects_unknown_observation_field(
+    runtime_context: RuntimeContext,
+) -> None:
+    policy = ConfigurableActorCritic(context=runtime_context)
+    with pytest.raises(KeyError, match="Unknown observation field"):
+        policy.config_update(
+            component=make_component(), obs_dim=3, action_dim=2,
+            observation_slices={"known": slice(0, 3)},
+            actor=[{
+                "inputs": "obs.missing",
+                "type": "linear",
+                "in_features": 3,
+                "out_features": "action_dim",
+            }],
+            critic=CRITIC_CONFIG,
+            distribution={"type": "diagonal_gaussian"},
+        )
+
+
 def test_stateful_gru_rejects_online_batch_size_change() -> None:
     module = StatefulGRU(input_size=3, hidden_size=4)
     module(torch.zeros(2, 3))
@@ -207,6 +743,35 @@ def test_recurrent_sequence_evaluation_preserves_time_gradients(
         )
     gru_parameter = next(policy.actor[0].parameters())
     assert gru_parameter.grad is not None
+
+
+def test_recurrent_sequence_supports_sliced_module_output(
+    runtime_context: RuntimeContext,
+) -> None:
+    policy = ConfigurableActorCritic(context=runtime_context)
+    policy.config_update(
+        component=make_component(), obs_dim=3, action_dim=2,
+        actor=[
+            {"name": "memory", "type": "gru",
+             "input_size": 3, "hidden_size": 8},
+            {"inputs": "memory[0:4]", "type": "linear",
+             "in_features": 4, "out_features": "action_dim"},
+        ],
+        critic=CRITIC_CONFIG,
+        distribution={"type": "diagonal_gaussian"},
+    )
+    obs = torch.randn(3, 2, 3)
+    actions = torch.zeros(3, 2, 2)
+
+    evaluation, final_state = policy.evaluate_recurrent_sequences(
+        obs=obs,
+        actions=actions,
+        initial_state=policy.get_recurrent_state(batch_size=2),
+        reset_mask=torch.zeros(3, 2, dtype=torch.bool),
+    )
+
+    assert evaluation.log_prob.shape == (3, 2)
+    assert final_state["memory"].shape == (2, 8)
 
 
 def test_ppo_evaluation_does_not_create_rollout_state(

@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 from torch import Tensor
 
@@ -26,6 +27,8 @@ class BaseAlgorithm(ABC):
         self.context = context
         self.policy: BasePolicy
         self.storage: RolloutStorage
+        self.learning_rate: float
+        self._pending_checkpoint_state: Mapping[str, Any] | None = None
 
 
     @abstractmethod
@@ -48,6 +51,12 @@ class BaseAlgorithm(ABC):
     @abstractmethod
     def update(self) -> dict[str, float]:
         """Perform one optimization phase and return scalar diagnostics."""
+        raise NotImplementedError
+
+
+    @abstractmethod
+    def set_learning_rate(self, learning_rate: float) -> None:
+        """Update the learning rate used by the algorithm's optimizers."""
         raise NotImplementedError
 
 
@@ -95,6 +104,39 @@ class BaseAlgorithm(ABC):
             and self.policy.is_recurrent
         ):
             self.policy.reset_recurrent_state(env_ids)
+
+
+    def checkpoint_state_dict(self) -> dict[str, Any]:
+        if not hasattr(self, "policy"):
+            raise RuntimeError("Cannot checkpoint before policy is built.")
+        return {
+            "type": type(self).__name__,
+            "policy": self.policy.checkpoint_state_dict(),
+        }
+
+
+    def prepare_checkpoint_load(
+        self,
+        state: Mapping[str, Any],
+    ) -> None:
+
+        self._pending_checkpoint_state = state
+
+
+    def load_checkpoint_state_dict(
+        self,
+        state: Mapping[str, Any],
+        load_optimizer: bool = False,
+    ) -> None:
+
+        if not hasattr(self, "policy"):
+            raise RuntimeError("Cannot load before policy is built.")
+        self.policy.load_checkpoint_state_dict(state["policy"])
+        self._pending_checkpoint_state = None
+
+
+    def save_module_artifacts(self, directory: Path) -> list[Path]:
+        return self.policy.save_module_artifacts(directory)
 
 
 class OnPolicyAlgorithm(BaseAlgorithm):

@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 from app.utils.context import RuntimeContext
@@ -7,6 +8,7 @@ from envs.base import BaseEnv
 from rl.algorithms.base import OnPolicyAlgorithm
 from runners.callbacks.base import BaseCallback
 from runners.callbacks.stage import StageCallback
+from runners.utils.frames import VideoFormat, VideoFormats
 from utils.component import Component
 
 
@@ -21,7 +23,8 @@ class BaseRunner(ABC):
         self.environment: BaseEnv
         self.algorithm: OnPolicyAlgorithm
 
-        self.current_iteration: int
+        self.current_iteration = -1
+        self.stage_index: int | None = None
 
         self.max_iterations: int
         self.rollout_length: int
@@ -65,7 +68,8 @@ class BaseRunner(ABC):
     @abstractmethod
     def play(
         self,
-        num_steps: int = 5000
+        num_steps: int = 5000,
+        formats: VideoFormat | VideoFormats = "gif",
     ) -> None:
         raise NotImplementedError
 
@@ -76,5 +80,24 @@ class BaseRunner(ABC):
 
 
     @abstractmethod
-    def save(self) -> None:
+    def save(
+        self,
+        path: Path | None = None,
+    ) -> Path:
         raise NotImplementedError
+
+
+    @abstractmethod
+    def prepare_checkpoint_load(self, path: Path) -> dict[str, Any]:
+        """Read metadata needed to construct modules before state loading."""
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support checkpoint loading."
+        )
+
+
+    @abstractmethod
+    def load(self, load_optimizer: bool = False) -> None:
+        """Restore checkpoint state after runner configuration."""
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support checkpoint loading."
+        )

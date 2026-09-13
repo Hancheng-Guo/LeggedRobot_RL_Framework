@@ -1,4 +1,5 @@
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -26,11 +27,13 @@ class WorkflowRunner(BaseRunner):
         rollout_length: int | None = None,
         rollout_length_history_size: int | None = None,
         callbacks: Sequence[str | Mapping[str, Any]] | None = None,
+        stage_index: int | None = None,
         *args: Any,
         **kwargs: Any,
     ) -> None:
         assert max_iterations is not None
         self.max_iterations = max_iterations
+        self.stage_index = stage_index
         self.max_iterations_history.append(max_iterations)
 
     def stage_update(
@@ -74,11 +77,34 @@ class WorkflowRunner(BaseRunner):
     def close(self) -> None:
         pass
 
-    def save(self) -> None:
-        pass
+    def save(self, path: Path | None = None) -> Path:
+        if path is None:
+            path = (
+                Path(self.context.save_dir)
+                / "checkpoints"
+                / f"stage_{self.stage_index:03d}"
+                / "latest.pt"
+            )
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+        return path
+
+    def prepare_checkpoint_load(self, path: Path) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def load(self, load_optimizer: bool = False) -> None:
+        raise NotImplementedError
 
 
-def make_stage_manager(context: RuntimeContext) -> StageManager:
+def make_stage_manager(
+    context: RuntimeContext,
+    save_dir: Path,
+) -> StageManager:
+    context = replace(
+        context,
+        load_dir=save_dir,
+        save_dir=save_dir,
+    )
     manager = StageManager(
         component={},
         context=context,
@@ -114,10 +140,49 @@ def make_stage_manager(context: RuntimeContext) -> StageManager:
     return manager
 
 
+def test_training_resume_selects_latest_stage_checkpoint(
+    runtime_context: RuntimeContext,
+    tmp_path: Path,
+) -> None:
+    runtime_context = replace(
+        runtime_context,
+        load_dir=tmp_path,
+        save_dir=tmp_path,
+    )
+    manager = StageManager(
+        component={},
+        context=runtime_context,
+        stage_detail=[
+            {"stage_0": {"max_iterations": 1, "transition": [True]}},
+            {"stage_1": {"max_iterations": 1, "transition": [True]}},
+        ],
+        load_dir=tmp_path,
+    )
+    first = tmp_path / "checkpoints" / "stage_000" / "latest.pt"
+    second = tmp_path / "checkpoints" / "stage_001" / "latest.pt"
+    first.parent.mkdir(parents=True)
+    second.parent.mkdir(parents=True)
+    first.touch()
+    second.touch()
+
+    resume_info = manager._prepare_training_stage()
+    assert resume_info is not None
+    assert resume_info.checkpoint_path == second
+    assert resume_info.stage_completed is False
+    assert manager.current_stage == 1
+
+    (second.parent / "stage_completed").touch()
+    resume_info = manager._prepare_training_stage()
+    assert resume_info is not None
+    assert resume_info.checkpoint_path == second
+    assert resume_info.stage_completed is True
+
+
 def test_stage_manager_continues_with_each_stage_transition(
     runtime_context: RuntimeContext,
+    tmp_path: Path,
 ) -> None:
-    manager = make_stage_manager(runtime_context)
+    manager = make_stage_manager(runtime_context, tmp_path)
     runner = manager.runner
     assert isinstance(runner, WorkflowRunner)
 
@@ -134,8 +199,9 @@ def test_stage_manager_continues_with_each_stage_transition(
 
 def test_stage_manager_does_not_advance_when_condition_is_not_met(
     runtime_context: RuntimeContext,
+    tmp_path: Path,
 ) -> None:
-    manager = make_stage_manager(runtime_context)
+    manager = make_stage_manager(runtime_context, tmp_path)
     runner = manager.runner
     assert isinstance(runner, WorkflowRunner)
     runner.allow_transition = False
@@ -159,8 +225,9 @@ def test_stage_manager_does_not_advance_when_condition_is_not_met(
 
 def test_application_entry_can_test_and_play_after_training(
     runtime_context: RuntimeContext,
+    tmp_path: Path,
 ) -> None:
-    manager = make_stage_manager(runtime_context)
+    manager = make_stage_manager(runtime_context, tmp_path)
     runner = manager.runner
     assert isinstance(runner, WorkflowRunner)
     application = ApplicationEntry.__new__(ApplicationEntry)

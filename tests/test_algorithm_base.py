@@ -152,6 +152,10 @@ class DummyOnPolicyAlgorithm(OnPolicyAlgorithm):
         return {"loss": 0.0}
 
 
+    def set_learning_rate(self, learning_rate: float) -> None:
+        self.learning_rate = learning_rate
+
+
     def close(self) -> None:
         return None
 
@@ -266,6 +270,27 @@ def test_ppo_update_optimizes_and_reports_metrics(
         "rollout/explained_variance",
     }
     assert info["rollout/learning_rate"] == 0.01
+
+
+def test_ppo_checkpoint_learning_rate_overrides_optimizer_state(
+    runtime_context: RuntimeContext,
+) -> None:
+    algorithm = PPO(runtime_context)
+    algorithm.policy = FakePPOPolicy(context=runtime_context)
+    algorithm.optimizer = torch.optim.Adam(
+        algorithm.policy.parameters(),
+        lr=0.01,
+    )
+    algorithm.learning_rate = 0.01
+
+    state = algorithm.checkpoint_state_dict()
+    state["learning_rate"] = 0.02
+    state["optimizer"]["param_groups"][0]["lr"] = 0.03
+
+    algorithm.load_checkpoint_state_dict(state, load_optimizer=True)
+
+    assert algorithm.learning_rate == 0.02
+    assert algorithm.optimizer.param_groups[0]["lr"] == 0.02
 
 
 def test_ppo_closes_owned_components(

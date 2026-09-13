@@ -1,5 +1,6 @@
 import torch
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 from app.utils.context import RuntimeContext
@@ -11,6 +12,7 @@ from rl.policies.distributions import (
 )
 from rl.policies.modules.network import ConfigurableNetwork
 from utils.component import Component
+from utils.save import atomic_save
 
 
 class ConfigurableActorCritic(ActorCritic):
@@ -35,13 +37,25 @@ class ConfigurableActorCritic(ActorCritic):
         actor: Sequence[Mapping[str, Any]],
         critic: Sequence[Mapping[str, Any]],
         distribution: Mapping[str, Any],
+        observation_slices: Mapping[str, slice] | None = None,
+        module_artifacts: Mapping[str, Mapping[str, Any]] | None = None,
         *args, **kwargs,
     ) -> None:
         
-        if obs_dim <= 0:
-            raise ValueError("'obs_dim' must be greater than 0.")
-        if action_dim <= 0:
-            raise ValueError("'action_dim' must be greater than 0.")
+        if (
+            not isinstance(obs_dim, int)
+            or isinstance(obs_dim, bool)
+            or obs_dim <= 0
+        ):
+            raise ValueError("'obs_dim' must be a positive integer.")
+        if (
+            not isinstance(action_dim, int)
+            or isinstance(action_dim, bool)
+            or action_dim <= 0
+        ):
+            raise ValueError("'action_dim' must be a positive integer.")
+        if not isinstance(distribution, Mapping):
+            raise TypeError("'distribution' must be a mapping.")
         if "action_dim" in distribution:
             raise ValueError(
                 "Distribution 'action_dim' is provided by the environment."
@@ -51,27 +65,116 @@ class ConfigurableActorCritic(ActorCritic):
             "obs_dim": obs_dim,
             "action_dim": action_dim,
         }
-        self.actor = ConfigurableNetwork(
+        previous_actor = getattr(self, "actor", None)
+        previous_critic = getattr(self, "critic", None)
+        pending_state = self._pending_checkpoint_state or {}
+        pending_artifacts = pending_state.get("module_artifacts", {})
+        if not isinstance(pending_artifacts, Mapping):
+            raise TypeError("Checkpoint 'module_artifacts' must be a mapping.")
+        if module_artifacts is not None and not isinstance(
+            module_artifacts, Mapping
+        ):
+            raise TypeError("'module_artifacts' must be a mapping.")
+        saved_artifacts = dict(pending_artifacts)
+        saved_artifacts.update(module_artifacts or {})
+        
+        actor_artifacts = {
+            name.removeprefix("actor."): artifact
+            for name, artifact in saved_artifacts.items()
+            if name.startswith("actor.")
+        }
+        critic_artifacts = {
+            name.removeprefix("critic."): artifact
+            for name, artifact in saved_artifacts.items()
+            if name.startswith("critic.")
+        }
+
+        if previous_actor is not None:
+            actor_artifacts.update(previous_actor.export_module_artifacts())
+        if previous_critic is not None:
+            critic_artifacts.update(previous_critic.export_module_artifacts())
+
+        actor_network = ConfigurableNetwork(
             modules=actor,
             variables=dimensions,
+            module_artifacts=actor_artifacts,
+            input_slices=observation_slices,
         )
-        self.critic = ConfigurableNetwork(
+        critic_network = ConfigurableNetwork(
             modules=critic,
             variables=dimensions,
+            module_artifacts=critic_artifacts,
+            input_slices=observation_slices,
         )
-        if self.critic.is_recurrent:
+        if critic_network.is_recurrent:
             raise ValueError(
                 "Recurrent critic modules are not supported yet."
             )
+        if actor_network.output_features != action_dim:
+            raise ValueError(
+                "Actor output features must equal action_dim: "
+                f"{actor_network.output_features} != {action_dim}."
+            )
+        if critic_network.output_features != 1:
+            raise ValueError(
+                "Critic output features must equal 1: "
+                f"got {critic_network.output_features}."
+            )
+        if previous_actor is not None:
+            actor_network.inherit_modules_from(previous_actor)
+        if previous_critic is not None:
+            critic_network.inherit_modules_from(previous_critic)
+
         distribution_config = dict(distribution)
         distribution_config["action_dim"] = action_dim
-        self.action_distribution = build_action_distribution(
+        action_distribution = build_action_distribution(
             distribution_config
         )
+        self.actor = actor_network
+        self.critic = critic_network
+        self.action_distribution = action_distribution
         self.to(
             device=self.context.device,
             dtype=self.context.dtype,
         )
+
+
+    def export_module_artifacts(self) -> dict[str, dict[str, Any]]:
+        
+        actor_artifacts = {
+            f"actor.{name}": artifact
+            for name, artifact in self.actor.export_module_artifacts().items()
+        }
+        critic_artifacts = {
+            f"critic.{name}": artifact
+            for name, artifact in self.critic.export_module_artifacts().items()
+        }
+
+        return actor_artifacts | critic_artifacts
+
+
+    def checkpoint_state_dict(self) -> dict[str, Any]:
+        state = super().checkpoint_state_dict()
+        state["module_artifacts"] = self.export_module_artifacts()
+        return state
+
+
+    def save_module_artifacts(self, directory: Path) -> list[Path]:
+        paths: list[Path] = []
+        for network_name, network in (
+            ("actor", self.actor),
+            ("critic", self.critic),
+        ):
+            for module_name, artifact in (
+                network.export_portable_module_artifacts().items()
+            ):
+                module_path = Path(*module_name.split("."))
+                paths.append(atomic_save(
+                    artifact,
+                    directory / network_name
+                    / module_path.parent / f"{module_path.name}.pt",
+                ))
+        return paths
 
 
     def actor_forward(

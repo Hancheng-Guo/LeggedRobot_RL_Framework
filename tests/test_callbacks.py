@@ -24,11 +24,31 @@ class DummyAlgorithm:
     def __init__(self) -> None:
         self.policy = torch.nn.Linear(2, 1)
         self.optimizer = torch.optim.Adam(self.policy.parameters())
+        self.learning_rate = 0.001
+
+    def set_learning_rate(self, learning_rate: float) -> None:
+        self.learning_rate = learning_rate
+        for param_group in self.optimizer.param_groups:
+            param_group["lr"] = learning_rate
+
+    def checkpoint_state_dict(self) -> dict[str, Any]:
+        return {
+            "type": type(self).__name__,
+            "optimizer": self.optimizer.state_dict(),
+            "policy": {
+                "type": type(self.policy).__name__,
+                "state_dict": self.policy.state_dict(),
+            },
+        }
+
+    def save_module_artifacts(self, directory: Path) -> list[Path]:
+        return []
 
 
 def make_runner() -> BaseRunner:
     return cast(BaseRunner, SimpleNamespace(
         current_iteration=0,
+        rollout_length=1,
         algorithm=DummyAlgorithm(),
     ))
 
@@ -38,6 +58,17 @@ def make_context(save_dir: Path) -> RuntimeContext:
         RuntimeContext,
         SimpleNamespace(save_dir=save_dir),
     )
+
+
+def make_checkpoint_runner(
+    save_dir: Path,
+    stage_index: int | None = None,
+) -> OnPolicyRunner:
+    runner = OnPolicyRunner(context=make_context(save_dir))
+    runner.current_iteration = 0
+    runner.stage_index = stage_index
+    runner.algorithm = cast(Any, DummyAlgorithm())
+    return runner
 
 
 def test_early_stopping_stops_at_no_improvement_limit() -> None:
@@ -393,7 +424,7 @@ def test_tensorboard_reduces_configured_vector_metrics(
     callback = TensorboardCallback(
         runner=make_runner(),
         context=make_context(tmp_path),
-        histogram_log_interval=2,
+        histogram_step_interval=2,
         step_metrics={
             "reward": ["value"],
             "episode_length": ["value"],
@@ -542,11 +573,11 @@ def test_tensorboard_reuses_server_across_stage_callbacks(
 def test_checkpoint_callback_saves_policy_and_optimizer(
     tmp_path: Path,
 ) -> None:
-    runner = make_runner()
+    runner = make_checkpoint_runner(tmp_path)
     callback = CheckpointCallback(
         runner=runner,
         context=make_context(tmp_path),
-        save_interval=1,
+        save_iter_interval=1,
     )
     callback._on_iteration_end({"ppo/loss": 1.0})
 
@@ -559,20 +590,28 @@ def test_checkpoint_callback_saves_policy_and_optimizer(
     )
     assert checkpoint_path.is_file()
     assert (tmp_path / "checkpoints" / "latest.pt").is_file()
-    assert payload["global_iteration"] == 1
-    assert "policy_state_dict" in payload
-    assert "optimizer_state_dict" in payload
+    assert "format_version" not in payload
+    runner_state = payload["runner"]
+    assert runner_state["current_iteration"] == 0
+    assert "global_iteration" not in runner_state
+    assert "metrics" not in runner_state
+    assert "stage_completed" not in runner_state
+    assert "policy" in runner_state["algorithm"]
+    assert "state_dict" in runner_state["algorithm"]["policy"]
+    assert "optimizer" in runner_state["algorithm"]
+    assert "policy_state_dict" not in payload
+    assert "optimizer_state_dict" not in payload
     assert not list((tmp_path / "checkpoints").glob("*.tmp"))
 
 
 def test_checkpoint_callback_uses_stage_directory(
     tmp_path: Path,
 ) -> None:
-    runner = make_runner()
+    runner = make_checkpoint_runner(tmp_path, stage_index=1)
     callback = CheckpointCallback(
         runner=runner,
         context=make_context(tmp_path),
-        save_interval=1,
+        save_iter_interval=1,
         stage_index=1,
     )
     callback._on_iteration_end({"ppo/loss": 1.0})
@@ -588,7 +627,47 @@ def test_checkpoint_callback_uses_stage_directory(
         weights_only=False,
     )
     assert checkpoint_path.is_file()
-    assert payload["stage_index"] == 1
+    assert payload["runner"]["stage_index"] == 1
+
+
+def test_checkpoint_callback_does_not_save_on_train_end_by_default(
+    tmp_path: Path,
+) -> None:
+    runner = make_checkpoint_runner(tmp_path)
+    runner.current_iteration = -1
+    callback = CheckpointCallback(
+        runner=runner,
+        context=make_context(tmp_path),
+        save_iter_interval=100,
+    )
+
+    callback._on_train_start()
+    callback._on_iteration_end({})
+    callback._on_train_end()
+
+    assert not list((tmp_path / "checkpoints").glob("*.pt"))
+
+
+def test_checkpoint_callback_can_explicitly_save_on_train_end(
+    tmp_path: Path,
+) -> None:
+    runner = make_checkpoint_runner(tmp_path)
+    runner.current_iteration = -1
+    callback = CheckpointCallback(
+        runner=runner,
+        context=make_context(tmp_path),
+        save_iter_interval=100,
+        directory_name="explicit_checkpoints",
+        save_on_train_end=True,
+    )
+
+    callback._on_train_start()
+    callback._on_iteration_end({})
+    callback._on_train_end()
+
+    checkpoint_dir = tmp_path / "explicit_checkpoints"
+    assert (checkpoint_dir / "checkpoint_00000001.pt").is_file()
+    assert (checkpoint_dir / "latest.pt").is_file()
 
 
 def test_progress_bar_reports_completed_iteration(

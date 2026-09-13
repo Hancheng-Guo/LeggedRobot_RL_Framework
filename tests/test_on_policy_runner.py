@@ -1,4 +1,4 @@
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -54,6 +54,12 @@ class TrackingEnvironment(BaseEnv):
     def render(self) -> np.ndarray | None:
         return None
 
+
+    @property
+    def render_fps(self) -> float:
+        return 50.0
+
+
     @property
     def action_dim(self) -> int:
         return 1
@@ -62,6 +68,11 @@ class TrackingEnvironment(BaseEnv):
     @property
     def observation_dim(self) -> int:
         return 1
+
+
+    @property
+    def observation_slices(self) -> dict[str, slice]:
+        return {"observation": slice(0, 1)}
 
 
 class MinimalAlgorithm(OnPolicyAlgorithm):
@@ -96,6 +107,9 @@ class MinimalAlgorithm(OnPolicyAlgorithm):
     def update(self) -> dict[str, float]:
         raise NotImplementedError
 
+    def set_learning_rate(self, learning_rate: float) -> None:
+        self.learning_rate = learning_rate
+
     def close(self) -> None:
         return None
 
@@ -105,6 +119,15 @@ class StopAtStepStartCallback(BaseCallback):
         self.runner = None
 
     def _on_step_start(self, *args: Any, **kwargs: Any) -> bool:
+        return False
+
+
+class StopAtIterationStartCallback(BaseCallback):
+    def __init__(self) -> None:
+        self.iterations: list[int] = []
+
+    def _on_iteration_start(self, *args: Any, **kwargs: Any) -> bool:
+        self.iterations.append(self.runner.current_iteration)
         return False
 
 
@@ -123,6 +146,44 @@ def test_train_stops_before_empty_rollout_update(
     runner.train()
 
     assert runner.stop_callback == [callback]
+
+
+def test_train_resumes_from_iteration_after_checkpoint(
+    runtime_context: RuntimeContext,
+) -> None:
+    runner = OnPolicyRunner(context=runtime_context)
+    runner.environment = TrackingEnvironment(runtime_context)
+    runner.environment.num_envs = 1
+    runner.algorithm = MinimalAlgorithm(runtime_context)
+    runner.current_iteration = 2
+    runner.max_iterations = 5
+    runner.rollout_length = 1
+    callback = StopAtIterationStartCallback()
+    callback.runner = runner
+    runner.callbacks = [callback]
+
+    runner.train()
+
+    assert callback.iterations == [3]
+
+
+@pytest.mark.parametrize("current_iteration", [-2, True, 1.5])
+def test_load_rejects_invalid_checkpoint_iteration(
+    runtime_context: RuntimeContext,
+    current_iteration: Any,
+) -> None:
+    runner = OnPolicyRunner(context=runtime_context)
+    runner.algorithm = MinimalAlgorithm(runtime_context)
+    runner._pending_checkpoint_payload = {
+        "runner": {
+            "stage_index": None,
+            "current_iteration": current_iteration,
+            "algorithm": {},
+        },
+    }
+
+    with pytest.raises(ValueError, match="current_iteration"):
+        runner.load()
 
 
 def test_runner_reports_recent_rollout_length_mean(
@@ -239,7 +300,10 @@ def test_play_restores_original_environment_after_failure(
     runner.algorithm = MinimalAlgorithm(runtime_context)
     runner._merge_component(component)
 
-    def fail_during_play(num_steps: int) -> None:
+    def fail_during_play(
+        num_steps: int,
+        formats: str | Sequence[str],
+    ) -> None:
         assert runner.environment is not None
         assert runner.environment.num_envs == 1
         raise RuntimeError("play failed")

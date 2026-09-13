@@ -1,3 +1,4 @@
+import pytest
 import torch
 from types import SimpleNamespace
 from typing import cast
@@ -174,6 +175,12 @@ def test_action_dim_comes_from_action_manager_input() -> None:
     env = make_env()
 
     assert env.action_dim == 1
+
+
+def test_render_fps_matches_control_frequency() -> None:
+    env = make_env()
+
+    assert env.render_fps == pytest.approx(50.0)
 
 
 def test_reward_is_scaled_for_consumers_but_not_info() -> None:

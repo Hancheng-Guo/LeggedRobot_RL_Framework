@@ -36,6 +36,9 @@ def make_task_context(num_envs: int = 2) -> TaskContext:
             "contact_geom_ids": torch.tensor(
                 [[[3, 0], [1, 2]]],
             ).repeat(num_envs, 1, 1),
+            "foot_ground_contact": torch.tensor(
+                [[[True], [False]]],
+            ).repeat(num_envs, 1, 1),
             "contact_forces": torch.tensor(
                 [[[12.0, 1.0, 2.0, 0.0, 0.0, 0.0],
                   [50.0, 0.0, 0.0, 0.0, 0.0, 0.0]]],
@@ -243,7 +246,7 @@ def test_foot_contact_observation_terms(
         action_dim=2,
         terms={
             "foot_contact_normal_force": {},
-            "foot_contact_state": {"threshold": 10.0},
+            "foot_contact_state": {},
         },
     )
 

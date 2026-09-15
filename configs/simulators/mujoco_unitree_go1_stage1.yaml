@@ -4,4 +4,5 @@ frame_skip: 10
 render_mode: human
 geom_foot_names: [FR, FL, RR, RL]
 geom_floor_names: [floor]
+foot_contact_force_threshold: 15.0
 reset_keyframe: "home"

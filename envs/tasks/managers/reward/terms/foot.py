@@ -8,39 +8,6 @@ from envs.tasks.managers.reward.terms.utils import command_vector
 from envs.tasks.utils.context import TaskContext
 
 
-_FOOT_CONTACT_FORCE_THRESHOLD = 15.0
-
-
-def _foot_landed(
-    task_context: TaskContext,
-    geom_foot_ids: torch.Tensor,
-    ground_geom_ids: torch.Tensor,
-) -> torch.Tensor:
-    
-    contact_geom_ids = task_context.state["contact_geom_ids"]
-    contact_forces = task_context.state["contact_forces"]
-    landed = torch.zeros(
-        (contact_geom_ids.shape[0], geom_foot_ids.numel()),
-        dtype=torch.bool,
-        device=contact_geom_ids.device,
-    )
-    if contact_geom_ids.shape[1] == 0:
-        return landed
-
-    geom1 = contact_geom_ids[..., 0]
-    geom2 = contact_geom_ids[..., 1]
-    normal_force = contact_forces[..., 0].abs()
-    forceful_contact = normal_force >= _FOOT_CONTACT_FORCE_THRESHOLD
-
-    for index, geom_foot_id in enumerate(geom_foot_ids):
-        foot_ground_contact = (
-            ((geom1 == geom_foot_id) & torch.isin(geom2, ground_geom_ids))
-            | ((geom2 == geom_foot_id) & torch.isin(geom1, ground_geom_ids))
-        )
-        landed[:, index] = (foot_ground_contact & forceful_contact).any(dim=-1)
-    return landed
-
-
 @register_reward
 class FootStateDurationCommandWeighedExp(BaseRewardTerm):
 
@@ -56,7 +23,6 @@ class FootStateDurationCommandWeighedExp(BaseRewardTerm):
         super().__init__(*args, **kwargs)
 
         self.geom_foot_ids = model_context.geom_foot_ids
-        self.ground_geom_ids = model_context.geom_floor_ids
         self.sigma = sigma
         self.command_names = command_names
 
@@ -77,11 +43,7 @@ class FootStateDurationCommandWeighedExp(BaseRewardTerm):
         task_context: TaskContext
     ) -> torch.Tensor:
         
-        landed = _foot_landed(
-            task_context,
-            self.geom_foot_ids,
-            self.ground_geom_ids,
-        )
+        landed = task_context.state["foot_ground_contact"].any(dim=1)
         unchanged = landed == self.last_foot_state
         self.duration = torch.where(
             unchanged,
@@ -127,7 +89,6 @@ class FootStateDurationCubicCommandWeighedExp(BaseRewardTerm):
         super().__init__(*args, **kwargs)
 
         self.geom_foot_ids = model_context.geom_foot_ids
-        self.ground_geom_ids = model_context.geom_floor_ids
         self.sigma = sigma
         self.command_names = command_names
 
@@ -148,11 +109,7 @@ class FootStateDurationCubicCommandWeighedExp(BaseRewardTerm):
         task_context: TaskContext
     ) -> torch.Tensor:
         
-        landed = _foot_landed(
-            task_context,
-            self.geom_foot_ids,
-            self.ground_geom_ids,
-        )
+        landed = task_context.state["foot_ground_contact"].any(dim=1)
         unchanged = landed == self.last_foot_state
         self.duration = torch.where(
             unchanged,
@@ -196,7 +153,6 @@ class FootSlidingVelocityL2(BaseRewardTerm):
         super().__init__(*args, **kwargs)
 
         self.geom_foot_ids = model_context.geom_foot_ids
-        self.ground_geom_ids = model_context.geom_floor_ids
 
 
     def compute(
@@ -204,11 +160,7 @@ class FootSlidingVelocityL2(BaseRewardTerm):
         task_context: TaskContext
     ) -> torch.Tensor:
         
-        landed = _foot_landed(
-            task_context,
-            self.geom_foot_ids,
-            self.ground_geom_ids,
-        )
+        landed = task_context.state["foot_ground_contact"].any(dim=1)
         foot_xvel = task_context.state["geom_xvel"][:, self.geom_foot_ids, :]
         foot_velocity = foot_xvel[..., 3:5]
         return torch.sum(
@@ -291,7 +243,6 @@ class FootContactWithoutCommand(BaseRewardTerm):
         super().__init__(*args, **kwargs)
 
         self.geom_foot_ids = model_context.geom_foot_ids
-        self.ground_geom_ids = model_context.geom_floor_ids
         self.command_names = command_names
 
 
@@ -300,11 +251,7 @@ class FootContactWithoutCommand(BaseRewardTerm):
         task_context: TaskContext
     ) -> torch.Tensor:
         
-        landed = _foot_landed(
-            task_context,
-            self.geom_foot_ids,
-            self.ground_geom_ids,
-        )
+        landed = task_context.state["foot_ground_contact"].any(dim=1)
         command_norm = torch.linalg.norm(
             command_vector(task_context, self.command_names),
             dim=-1,

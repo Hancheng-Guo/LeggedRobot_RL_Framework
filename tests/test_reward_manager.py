@@ -7,7 +7,10 @@ from envs.tasks.managers.reward.base import RewardManager
 from envs.tasks.managers.reward.terms.foot import (
     FootStateDurationCommandWeighedExp,
 )
-from envs.tasks.managers.reward.terms.gait import QuadrupedalGaitPhaseL2Exp
+from envs.tasks.managers.reward.terms.gait import (
+    QuadrupedalGaitPhaseL2Exp,
+    TrotLoopDurationTanh,
+)
 from envs.tasks.managers.reward.terms.tracking import (
     TrackLinearVelocityXyErrorIntegralL2,
 )
@@ -105,6 +108,10 @@ def make_quadrupedal_foot_context() -> TaskContext:
                 [[3, 0], [4, 0], [-1, -1], [-1, -1]],
                 [[5, 0], [-1, -1], [-1, -1], [-1, -1]],
             ]),
+            "foot_ground_contact": torch.tensor([
+                [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+                [[0, 0, 1, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+            ], dtype=torch.bool),
             "contact_forces": contact_forces,
         },
         command={
@@ -290,6 +297,7 @@ def test_foot_state_duration_ignores_low_force_contacts(
     )
     task_context = make_quadrupedal_foot_context()
     task_context.state["contact_forces"].zero_()
+    task_context.state["foot_ground_contact"].zero_()
 
     manager.compute(task_context)
     term = cast(
@@ -397,6 +405,73 @@ def test_quadrupedal_phase_gait_updates_phase_steps(
     manager.reset(torch.tensor([1]))
     assert term.foot_phase_steps[0].any()
     assert not term.foot_phase_steps[1].any()
+
+
+def test_trot_loop_duration_tracks_valid_contact_sequence_and_resets(
+    runtime_context,
+    model_context,
+):
+    gait_model_context = replace(
+        model_context,
+        geom_names=("floor", "base", "thigh", "FL", "FR", "RL", "RR"),
+        geom_body_ids=torch.arange(7),
+        geom_foot_ids=torch.tensor([3, 4, 5, 6]),
+    )
+    term = TrotLoopDurationTanh(
+        num_envs=2,
+        context=runtime_context,
+        model_context=gait_model_context,
+        gain=2.0,
+    )
+    task_context = TaskContext(
+        state={
+            "contact_geom_ids": torch.tensor([
+                [[3, 0], [4, 0], [5, 0], [6, 0]],
+                [[0, 3], [0, 4], [0, 5], [0, 6]],
+            ]),
+            "foot_ground_contact": torch.eye(
+                4, dtype=torch.bool,
+            ).repeat(2, 1, 1),
+            "contact_forces": torch.zeros(2, 4, 6),
+        },
+        command={
+            "lin_vel_x": torch.tensor([[1.0], [0.0]]),
+            "lin_vel_y": torch.zeros(2, 1),
+            "ang_vel_z": torch.zeros(2, 1),
+        },
+        action=torch.zeros(2, 2),
+        last_action=torch.zeros(2, 2),
+        episode_step=torch.ones(2, dtype=torch.long),
+        step_dt=0.02,
+    )
+    task_context.state["contact_forces"][..., 0] = 20.0
+
+    first_reward = term.compute(task_context)
+    torch.testing.assert_close(
+        first_reward,
+        torch.tanh(torch.full((2,), 0.04)),
+    )
+
+    task_context.state["contact_geom_ids"][0] = torch.tensor([
+        [3, 0], [6, 0], [-1, -1], [-1, -1],
+    ])
+    task_context.state["foot_ground_contact"][0] = torch.tensor([
+        [1, 0, 0, 0], [0, 0, 0, 1],
+        [0, 0, 0, 0], [0, 0, 0, 0],
+    ], dtype=torch.bool)
+    second_reward = term.compute(task_context)
+    torch.testing.assert_close(
+        second_reward,
+        torch.tanh(torch.full((2,), 0.08)),
+    )
+
+    term.reset(torch.tensor([1]))
+    torch.testing.assert_close(
+        term.gait_loop_duration,
+        torch.tensor([0.04, 0.0]),
+    )
+    assert term.gait_is_moving[0] is True
+    assert term.gait_is_moving[1] is None
 
 
 def test_quadrupedal_phase_gait_uses_base_plane_distance(

@@ -28,6 +28,7 @@ class MujocoSimulator(BaseSimulator):
         self.frame_skip: int
         self.geom_foot_names: tuple[str, ...]
         self.geom_floor_names: tuple[str, ...]
+        self.foot_contact_force_threshold: float = 15.0
         self.render_mode: str | None = None
         self.reset_keyframe: str | None = None
         self.reset_keyframe_id: int = -1
@@ -56,12 +57,20 @@ class MujocoSimulator(BaseSimulator):
         render_mode: str | None = None,
         geom_foot_names: list[str] | tuple[str, ...] | None = None,
         geom_floor_names: list[str] | tuple[str, ...] | None = None,
+        foot_contact_force_threshold: float | None = None,
         reset_keyframe: str | None = None,
     ) -> None:
 
         if num_envs is not None and num_envs <= 0:
             raise ValueError(
                 "'num_envs' should be a int greater than 0."
+            )
+        if (
+            foot_contact_force_threshold is not None
+            and foot_contact_force_threshold < 0.0
+        ):
+            raise ValueError(
+                "'foot_contact_force_threshold' must be non-negative."
             )
         
         update_attributes(
@@ -70,6 +79,7 @@ class MujocoSimulator(BaseSimulator):
             model_path=None if model_path is None else Path(model_path),
             sim_dt=sim_dt,
             frame_skip=frame_skip,
+            foot_contact_force_threshold=foot_contact_force_threshold,
             geom_foot_names=(
                 tuple(geom_foot_names)
                 if geom_foot_names is not None
@@ -480,6 +490,10 @@ class MujocoSimulator(BaseSimulator):
             contact_geom_ids,
             contact_forces
         ) = self._get_contact_state(models, datas)
+        foot_ground_contact = self._get_foot_ground_contact(
+            contact_geom_ids,
+            contact_forces,
+        )
 
         return (
             basic_state |
@@ -487,9 +501,30 @@ class MujocoSimulator(BaseSimulator):
             {
                 "contact_geom_ids": contact_geom_ids,
                 "contact_forces": contact_forces,
+                "foot_ground_contact": foot_ground_contact,
                 "geom_xvel": geom_xvel,
             }
         )
+
+
+    def _get_foot_ground_contact(
+        self,
+        contact_geom_ids: torch.Tensor,
+        contact_forces: torch.Tensor,
+    ) -> torch.Tensor:
+        geom1 = contact_geom_ids[..., 0].unsqueeze(-1)
+        geom2 = contact_geom_ids[..., 1].unsqueeze(-1)
+        foot_ids = self.model_context.geom_foot_ids.view(1, 1, -1)
+        floor_ids = self.model_context.geom_floor_ids
+        foot_ground_pair = (
+            ((geom1 == foot_ids) & torch.isin(geom2, floor_ids))
+            | ((geom2 == foot_ids) & torch.isin(geom1, floor_ids))
+        )
+        forceful_contact = (
+            contact_forces[..., 0].abs()
+            >= self.foot_contact_force_threshold
+        )
+        return foot_ground_pair & forceful_contact.unsqueeze(-1)
 
 
     def _get_basic_state(

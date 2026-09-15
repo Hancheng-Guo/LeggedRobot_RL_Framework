@@ -11,9 +11,9 @@ action_manager_config:
 
 command_manager_config:
   terms:
-    lin_vel_x: {type: SymmetricFastLpacSampleOnReset, params: {group: velocity, min_value: 0.0, max_value: 3.5, num_cell: 5}}
-    lin_vel_y: {type: UniformOnReset, params: {min_value: -0.5, max_value: 0.5}}
-    ang_vel_z: {type: SymmetricFastLpacSampleOnReset, params: {group: velocity, min_value: 0.0, max_value: 2.0, num_cell: 4}}
+    lin_vel_x: {type: UniformOnReset, params: {min_value: 0.0, max_value: 0.0}}
+    lin_vel_y: {type: UniformOnReset, params: {min_value: 0.0, max_value: 0.0}}
+    ang_vel_z: {type: UniformOnReset, params: {min_value: 0.0, max_value: 0.0}}
 
 
 observation_manager_config:
@@ -61,8 +61,7 @@ termination_manager_config:
 
 
 curriculum_manager_config:
-  terms:
-    fast_lpac_command_reward: {max_cells: 100000}
+  terms: {}
 
 
 event_manager_config: {}

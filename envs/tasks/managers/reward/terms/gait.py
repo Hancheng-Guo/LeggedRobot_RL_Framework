@@ -1,8 +1,10 @@
 import torch
+from collections.abc import Sequence
 
 from envs.simulators.utils.context import ModelContext
 from envs.tasks.managers.reward.terms.base import BaseRewardTerm
 from envs.tasks.managers.reward.terms.registry import register_reward
+from envs.tasks.managers.reward.terms.utils import command_vector
 from envs.tasks.utils.context import TaskContext
 
 
@@ -12,6 +14,21 @@ _HALF_PERIOD_DURATION_NAME = "half_period_duration"
 
 _LANDED_DISTANCE_FACTOR = -1.0
 _LIFTED_DISTANCE_FACTOR = -0.25
+
+_IDLE_SPEED_THRESHOLD = 1.0e-7
+_TROT_LOOPS = {
+    False: ((0b1111, 0),),
+    True: (
+        (0b1111, 2),
+        (0b1011, 1),
+        (0b1001, 4),
+        (0b1101, 3),
+        (0b1111, 2),
+        (0b0111, 1),
+        (0b0110, 4),
+        (0b1110, 3),
+    ),
+}
 
 
 def _named_tensor_squeeze(
@@ -24,6 +41,140 @@ def _named_tensor_squeeze(
     if name in task_context.state:
         return task_context.state[name].squeeze(-1)
     raise ValueError(f"'{name}' is missing from task context.")
+
+
+@register_reward
+class TrotLoopDurationTanh(BaseRewardTerm):
+
+    def __init__(
+        self,
+        num_envs: int,
+        model_context: ModelContext,
+        command_names: Sequence[str] = (
+            "lin_vel_x",
+            "lin_vel_y",
+            "ang_vel_z",
+        ),
+        growth_rate: float = 1.0,
+        *args, **kwargs,
+    ) -> None:
+
+        super().__init__(*args, **kwargs)
+
+        if model_context.geom_foot_ids.numel() != 4:
+            raise ValueError(
+                "TrotLoopDurationTanh requires exactly four foot geoms."
+            )
+        if not command_names or any(
+            not isinstance(name, str) or not name
+            for name in command_names
+        ):
+            raise ValueError("'command_names' must contain valid names.")
+
+        self.command_names = tuple(command_names)
+        self.growth_rate = growth_rate
+        self.gait_is_moving: list[bool | None] = [None] * num_envs
+        self.gait_phases: list[list[int]] = [
+            [] for _ in range(num_envs)
+        ]
+        self.gait_loop_duration = torch.zeros(
+            num_envs,
+            dtype=self.context.dtype,
+            device=self.context.device,
+        )
+
+
+    @staticmethod
+    def _initial_phases(
+        loop: tuple[tuple[int, int], ...],
+        foot_state: int,
+    ) -> list[int]:
+        
+        return [
+            phase
+            for phase, (state, _) in enumerate(loop)
+            if foot_state == state
+        ]
+
+
+    @staticmethod
+    def _next_phases(
+        loop: tuple[tuple[int, int], ...],
+        phases: list[int],
+        foot_state: int,
+    ) -> list[int]:
+        
+        next_phases: list[int] = []
+        for phase in phases:
+            max_advance = loop[phase][1]
+            for advance in range(max_advance + 1):
+                candidate = (phase + advance) % len(loop)
+                if loop[candidate][0] == foot_state:
+                    next_phases.append(candidate)
+                    break
+
+        return next_phases
+
+
+    def compute(
+        self,
+        task_context: TaskContext,
+    ) -> torch.Tensor:
+        
+        foot_contact = task_context.state["foot_ground_contact"].any(dim=1)
+        bit_weights = 2 ** torch.arange(
+            foot_contact.shape[-1] - 1,
+            -1,
+            -1,
+            dtype=torch.long,
+            device=foot_contact.device,
+        )
+        foot_states = (
+            foot_contact.long() @ bit_weights
+        ).detach().cpu().tolist()
+        speed = torch.linalg.vector_norm(
+            command_vector(task_context, self.command_names),
+            dim=-1,
+        )
+        moving = (speed >= _IDLE_SPEED_THRESHOLD).detach().cpu().tolist()
+
+        for env_id, (is_moving, foot_state) in enumerate(
+            zip(moving, foot_states)
+        ):
+            loop = _TROT_LOOPS[is_moving]
+            phases = self.gait_phases[env_id]
+            if is_moving == self.gait_is_moving[env_id] and phases:
+                phases = self._next_phases(loop, phases, foot_state)
+            else:
+                self.gait_is_moving[env_id] = is_moving
+                phases = self._initial_phases(loop, foot_state)
+            self.gait_phases[env_id] = phases
+
+            if phases:
+                self.gait_loop_duration[env_id] += task_context.step_dt
+            else:
+                self.gait_loop_duration[env_id] = 0.0
+
+        return torch.tanh(
+            self.growth_rate * self.gait_loop_duration
+        )
+
+
+    def reset(
+        self,
+        env_ids: torch.Tensor | None = None,
+    ) -> None:
+
+        if env_ids is None:
+            self.gait_loop_duration.zero_()
+            self.gait_is_moving = [None] * len(self.gait_is_moving)
+            self.gait_phases = [[] for _ in self.gait_phases]
+            return
+
+        self.gait_loop_duration[env_ids] = 0.0
+        for env_id in env_ids.cpu().tolist():
+            self.gait_is_moving[env_id] = None
+            self.gait_phases[env_id] = []
 
 
 @register_reward

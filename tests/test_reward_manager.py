@@ -421,7 +421,7 @@ def test_trot_loop_duration_tracks_valid_contact_sequence_and_resets(
         num_envs=2,
         context=runtime_context,
         model_context=gait_model_context,
-        gain=2.0,
+        growth_rate=2.0,
     )
     task_context = TaskContext(
         state={

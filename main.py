@@ -7,7 +7,7 @@ if os.name == "nt":
 from app.application_entry import ApplicationEntry
 
 
-with ApplicationEntry("unitree_go1_cuda") as application:
+with ApplicationEntry("unitree_go1_velocity") as application:
     application.train()
     application.save()
     application.play(num_steps=500, formats="gif")

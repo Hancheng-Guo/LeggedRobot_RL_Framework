@@ -122,16 +122,12 @@ class TrotLoopDurationTanh(BaseRewardTerm):
     ) -> torch.Tensor:
         
         foot_contact = task_context.state["foot_ground_contact"].any(dim=1)
-        bit_weights = 2 ** torch.arange(
-            foot_contact.shape[-1] - 1,
-            -1,
-            -1,
-            dtype=torch.long,
-            device=foot_contact.device,
-        )
         foot_states = (
-            foot_contact.long() @ bit_weights
-        ).detach().cpu().tolist()
+            foot_contact[:, 0].long() * 0b1000
+            + foot_contact[:, 1].long() * 0b0100
+            + foot_contact[:, 2].long() * 0b0010
+            + foot_contact[:, 3].long()
+        ).cpu().tolist()
         speed = torch.linalg.vector_norm(
             command_vector(task_context, self.command_names),
             dim=-1,

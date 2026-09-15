@@ -339,7 +339,17 @@ class StageManager:
         self.runner.stage_update(stage_callback)
         
 
-    def test(self, *args, **kwargs) -> None:
+    def test(
+        self,
+        *args, **kwargs
+    ) -> None:
+
+        if hasattr(self, "runner"):
+            if self.continue_training:
+                logger.warning("Model is not trained completely.")
+            self.runner.stage_update(None)
+            self.runner.test(*args, **kwargs)
+            return
 
         checkpoint_path = self._prepare_evaluation_stage()
         if self.continue_training:
@@ -360,6 +370,13 @@ class StageManager:
         self,
         *args, **kwargs
     ) -> None:
+
+        if hasattr(self, "runner"):
+            if self.continue_training:
+                logger.warning("Model is not trained completely.")
+            self.runner.stage_update(None)
+            self.runner.play(*args, **kwargs)
+            return
 
         checkpoint_path = self._prepare_evaluation_stage()
         if self.continue_training:

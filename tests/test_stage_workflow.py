@@ -8,6 +8,7 @@ from app.stage_manager import StageManager
 from app.utils.context import RuntimeContext
 from runners.base import BaseRunner
 from runners.callbacks.stage import StageCallback
+from runners.utils.frames import VideoFormat, VideoFormats
 
 
 class WorkflowRunner(BaseRunner):
@@ -71,7 +72,11 @@ class WorkflowRunner(BaseRunner):
     def test(self, num_episodes: int = 1000) -> None:
         self.test_calls.append(num_episodes)
 
-    def play(self, num_steps: int = 5000) -> None:
+    def play(
+        self,
+        num_steps: int = 5000,
+        formats: VideoFormat | VideoFormats = "gif",
+    ) -> None:
         self.play_calls.append(num_steps)
 
     def close(self) -> None:
@@ -239,6 +244,6 @@ def test_application_entry_can_test_and_play_after_training(
 
     assert manager.current_stage == len(manager.stage_detail)
     assert runner.stage_callback is None
-    assert runner.max_iterations_history == [3, 5, 5, 5]
+    assert runner.max_iterations_history == [3, 5]
     assert runner.test_calls == [7]
     assert runner.play_calls == [11]

@@ -46,8 +46,10 @@ class ProgressBarCallback(BaseCallback):
     ) -> bool:
         
         self._last_length = 0
-        self._completed_iterations = 0
-        self._completed_steps = 0
+        self._completed_iterations = self.runner.current_iteration + 1
+        self._completed_steps = (
+            self._completed_iterations * self.rollout_length
+        )
         self._cursor_position = 0
         now = monotonic()
         self._last_refresh_time = now

@@ -105,13 +105,14 @@ class ApplicationEntry:
         if base_config_file.is_file():
             return runtime_dir, runtime_dir     # load_dir, save_dir
 
-        warnings.warn(f"checkpoint directory '{runtime_dir}' is incomplete.")
-
-        return Path("."), runtime_dir           # load_dir, save_dir
+        raise FileNotFoundError(
+            f"Checkpoint directory '{runtime_dir}' is incomplete."
+        )
 
 
     def train(self) -> None:
         self._ensure_open()
+        self._save_configs()
         self.stage_manager.train()
 
 
@@ -127,6 +128,11 @@ class ApplicationEntry:
 
     def save(self) -> Path:
         self._ensure_open()
+        self._save_configs()
+        return self.stage_manager.save()
+
+
+    def _save_configs(self) -> None:
         config_source = self.load_dir / "configs"
         config_destination = self.save_dir / "configs"
         if (
@@ -138,7 +144,6 @@ class ApplicationEntry:
                 config_destination,
                 dirs_exist_ok=True,
             )
-        return self.stage_manager.save()
 
 
     def close(self) -> None:

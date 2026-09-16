@@ -40,6 +40,7 @@ class OnPolicyRunner(BaseRunner):
         self._component: Component | None = None
         self._callback_configs: Sequence[str | Mapping[str, Any]] | None = None
         self._pending_checkpoint_payload: Mapping[str, Any] | None = None
+        self._pending_callback_states: Sequence[Mapping[str, Any]] | None = None
         
         self.current_iteration = -1
 
@@ -362,6 +363,7 @@ class OnPolicyRunner(BaseRunner):
         if not self._run_callbacks("_on_train_start"):
             self._run_callbacks("_on_train_end")
             return
+        self._load_pending_callback_states()
 
         for iteration in range(
             self.current_iteration + 1,
@@ -428,7 +430,12 @@ class OnPolicyRunner(BaseRunner):
             runner_info = self._get_info()
             info = update_info | runner_info
 
-            if not self._run_callbacks("_on_iteration_end", info=info):
+            should_continue = self._run_callbacks(
+                "_on_iteration_end",
+                info=info,
+            )
+            self._run_callbacks("_on_iteration_finalize", info=info)
+            if not should_continue:
                 break
 
             if callback_step_break:
@@ -736,6 +743,13 @@ class OnPolicyRunner(BaseRunner):
             "current_iteration": self.current_iteration,
             "stage_index": self.stage_index,
             "algorithm": self.algorithm.checkpoint_state_dict(),
+            "callbacks": [
+                {
+                    "type": type(callback).__name__,
+                    "state": callback.checkpoint_state_dict(),
+                }
+                for callback in self.callbacks
+            ],
         }
 
 
@@ -775,7 +789,35 @@ class OnPolicyRunner(BaseRunner):
             load_optimizer=load_optimizer,
         )
         self.current_iteration = current_iteration
+        callback_states = runner_state.get("callbacks")
+        if callback_states is not None:
+            if not isinstance(callback_states, Sequence):
+                raise TypeError("Checkpoint 'callbacks' must be a sequence.")
+            self._pending_callback_states = callback_states
         self._pending_checkpoint_payload = None
+
+
+    def _load_pending_callback_states(self) -> None:
+        callback_states = self._pending_callback_states
+        if callback_states is None:
+            return
+        if len(callback_states) != len(self.callbacks):
+            raise RuntimeError(
+                "Checkpoint callback count does not match current configuration."
+            )
+        for callback, entry in zip(self.callbacks, callback_states):
+            expected_type = type(callback).__name__
+            if entry.get("type") != expected_type:
+                raise RuntimeError(
+                    "Checkpoint callback order does not match current "
+                    f"configuration: expected {expected_type!r}, got "
+                    f"{entry.get('type')!r}."
+                )
+            state = entry.get("state", {})
+            if not isinstance(state, Mapping):
+                raise TypeError("Checkpoint callback state must be a mapping.")
+            callback.load_checkpoint_state_dict(state)
+        self._pending_callback_states = None
 
 
     def prepare_checkpoint_load(

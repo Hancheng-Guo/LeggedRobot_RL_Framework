@@ -1,6 +1,6 @@
 import math
 from collections import deque
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from enum import Enum, auto
 from numbers import Real
 from typing import Any
@@ -86,10 +86,10 @@ class AdaptiveLearningRateCallback(BaseCallback):
         self.min_learning_rate = min_learning_rate
         self.max_learning_rate = max_learning_rate
 
-        self._algorithm: BaseAlgorithm
-        self._buffer: deque[float]
-        self._hold_current_iters: int
         self._buffer_len = int(buffer_len)
+        self._algorithm: BaseAlgorithm
+        self._buffer: deque[float] = deque(maxlen=self._buffer_len)
+        self._hold_current_iters = self._buffer_len - 1
         
 
 
@@ -192,3 +192,32 @@ class AdaptiveLearningRateCallback(BaseCallback):
         if adjustment is LearningRateAdjustment.INCREASE:
             return learning_rate / self.factor
         return learning_rate * self.factor
+
+
+    def checkpoint_state_dict(self) -> dict[str, Any]:
+        return {
+            "buffer": list(self._buffer),
+            "hold_current_iters": self._hold_current_iters,
+        }
+
+
+    def load_checkpoint_state_dict(
+        self,
+        state: Mapping[str, Any],
+    ) -> None:
+
+        buffer = state.get("buffer", ())
+        hold_current_iters = state.get("hold_current_iters", 0)
+        if not isinstance(buffer, Sequence) or isinstance(buffer, str):
+            raise TypeError(
+                "Adaptive learning-rate buffer must be a sequence."
+            )
+        if not isinstance(hold_current_iters, int):
+            raise TypeError(
+                "Adaptive learning-rate hold counter must be an integer."
+            )
+        self._buffer = deque(
+            (float(value) for value in buffer),
+            maxlen=self._buffer_len,
+        )
+        self._hold_current_iters = hold_current_iters

@@ -97,3 +97,33 @@ class EarlystoppingCallback(BaseCallback):
         if self.mode == "min":
             return value < self.best_value - self.min_delta
         return value > self.best_value + self.min_delta
+
+
+    def checkpoint_state_dict(self) -> dict[str, Any]:
+        return {
+            "best_value": self.best_value,
+            "no_improve_iters": self.no_improve_iters,
+            "observed_iters": self.observed_iters,
+        }
+
+
+    def load_checkpoint_state_dict(
+        self,
+        state: Mapping[str, Any],
+    ) -> None:
+        best_value = state.get("best_value")
+        if best_value is not None:
+            best_value = float(best_value)
+        no_improve_iters = state.get("no_improve_iters", 0)
+        observed_iters = state.get("observed_iters", 0)
+        if not isinstance(no_improve_iters, int):
+            raise TypeError(
+                "Early-stopping no-improvement counter must be an integer."
+            )
+        if not isinstance(observed_iters, int):
+            raise TypeError(
+                "Early-stopping observed counter must be an integer."
+            )
+        self.best_value = best_value
+        self.no_improve_iters = no_improve_iters
+        self.observed_iters = observed_iters

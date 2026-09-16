@@ -41,6 +41,15 @@ class DummyAlgorithm:
             },
         }
 
+    def load_checkpoint_state_dict(
+        self,
+        state: dict[str, Any],
+        load_optimizer: bool = False,
+    ) -> None:
+        self.policy.load_state_dict(state["policy"]["state_dict"])
+        if load_optimizer:
+            self.optimizer.load_state_dict(state["optimizer"])
+
     def save_module_artifacts(self, directory: Path) -> list[Path]:
         return []
 
@@ -56,7 +65,7 @@ def make_runner() -> BaseRunner:
 def make_context(save_dir: Path) -> RuntimeContext:
     return cast(
         RuntimeContext,
-        SimpleNamespace(save_dir=save_dir),
+        SimpleNamespace(save_dir=save_dir, device="cpu"),
     )
 
 
@@ -205,6 +214,68 @@ def test_runner_builds_adaptive_learning_rate_from_yaml_style_config(
     assert callback.lower_bound == pytest.approx(0.005)
     assert callback.upper_bound == pytest.approx(0.02)
     assert callback.factor == pytest.approx(0.5)
+
+
+def test_runner_checkpoint_restores_callback_runtime_state(
+    tmp_path: Path,
+) -> None:
+    source = make_checkpoint_runner(tmp_path, stage_index=1)
+    source.max_iterations = 20
+    source.rollout_length = 4
+    source._build_callbacks(callbacks=[{
+        "adaptive_learning_rate": {
+            "monitor": "rollout/approx_kl",
+            "allowed_range": [0.01, 0.02],
+            "factor": 0.5,
+            "buffer_len": 3,
+        },
+    }])
+    source_callback = cast(
+        AdaptiveLearningRateCallback,
+        source.callbacks[0],
+    )
+    source_callback._on_train_start()
+    source_callback._on_iteration_end({"rollout/approx_kl": 0.012})
+    source_callback._on_iteration_end({"rollout/approx_kl": 0.013})
+    checkpoint_path = source.save(tmp_path / "resume.pt")
+
+    restored = make_checkpoint_runner(tmp_path, stage_index=1)
+    restored.max_iterations = 20
+    restored.rollout_length = 4
+    restored.prepare_checkpoint_load(checkpoint_path)
+    restored._build_callbacks(callbacks=[{
+        "adaptive_learning_rate": {
+            "monitor": "rollout/approx_kl",
+            "allowed_range": [0.01, 0.02],
+            "factor": 0.5,
+            "buffer_len": 3,
+        },
+    }])
+    restored.load(load_optimizer=True)
+    restored_callback = cast(
+        AdaptiveLearningRateCallback,
+        restored.callbacks[0],
+    )
+    restored_callback._on_train_start()
+    restored._load_pending_callback_states()
+
+    assert list(restored_callback._buffer) == pytest.approx([0.012, 0.013])
+    assert restored_callback._hold_current_iters == 0
+
+
+def test_progress_bar_resumes_from_runner_iteration() -> None:
+    runner = make_runner()
+    runner.current_iteration = 4
+    callback = ProgressBarCallback(
+        runner=runner,
+        max_iterations=10,
+        rollout_length=8,
+    )
+
+    callback._on_train_start()
+
+    assert callback._completed_iterations == 5
+    assert callback._completed_steps == 40
 
 
 def test_early_stopping_rejects_missing_metric() -> None:
@@ -580,6 +651,7 @@ def test_checkpoint_callback_saves_policy_and_optimizer(
         save_iter_interval=1,
     )
     callback._on_iteration_end({"ppo/loss": 1.0})
+    callback._on_iteration_finalize()
 
     checkpoint_path = (
         tmp_path / "checkpoints" / "checkpoint_00000001.pt"
@@ -615,6 +687,7 @@ def test_checkpoint_callback_uses_stage_directory(
         stage_index=1,
     )
     callback._on_iteration_end({"ppo/loss": 1.0})
+    callback._on_iteration_finalize()
 
     checkpoint_path = (
         tmp_path
@@ -674,6 +747,7 @@ def test_progress_bar_reports_completed_iteration(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     runner = make_runner()
+    runner.current_iteration = -1
     callback = ProgressBarCallback(
         runner=runner,
         max_iterations=2,

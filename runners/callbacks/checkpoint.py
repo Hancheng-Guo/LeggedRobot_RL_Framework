@@ -66,6 +66,14 @@ class CheckpointCallback(BaseCallback):
     ) -> bool:
 
         self.global_iteration += 1
+        return True
+
+
+    def _on_iteration_finalize(
+        self,
+        *args, **kwargs,
+    ) -> bool:
+
         if self.global_iteration % self.save_iter_interval == 0:
             self._save()
         return True

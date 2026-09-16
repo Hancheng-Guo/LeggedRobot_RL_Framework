@@ -235,3 +235,27 @@ class StageCallback(BaseCallback):
             return float(value)
         
         raise TypeError(f"Stage metric {metric!r} must be numeric.")
+
+
+    def checkpoint_state_dict(self) -> dict[str, Any]:
+        return {
+            "stop_training": self.stop_training,
+            "condition_values": [
+                list(condition.values)
+                for condition in self._conditions
+            ],
+        }
+
+
+    def load_checkpoint_state_dict(
+        self,
+        state: Mapping[str, Any],
+    ) -> None:
+        condition_values = state.get("condition_values", ())
+        if len(condition_values) != len(self._conditions):
+            raise ValueError(
+                "Checkpoint stage-condition count does not match configuration."
+            )
+        for condition, values in zip(self._conditions, condition_values):
+            condition.values.extend(float(value) for value in values)
+        self.stop_training = bool(state.get("stop_training", False))

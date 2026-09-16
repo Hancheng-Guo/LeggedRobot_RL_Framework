@@ -1,7 +1,11 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
+
+import pytest
 
 from app.application_entry import ApplicationEntry
 from app.stage_manager import StageManager
@@ -9,6 +13,46 @@ from app.utils.context import RuntimeContext
 from runners.base import BaseRunner
 from runners.callbacks.stage import StageCallback
 from runners.utils.frames import VideoFormat, VideoFormats
+
+
+def test_application_train_archives_configs_before_training(
+    tmp_path: Path,
+) -> None:
+    load_dir = tmp_path / "source"
+    save_dir = tmp_path / "run"
+    config_dir = load_dir / "configs"
+    config_dir.mkdir(parents=True)
+    (config_dir / "app.yaml").write_text("runtime: {}", encoding="utf-8")
+    trained: list[bool] = []
+
+    application = ApplicationEntry.__new__(ApplicationEntry)
+    application.load_dir = load_dir
+    application.save_dir = save_dir
+    application.stage_manager = cast(
+        Any,
+        SimpleNamespace(train=lambda: trained.append(True)),
+    )
+    application._closed = False
+
+    application.train()
+
+    assert trained == [True]
+    assert (save_dir / "configs" / "app.yaml").read_text(
+        encoding="utf-8",
+    ) == "runtime: {}"
+
+
+def test_application_rejects_incomplete_historical_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    application = ApplicationEntry.__new__(ApplicationEntry)
+    application.app_name = "missing"
+    application.train_time = datetime(2026, 1, 2, 3, 4, 5)
+
+    with pytest.raises(FileNotFoundError, match="missing.*yaml"):
+        application._get_runtime_dir(skip_check=False)
 
 
 class WorkflowRunner(BaseRunner):
@@ -237,6 +281,8 @@ def test_application_entry_can_test_and_play_after_training(
     assert isinstance(runner, WorkflowRunner)
     application = ApplicationEntry.__new__(ApplicationEntry)
     application.stage_manager = manager
+    application.load_dir = tmp_path
+    application.save_dir = tmp_path
 
     application.train()
     application.test(num_episodes=7)

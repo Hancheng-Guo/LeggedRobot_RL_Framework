@@ -36,6 +36,7 @@ class TensorboardCallback(BaseCallback):
         log_dir: str = "tensorboard",
         step_log_interval: int = 1,
         histogram_step_interval: int = 100,
+        flush_secs: int = 10,
         step_metrics: Mapping[str, Sequence[str]] | None = None,
         stage_index: int | None = None,
         *args, **kwargs,
@@ -47,12 +48,19 @@ class TensorboardCallback(BaseCallback):
             raise ValueError(
                 "'histogram_step_interval' must be greater than 0."
             )
+        if (
+            not isinstance(flush_secs, int)
+            or isinstance(flush_secs, bool)
+            or flush_secs <= 0
+        ):
+            raise ValueError("'flush_secs' must be a positive integer.")
         if not log_dir:
             raise ValueError("'log_dir_name' cannot be empty.")
 
         self.runner = runner
         self.step_log_interval = step_log_interval
         self.histogram_step_interval = histogram_step_interval
+        self.flush_secs = flush_secs
         self.step_metrics = self._validate_step_metrics(step_metrics)
         self.tensorboard_root_dir = Path(context.save_dir) / log_dir
         self.tensorboard_log_dir = (
@@ -62,7 +70,8 @@ class TensorboardCallback(BaseCallback):
         )
 
         self.writer = SummaryWriter(
-            log_dir=str((self.tensorboard_log_dir).resolve())
+            log_dir=str((self.tensorboard_log_dir).resolve()),
+            flush_secs=self.flush_secs,
         )
         
         self.global_step = 0

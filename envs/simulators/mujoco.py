@@ -1,3 +1,10 @@
+import os
+
+
+if os.name == "nt":
+    os.environ.setdefault("MUJOCO_GL", "wgl")
+
+
 import mujoco
 import torch
 import warnings

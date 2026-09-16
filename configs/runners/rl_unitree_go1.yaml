@@ -10,13 +10,15 @@ callbacks:
       save_iter_interval: 100
   - logging
   - tensorboard:
-      histogram_step_interval: 500
+      step_log_interval: 10
+      histogram_step_interval: 10000
+      initial_load_timeout: 1200
+      max_reload_threads: 4
       step_metrics:
         "reward": [value]
         "reward/*": [mean]
         "termination/*": [mean]
         "command/*": [histogram]
-        "observation/*": [histogram]
         "curriculum/*": [histogram]
 #   - early_stopping: 
 #       monitor: "*/loss"

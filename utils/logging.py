@@ -1,4 +1,5 @@
 import logging
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -14,10 +15,31 @@ def get_logger(name: str | None = None) -> logging.Logger:
     return logging.getLogger(f"{LOGGER_NAME}.{name}")
 
 
+@dataclass
+class LoggingSession:
+    logger: logging.Logger
+    handlers: list[logging.Handler] = field(default_factory=list)
+    _closed: bool = False
+
+    def flush(self) -> None:
+        for handler in self.handlers:
+            handler.flush()
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        for handler in self.handlers:
+            handler.flush()
+            handler.close()
+            self.logger.removeHandler(handler)
+        self.handlers.clear()
+        self._closed = True
+
+
 def configure_logging(
     log_file: Path,
     console: bool = True,
-) -> tuple[logging.Logger, list[logging.Handler]]:
+) -> LoggingSession:
     
     logger = get_logger()
     logger.setLevel(logging.INFO)
@@ -37,16 +59,4 @@ def configure_logging(
 
     for handler in handlers:
         logger.addHandler(handler)
-    return logger, handlers
-
-
-def close_handlers(
-    logger: logging.Logger,
-    handlers: list[logging.Handler],
-) -> None:
-    
-    for handler in handlers:
-        handler.flush()
-        handler.close()
-        logger.removeHandler(handler)
-    handlers.clear()
+    return LoggingSession(logger=logger, handlers=handlers)

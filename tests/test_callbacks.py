@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -17,7 +18,7 @@ from runners.callbacks.adaptive_learning_rate import (
 from runners.base import BaseRunner
 from runners.on_policy import OnPolicyRunner
 from app.utils.context import RuntimeContext
-from utils.logging import get_logger
+from utils.logging import configure_logging, get_logger
 
 
 class DummyAlgorithm:
@@ -65,7 +66,10 @@ def make_runner() -> BaseRunner:
 def make_context(save_dir: Path) -> RuntimeContext:
     return cast(
         RuntimeContext,
-        SimpleNamespace(save_dir=save_dir, device="cpu"),
+        SimpleNamespace(
+            save_dir=save_dir,
+            device="cpu",
+        ),
     )
 
 
@@ -384,12 +388,12 @@ def test_runner_rebuilds_previous_callbacks_when_config_is_none(
 
 
 def test_logging_callback_writes_scalar_metrics(tmp_path: Path) -> None:
-    runner = make_runner()
-    callback = LoggingCallback(
-        runner=runner,
-        context=make_context(tmp_path),
+    session = configure_logging(
+        tmp_path / "logs" / "training.log",
         console=False,
     )
+    runner = make_runner()
+    callback = LoggingCallback(runner=runner)
     callback._on_train_start()
     callback._on_iteration_end({
         "runner/current_iter": 0,
@@ -397,7 +401,7 @@ def test_logging_callback_writes_scalar_metrics(tmp_path: Path) -> None:
         "structured": torch.ones(2),
     })
     callback._on_train_end()
-    callback._on_close()
+    session.close()
 
     content = (tmp_path / "logs" / "training.log").read_text(
         encoding="utf-8"
@@ -414,13 +418,12 @@ def test_logging_callback_writes_scalar_metrics(tmp_path: Path) -> None:
 def test_global_logger_uses_callback_handlers(
     tmp_path: Path,
 ) -> None:
-    callback = LoggingCallback(
-        runner=make_runner(),
-        context=make_context(tmp_path),
+    session = configure_logging(
+        tmp_path / "logs" / "training.log",
         console=False,
     )
     get_logger("tests").info("Message from another component.")
-    callback._on_close()
+    session.close()
 
     content = (tmp_path / "logs" / "training.log").read_text(
         encoding="utf-8"
@@ -440,6 +443,23 @@ def test_tensorboard_callback_writes_event_file(tmp_path: Path) -> None:
     event_files = list((tmp_path / "tensorboard").glob("events.out.*"))
     assert event_files
     assert event_files[0].stat().st_size > 0
+
+
+def test_tensorboard_validates_max_reload_threads(tmp_path: Path) -> None:
+    callback = TensorboardCallback(
+        runner=make_runner(),
+        context=make_context(tmp_path),
+        max_reload_threads=4,
+    )
+    assert callback.max_reload_threads == 4
+    callback._on_close()
+
+    with pytest.raises(ValueError, match="max_reload_threads"):
+        TensorboardCallback(
+            runner=make_runner(),
+            context=make_context(tmp_path),
+            max_reload_threads=0,
+        )
 
 
 def test_tensorboard_callback_writes_stage_event_file(
@@ -468,9 +488,11 @@ def test_tensorboard_reduces_configured_vector_metrics(
 ) -> None:
     class RecordingWriter:
         def __init__(self) -> None:
+            self.default_bins = [-10.0, 0.0, 10.0]
             self.scalars: dict[str, float] = {}
+            self.scalar_steps: dict[str, int] = {}
             self.histograms: list[str] = []
-            self.histogram_values: list[torch.Tensor] = []
+            self.histogram_values: list[dict[str, Any]] = []
 
         def add_scalar(
             self,
@@ -479,15 +501,15 @@ def test_tensorboard_reduces_configured_vector_metrics(
             step: int,
         ) -> None:
             self.scalars[name] = float(value)
+            self.scalar_steps[name] = step
 
-        def add_histogram(
+        def add_histogram_raw(
             self,
             name: str,
-            value: torch.Tensor,
-            step: int,
+            **kwargs: Any,
         ) -> None:
             self.histograms.append(name)
-            self.histogram_values.append(value.clone())
+            self.histogram_values.append(kwargs)
 
         def close(self) -> None:
             pass
@@ -503,7 +525,6 @@ def test_tensorboard_reduces_configured_vector_metrics(
             "action/action": ["mean", "std", "min", "max", "histogram"],
         },
     )
-    callback.writer.close()
     writer = RecordingWriter()
     callback.writer = cast(Any, writer)
     info = {
@@ -526,14 +547,76 @@ def test_tensorboard_reduces_configured_vector_metrics(
     assert writer.scalars["action/action/max"] == pytest.approx(5.0)
     assert not any(name.startswith("observation/") for name in writer.scalars)
     assert writer.histograms == []
+    accumulator = callback._pending_histograms["action/action"]
+    assert accumulator.counts.numel() == 2
+    assert int(accumulator.num.item()) == 4
 
     callback._on_step_end(info)
     assert writer.histograms == ["action/action/distribution"]
-    torch.testing.assert_close(
-        writer.histogram_values[0],
-        torch.tensor([-1.0, 1.0, 3.0, 5.0] * 2),
-    )
+    histogram = writer.histogram_values[0]
+    assert histogram["min"] == pytest.approx(-1.0)
+    assert histogram["max"] == pytest.approx(5.0)
+    assert histogram["num"] == 8
+    assert histogram["sum"] == pytest.approx(16.0)
+    assert histogram["sum_squares"] == pytest.approx(72.0)
+    assert histogram["bucket_limits"] == [-10.0, 0.0, 10.0]
+    assert histogram["bucket_counts"] == [0, 2, 6]
+    assert histogram["global_step"] == 2
     assert callback._pending_histograms == {}
+    callback._on_iteration_end({"rollout/loss": 0.25})
+    assert writer.scalar_steps["rollout/loss"] == callback.global_step
+    callback._on_close()
+
+
+def test_tensorboard_purges_events_after_resumed_checkpoint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    writer_arguments: dict[str, Any] = {}
+
+    class RecordingSummaryWriter:
+        def __init__(self, **kwargs: Any) -> None:
+            writer_arguments.update(kwargs)
+
+        def flush(self) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    class FakeTensorBoard:
+        def configure(self, argv: tuple[str, ...]) -> None:
+            pass
+
+        def launch(self) -> str:
+            logging.getLogger("tensorboard").info(
+                "TensorBoard done reloading. Load took 0.000 secs"
+            )
+            return "http://127.0.0.1:43123/"
+
+    monkeypatch.setattr(
+        tensorboard_module,
+        "SummaryWriter",
+        RecordingSummaryWriter,
+    )
+    monkeypatch.setattr(
+        tensorboard_module,
+        "TensorBoard",
+        FakeTensorBoard,
+    )
+    monkeypatch.setattr(TensorboardCallback, "_SERVER_URLS", {})
+    runner = make_runner()
+    runner.current_iteration = 4
+    runner.rollout_length = 8
+    callback = TensorboardCallback(
+        runner=runner,
+        context=make_context(tmp_path),
+    )
+
+    callback._on_train_start()
+
+    assert callback.global_step == 40
+    assert writer_arguments["purge_step"] == 41
     callback._on_close()
 
 
@@ -548,6 +631,9 @@ def test_tensorboard_starts_server_and_logs_returned_url(
             FakeTensorBoard.configured_argv = argv
 
         def launch(self) -> str:
+            logging.getLogger("tensorboard").info(
+                "TensorBoard done reloading. Load took 0.000 secs"
+            )
             return "http://127.0.0.1:43123/"
 
     monkeypatch.setattr(
@@ -560,15 +646,14 @@ def test_tensorboard_starts_server_and_logs_returned_url(
         runner=runner,
         context=make_context(tmp_path),
     )
-    logger = LoggingCallback(
-        runner=runner,
-        context=make_context(tmp_path),
+    logging_session = configure_logging(
+        tmp_path / "logs" / "training.log",
         console=False,
     )
-    runner.callbacks = [tensorboard, logger]
+    runner.callbacks = [tensorboard]
 
     tensorboard._on_train_start()
-    logger._on_close()
+    logging_session.close()
     tensorboard._on_close()
 
     content = (tmp_path / "logs" / "training.log").read_text(
@@ -582,6 +667,10 @@ def test_tensorboard_starts_server_and_logs_returned_url(
         str(tensorboard.tensorboard_log_dir),
         "--host",
         "0.0.0.0",
+        "--load_fast",
+        "false",
+        "--max_reload_threads",
+        "4",
     )
 
 
@@ -598,6 +687,9 @@ def test_tensorboard_reuses_server_across_stage_callbacks(
 
         def launch(self) -> str:
             FakeTensorBoard.launches += 1
+            logging.getLogger("tensorboard").info(
+                "TensorBoard done reloading. Load took 0.000 secs"
+            )
             return "http://127.0.0.1:43123/"
 
     monkeypatch.setattr(
@@ -632,6 +724,10 @@ def test_tensorboard_reuses_server_across_stage_callbacks(
         str((tmp_path / "tensorboard").resolve()),
         "--host",
         "0.0.0.0",
+        "--load_fast",
+        "false",
+        "--max_reload_threads",
+        "4",
     )]
     assert first.tensorboard_log_dir == (
         tmp_path / "tensorboard" / "stage_000"

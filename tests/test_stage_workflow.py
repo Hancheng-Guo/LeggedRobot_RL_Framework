@@ -94,12 +94,17 @@ def test_application_device_override_is_temporary(
         lambda **kwargs: SimpleNamespace(),
     )
 
-    with pytest.warns(UserWarning, match="'cuda' -> 'cpu'"):
-        application = ApplicationEntry("app", device="cpu")
+    application = ApplicationEntry("app", device="cpu")
 
     assert application.context is context
     assert received_runtime["device"] == "cpu"
     assert application.config["runtime"]["device"] == "cuda"
+    application.logging_session.close()
+    log_content = (tmp_path / "logs" / "training.log").read_text(
+        encoding="utf-8"
+    )
+    assert "Runtime device overridden" in log_content
+    assert "'cuda' -> 'cpu'" in log_content
 
 
 class WorkflowRunner(BaseRunner):

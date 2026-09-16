@@ -5,6 +5,10 @@ runtime:
   seed: None
   deterministic_ops: true
 
+logging:
+  file_name: training.log
+  console: true
+
 
 stage:
   - velocity_tracking:

@@ -7,6 +7,7 @@ from typing import Any, cast
 
 import pytest
 
+import app.application_entry as application_entry_module
 from app.application_entry import ApplicationEntry
 from app.stage_manager import StageManager
 from app.utils.context import RuntimeContext
@@ -53,6 +54,52 @@ def test_application_rejects_incomplete_historical_run(
 
     with pytest.raises(FileNotFoundError, match="missing.*yaml"):
         application._get_runtime_dir(skip_check=False)
+
+
+def test_application_device_override_is_temporary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = {
+        "runtime": {"device": "cuda", "dtype": "float32"},
+        "component": {},
+        "stage": [],
+    }
+    received_runtime: dict[str, Any] = {}
+    context = cast(RuntimeContext, SimpleNamespace(device="cpu"))
+
+    monkeypatch.setattr(
+        ApplicationEntry,
+        "_get_runtime_dir",
+        lambda self, skip_check: (tmp_path, tmp_path),
+    )
+    monkeypatch.setattr(
+        application_entry_module,
+        "load_yaml",
+        lambda path: config,
+    )
+
+    def create_context(**kwargs: Any) -> RuntimeContext:
+        received_runtime.update(kwargs["runtime_config"])
+        return context
+
+    monkeypatch.setattr(
+        application_entry_module,
+        "create_runtime_context",
+        create_context,
+    )
+    monkeypatch.setattr(
+        application_entry_module,
+        "StageManager",
+        lambda **kwargs: SimpleNamespace(),
+    )
+
+    with pytest.warns(UserWarning, match="'cuda' -> 'cpu'"):
+        application = ApplicationEntry("app", device="cpu")
+
+    assert application.context is context
+    assert received_runtime["device"] == "cpu"
+    assert application.config["runtime"]["device"] == "cuda"
 
 
 class WorkflowRunner(BaseRunner):

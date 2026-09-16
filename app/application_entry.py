@@ -14,6 +14,7 @@ class ApplicationEntry:
         self,
         app_name: str,
         train_time: str | None = None,
+        device: str | None = None,
     ) -> None:
         
         self.app_name: str
@@ -24,13 +25,14 @@ class ApplicationEntry:
         self.stage_manager: StageManager
         self._closed = False
 
-        self._setup(app_name, train_time)
+        self._setup(app_name, train_time, device)
 
     
     def _setup(
         self,
         app_name: str,
         train_time: str | None = None,
+        device: str | None = None,
     ) -> None:
 
         self.app_name = app_name
@@ -62,9 +64,19 @@ class ApplicationEntry:
             self.load_dir / "configs" / f"{self.app_name}.yaml"
         )
 
-        runtime_config = self.config.get("runtime")
-        if not isinstance(runtime_config, dict):
+        configured_runtime = self.config.get("runtime")
+        if not isinstance(configured_runtime, dict):
             raise ValueError("runtime config is not a instance of 'dict'")
+        runtime_config = dict(configured_runtime)
+        if device is not None:
+            configured_device = runtime_config.get("device")
+            runtime_config["device"] = device
+            warnings.warn(
+                "Runtime device overridden for this run: "
+                f"{configured_device!r} -> {device!r}. "
+                "The saved configuration is unchanged.",
+                stacklevel=2,
+            )
         self.context = create_runtime_context(
             runtime_config=runtime_config,
             load_dir=self.load_dir,
@@ -106,7 +118,7 @@ class ApplicationEntry:
             return runtime_dir, runtime_dir     # load_dir, save_dir
 
         raise FileNotFoundError(
-            f"Checkpoint directory '{runtime_dir}' is incomplete."
+            f"Historical training config is missing: {base_config_file}."
         )
 
 

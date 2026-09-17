@@ -1,0 +1,10 @@
+-r core.txt
+
+# Isaac Sim packages are hosted on NVIDIA's package index.
+--extra-index-url https://pypi.nvidia.com
+
+isaacsim-app==6.1.0.0
+isaacsim-core==6.1.0.0
+isaacsim-asset==6.1.0.0
+isaacsim-rl==6.1.0.0
+isaacsim-sensor==6.1.0.0

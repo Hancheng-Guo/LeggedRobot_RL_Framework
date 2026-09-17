@@ -1,15 +1,20 @@
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.utils.context import RuntimeContext
 from envs.base import BaseEnv
 from rl.algorithms.base import OnPolicyAlgorithm
 from runners.callbacks.base import BaseCallback
 from runners.callbacks.stage import StageCallback
-from runners.utils.frames import VideoFormat, VideoFormats
 from utils.component import Component
+
+
+if TYPE_CHECKING:
+    from runners.utils.frames import VideoFormat, VideoFormats
 
 
 class BaseRunner(ABC):

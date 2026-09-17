@@ -303,7 +303,9 @@ def test_play_restores_original_environment_after_failure(
     def fail_during_play(
         num_steps: int,
         formats: str | Sequence[str],
+        frame_saver: Any,
     ) -> None:
+        assert callable(frame_saver)
         assert runner.environment is not None
         assert runner.environment.num_envs == 1
         raise RuntimeError("play failed")

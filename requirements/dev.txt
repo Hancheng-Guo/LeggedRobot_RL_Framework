@@ -1,0 +1,5 @@
+-r mujoco.txt
+-r demo.txt
+
+pyright==1.1.411
+pytest==9.1.1

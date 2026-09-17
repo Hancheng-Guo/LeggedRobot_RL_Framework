@@ -1,10 +1,12 @@
+from __future__ import annotations
+
 import warnings
 import torch
 import numpy as np
 from pathlib import Path
 from collections import deque
-from collections.abc import Mapping, Sequence
-from typing import Any
+from collections.abc import Callable, Mapping, Sequence
+from typing import TYPE_CHECKING, Any
 
 from app.utils.context import RuntimeContext
 from runners.base import BaseRunner
@@ -12,11 +14,6 @@ from runners.callbacks.base import BaseCallback
 from runners.callbacks.stage import StageCallback
 from runners.callbacks.registry import CALLBACK_TYPE_MAP
 from utils.save import atomic_save
-from runners.utils.frames import (
-    VideoFormat,
-    VideoFormats,
-    save_frames_to_video,
-)
 from envs.base import BaseEnv
 from envs.registry import ENV_TYPE_MAP
 from rl.algorithms.base import OnPolicyAlgorithm
@@ -24,6 +21,10 @@ from rl.algorithms.registry import ALG_TYPE_MAP
 from utils.component import Component
 from utils.config import load_yaml
 from utils.param import update_attributes
+
+
+if TYPE_CHECKING:
+    from runners.utils.frames import VideoFormat, VideoFormats
 
 
 class OnPolicyRunner(BaseRunner):
@@ -602,6 +603,14 @@ class OnPolicyRunner(BaseRunner):
         num_steps: int = 5000,
         formats: VideoFormat | VideoFormats = "gif",
     ) -> None:
+        try:
+            from runners.utils.frames import save_frames_to_video
+        except ModuleNotFoundError as error:
+            raise ModuleNotFoundError(
+                "Playback requires the demo dependencies. Install them with "
+                "'python -m pip install -r requirements/demo.txt'."
+            ) from error
+
         if not hasattr(self, "environment"):
             raise RuntimeError("environment is not instantiated.")
 
@@ -622,7 +631,11 @@ class OnPolicyRunner(BaseRunner):
         self.environment = temporary_environment
 
         try:
-            self._play_steps(num_steps, formats)
+            self._play_steps(
+                num_steps,
+                formats,
+                save_frames_to_video,
+            )
         finally:
             self.algorithm.reset_policy_state()
             temporary_environment.close()
@@ -632,7 +645,8 @@ class OnPolicyRunner(BaseRunner):
     def _play_steps(
         self,
         num_steps: int,
-        formats: VideoFormat | VideoFormats = "gif",
+        formats: VideoFormat | VideoFormats,
+        frame_saver: Callable[..., list[Path]],
     ) -> None:
         if not hasattr(self, "environment"):
             raise RuntimeError("environment is not instantiated.")
@@ -686,7 +700,7 @@ class OnPolicyRunner(BaseRunner):
             step += 1
 
         if len(frames):
-            save_frames_to_video(
+            frame_saver(
                 frames,
                 directory=Path(self.context.save_dir) / "videos",
                 fps=self.environment.render_fps,

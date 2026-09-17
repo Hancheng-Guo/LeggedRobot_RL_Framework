@@ -1,0 +1,21 @@
+# Isaac Sim 6.1 constraints verified with Python 3.12 on Windows.
+# Isaac Sim owns this scientific Python stack independently of core.txt.
+
+absl-py==2.4.0
+etils==1.13.0
+filelock==3.25.2
+fsspec==2026.2.0
+grpcio==1.84.0
+Jinja2==3.1.6
+Markdown==3.10.3
+MarkupSafe==3.0.3
+mpmath==1.3.0
+networkx==3.6.1
+packaging==26.0
+protobuf==7.36.1
+setuptools==81.0.0
+sympy==1.14.0
+tensorboard-data-server==0.7.2
+typing_extensions==4.16.0
+Werkzeug==3.1.8
+zipp==4.1.0

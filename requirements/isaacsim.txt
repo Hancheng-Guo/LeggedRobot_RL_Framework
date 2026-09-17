@@ -1,7 +1,11 @@
 -r core.txt
 
+# Isaac Sim maintains its own scientific Python dependency stack.
 # Isaac Sim packages are hosted on NVIDIA's package index.
 --extra-index-url https://pypi.nvidia.com
+-c constraints/isaacsim.txt
+
+numpy==2.3.1
 
 isaacsim-app==6.1.0.0
 isaacsim-core==6.1.0.0

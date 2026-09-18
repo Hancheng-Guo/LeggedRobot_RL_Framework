@@ -246,7 +246,7 @@ def test_foot_state_duration_terms_use_new_names_and_update_each_foot(
         model_context,
         geom_names=("floor", "base", "thigh", "FL", "FR", "RL", "RR"),
         geom_body_ids=torch.arange(7),
-        geom_foot_ids=torch.tensor([3, 4, 5, 6]),
+        foot_geom_ids=torch.tensor([3, 4, 5, 6]),
     )
     manager = RewardManager(
         num_envs=2,
@@ -285,7 +285,7 @@ def test_foot_state_duration_ignores_low_force_contacts(
         model_context,
         geom_names=("floor", "base", "thigh", "FL", "FR", "RL", "RR"),
         geom_body_ids=torch.arange(7),
-        geom_foot_ids=torch.tensor([3, 4, 5, 6]),
+        foot_geom_ids=torch.tensor([3, 4, 5, 6]),
     )
     manager = RewardManager(
         num_envs=2,
@@ -319,7 +319,7 @@ def test_quadrupedal_foot_velocity_diff_matches_diagonal_feet(
         model_context,
         geom_names=("floor", "base", "thigh", "FL", "FR", "RL", "RR"),
         geom_body_ids=torch.arange(7),
-        geom_foot_ids=torch.tensor([3, 4, 5, 6]),
+        foot_geom_ids=torch.tensor([3, 4, 5, 6]),
     )
     manager = RewardManager(
         num_envs=2,
@@ -356,7 +356,7 @@ def test_quadrupedal_phase_gait_updates_phase_steps(
         model_context,
         geom_names=("floor", "base", "thigh", "FL", "FR", "RL", "RR"),
         geom_body_ids=torch.arange(7),
-        geom_foot_ids=torch.tensor([3, 4, 5, 6]),
+        foot_geom_ids=torch.tensor([3, 4, 5, 6]),
     )
     manager = RewardManager(
         num_envs=2,
@@ -415,7 +415,7 @@ def test_trot_loop_duration_tracks_valid_contact_sequence_and_resets(
         model_context,
         geom_names=("floor", "base", "thigh", "FL", "FR", "RL", "RR"),
         geom_body_ids=torch.arange(7),
-        geom_foot_ids=torch.tensor([3, 4, 5, 6]),
+        foot_geom_ids=torch.tensor([3, 4, 5, 6]),
     )
     term = TrotLoopDurationTanh(
         num_envs=2,
@@ -482,7 +482,7 @@ def test_quadrupedal_phase_gait_uses_base_plane_distance(
         model_context,
         geom_names=("floor", "base", "thigh", "FL", "FR", "RL", "RR"),
         geom_body_ids=torch.arange(7),
-        geom_foot_ids=torch.tensor([3, 4, 5, 6]),
+        foot_geom_ids=torch.tensor([3, 4, 5, 6]),
     )
     term = QuadrupedalGaitPhaseL2Exp(
         num_envs=1,

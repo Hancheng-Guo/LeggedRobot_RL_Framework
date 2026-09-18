@@ -29,11 +29,54 @@ def _configure_go1_simulator(
         model_path=model_path,
         sim_dt=0.002,
         frame_skip=1,
-        geom_foot_names=(),
-        geom_floor_names=(),
+        foot_geom_names=(),
+        floor_geom_names=(),
         reset_keyframe=reset_keyframe,
     )
     return simulator
+
+
+def test_mujoco_rejects_unsupported_render_mode(runtime_context):
+    simulator = _configure_go1_simulator(runtime_context)
+
+    try:
+        with pytest.raises(ValueError, match="Unsupported render mode"):
+            simulator.config_update(
+                component=Component(None, None, None, None, None, None),
+                render_mode="depth_array",
+            )
+    finally:
+        simulator.close()
+
+
+def test_mujoco_rejects_actuator_activation_states(runtime_context):
+    model = mujoco.MjModel.from_xml_string( # pyright: ignore[reportAttributeAccessIssue]
+        """
+        <mujoco>
+          <worldbody>
+            <body name="base">
+              <freejoint/>
+              <geom type="sphere" size="0.1"/>
+              <body name="link">
+                <joint name="joint" type="hinge"/>
+                <geom type="sphere" size="0.05"/>
+              </body>
+            </body>
+          </worldbody>
+          <actuator>
+            <general joint="joint" dyntype="filter" dynprm="0.1"/>
+          </actuator>
+        </mujoco>
+        """
+    )
+    simulator = MujocoSimulator(runtime_context)
+    simulator.models = [model]
+
+    with pytest.raises(
+        NotImplementedError,
+        match="actuator activation states are not supported",
+    ):
+        simulator._build_model_context()
 
 
 def test_mujoco_builds_observation_indices_from_model(runtime_context):
@@ -45,8 +88,8 @@ def test_mujoco_builds_observation_indices_from_model(runtime_context):
         / "go1.xml"
     )
     simulator = MujocoSimulator(runtime_context)
-    simulator.geom_foot_names = ("FR", "FL", "RR", "RL")
-    simulator.geom_floor_names = ()
+    simulator.foot_geom_names = ("FR", "FL", "RR", "RL")
+    simulator.floor_geom_names = ()
     simulator.models = [
         mujoco.MjModel.from_xml_path(str(model_path))   # pyright: ignore[reportAttributeAccessIssue]
     ]
@@ -62,7 +105,7 @@ def test_mujoco_builds_observation_indices_from_model(runtime_context):
     assert context.joint_qpos_ids.tolist() == list(range(7, 19))
     assert context.joint_qvel_ids.tolist() == list(range(6, 18))
     assert context.joint_default_pos.shape == (12,)
-    assert context.geom_foot_ids.tolist() == [
+    assert context.foot_geom_ids.tolist() == [
         context.geom_names.index(name)
         for name in ("FR", "FL", "RR", "RL")
     ]
@@ -79,8 +122,8 @@ def test_mujoco_scene_exposes_ground_and_body_geom_mapping(runtime_context):
         / "scene.xml"
     )
     simulator = MujocoSimulator(runtime_context)
-    simulator.geom_foot_names = ()
-    simulator.geom_floor_names = ("floor",)
+    simulator.foot_geom_names = ()
+    simulator.floor_geom_names = ("floor",)
     simulator.models = [
         mujoco.MjModel.from_xml_path(str(model_path))  # pyright: ignore[reportAttributeAccessIssue]
     ]
@@ -104,8 +147,8 @@ def test_mujoco_state_exposes_base_velocity_in_body_frame(runtime_context):
         / "go1.xml"
     )
     simulator = MujocoSimulator(runtime_context)
-    simulator.geom_foot_names = ()
-    simulator.geom_floor_names = ()
+    simulator.foot_geom_names = ()
+    simulator.floor_geom_names = ()
     simulator.models = [
         mujoco.MjModel.from_xml_path(str(model_path))  # pyright: ignore[reportAttributeAccessIssue]
     ]
@@ -126,7 +169,7 @@ def test_mujoco_state_exposes_base_velocity_in_body_frame(runtime_context):
     assert state["foot_ground_contact"].shape == (
         1,
         state["contact_geom_ids"].shape[1],
-        simulator.model_context.geom_foot_ids.numel(),
+        simulator.model_context.foot_geom_ids.numel(),
     )
 
 

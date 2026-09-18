@@ -1,2 +1,0 @@
-# Backwards-compatible default development environment.
--r requirements/dev.txt

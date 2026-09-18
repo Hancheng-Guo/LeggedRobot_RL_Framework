@@ -61,7 +61,7 @@ class TrotLoopDurationTanh(BaseRewardTerm):
 
         super().__init__(*args, **kwargs)
 
-        if model_context.geom_foot_ids.numel() != 4:
+        if model_context.foot_geom_ids.numel() != 4:
             raise ValueError(
                 "TrotLoopDurationTanh requires exactly four foot geoms."
             )
@@ -187,8 +187,8 @@ class QuadrupedalGaitPhaseL2Exp(BaseRewardTerm):
         
         super().__init__(*args, **kwargs)
 
-        self.geom_foot_ids = model_context.geom_foot_ids
-        if self.geom_foot_ids.numel() != 4:
+        self.foot_geom_ids = model_context.foot_geom_ids
+        if self.foot_geom_ids.numel() != 4:
             raise ValueError(
                 "QuadrupedalGaitPhaseL2Exp requires exactly four foot geoms."
             )
@@ -316,7 +316,7 @@ class QuadrupedalGaitPhaseL2Exp(BaseRewardTerm):
             keepdim=True,
         ).clamp_min(torch.finfo(quaternion.dtype).eps)
 
-        foot_pos = task_context.state["geom_xpos"][:, self.geom_foot_ids, :]
+        foot_pos = task_context.state["geom_xpos"][:, self.foot_geom_ids, :]
 
         w = quaternion[:, 0:1]
         xyz = quaternion[:, 1:4]

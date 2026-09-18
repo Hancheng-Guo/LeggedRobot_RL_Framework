@@ -1,15 +1,23 @@
 import torch
 import numpy as np
 from pathlib import Path
+from typing import Any
 from abc import ABC, abstractmethod
 
 from envs.simulators.utils.context import ModelContext
+from app.utils.context import RuntimeContext
 
 
 class BaseSimulator(ABC):
 
-    def __init__(self) -> None:
+    SUPPORTED_RENDER_MODES = frozenset(("human", "rgb_array"))
 
+    def __init__(
+        self,
+        context: RuntimeContext
+    ) -> None:
+
+        self.context = context
         self.num_envs: int
         self.model_path: Path
         self.sim_dt: float
@@ -42,6 +50,30 @@ class BaseSimulator(ABC):
         return (
             self.sim_dt *
             self.frame_skip
+        )
+
+
+    def _tensor(
+        self,
+        values: Any
+    ) -> torch.Tensor:
+
+        return torch.as_tensor(
+            values,
+            dtype=self.context.dtype,
+            device=self.context.device,
+        )
+
+
+    def _index_tensor(
+        self,
+        values: Any
+    ) -> torch.Tensor:
+
+        return torch.as_tensor(
+            values,
+            dtype=torch.long,
+            device=self.context.device,
         )
 
 

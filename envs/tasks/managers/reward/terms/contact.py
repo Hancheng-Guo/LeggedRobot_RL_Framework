@@ -20,17 +20,17 @@ class IllegalContactL1(BaseRewardTerm):
         
         super().__init__(*args, **kwargs)
 
-        if model_context.geom_floor_ids.numel() == 0:
+        if model_context.floor_geom_ids.numel() == 0:
             raise ValueError(
-                "IllegalContactL1 requires 'model_context.geom_floor_ids'."
+                "IllegalContactL1 requires 'model_context.floor_geom_ids'."
             )
         self.num_envs = num_envs
         self.legal_geom_ids = geom_ids_from_names(
             model_context,
             geom_legal_names or [],
-            fallback_ids=model_context.geom_foot_ids,
+            fallback_ids=model_context.foot_geom_ids,
         )
-        self.ground_geom_ids = model_context.geom_floor_ids
+        self.ground_geom_ids = model_context.floor_geom_ids
 
 
     def compute(

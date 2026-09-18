@@ -22,17 +22,17 @@ class FootStateDurationCommandWeighedExp(BaseRewardTerm):
         
         super().__init__(*args, **kwargs)
 
-        self.geom_foot_ids = model_context.geom_foot_ids
+        self.foot_geom_ids = model_context.foot_geom_ids
         self.sigma = sigma
         self.command_names = command_names
 
         self.last_foot_state = torch.zeros(
-            (num_envs, self.geom_foot_ids.numel()),
+            (num_envs, self.foot_geom_ids.numel()),
             dtype=torch.bool,
             device=self.context.device,
         )
         self.duration = torch.zeros(
-            (num_envs, self.geom_foot_ids.numel()),
+            (num_envs, self.foot_geom_ids.numel()),
             dtype=self.context.dtype,
             device=self.context.device,
         )
@@ -88,17 +88,17 @@ class FootStateDurationCubicCommandWeighedExp(BaseRewardTerm):
         
         super().__init__(*args, **kwargs)
 
-        self.geom_foot_ids = model_context.geom_foot_ids
+        self.foot_geom_ids = model_context.foot_geom_ids
         self.sigma = sigma
         self.command_names = command_names
 
         self.last_foot_state = torch.zeros(
-            (num_envs, self.geom_foot_ids.numel()),
+            (num_envs, self.foot_geom_ids.numel()),
             dtype=torch.bool,
             device=self.context.device,
         )
         self.duration = torch.zeros(
-            (num_envs, self.geom_foot_ids.numel()),
+            (num_envs, self.foot_geom_ids.numel()),
             dtype=self.context.dtype,
             device=self.context.device,
         )
@@ -152,7 +152,7 @@ class FootSlidingVelocityL2(BaseRewardTerm):
         
         super().__init__(*args, **kwargs)
 
-        self.geom_foot_ids = model_context.geom_foot_ids
+        self.foot_geom_ids = model_context.foot_geom_ids
 
 
     def compute(
@@ -161,7 +161,7 @@ class FootSlidingVelocityL2(BaseRewardTerm):
     ) -> torch.Tensor:
         
         landed = task_context.state["foot_ground_contact"].any(dim=1)
-        foot_xvel = task_context.state["geom_xvel"][:, self.geom_foot_ids, :]
+        foot_xvel = task_context.state["geom_xvel"][:, self.foot_geom_ids, :]
         foot_velocity = foot_xvel[..., 3:5]
         return torch.sum(
             (foot_velocity * landed.unsqueeze(-1)).square(),
@@ -181,7 +181,7 @@ class FootLiftHeightVelocityWeightedExp(BaseRewardTerm):
         
         super().__init__(*args, **kwargs)
 
-        self.geom_foot_ids = model_context.geom_foot_ids
+        self.foot_geom_ids = model_context.foot_geom_ids
         self.target_height = target_height
 
 
@@ -190,9 +190,9 @@ class FootLiftHeightVelocityWeightedExp(BaseRewardTerm):
         task_context: TaskContext
     ) -> torch.Tensor:
         
-        foot_height = task_context.state["geom_xpos"][:, self.geom_foot_ids, 2]
+        foot_height = task_context.state["geom_xpos"][:, self.foot_geom_ids, 2]
         foot_speed = torch.linalg.norm(
-            task_context.state["geom_xvel"][:, self.geom_foot_ids, 3:5],
+            task_context.state["geom_xvel"][:, self.foot_geom_ids, 3:5],
             dim=-1,
         )
         return torch.sum(
@@ -214,8 +214,8 @@ class QuadrupedalFootVelocityDiffL2(BaseRewardTerm):
         
         super().__init__(*args, **kwargs)
 
-        self.geom_foot_ids = model_context.geom_foot_ids
-        if self.geom_foot_ids.numel() != 4:
+        self.foot_geom_ids = model_context.foot_geom_ids
+        if self.foot_geom_ids.numel() != 4:
             raise ValueError("QuadrupedalFootVelocityDiffL2 requires exactly four feet.")
 
 
@@ -224,7 +224,7 @@ class QuadrupedalFootVelocityDiffL2(BaseRewardTerm):
         task_context: TaskContext
     ) -> torch.Tensor:
 
-        foot_xvel = task_context.state["geom_xvel"][:, self.geom_foot_ids, :]
+        foot_xvel = task_context.state["geom_xvel"][:, self.foot_geom_ids, :]
         foot_velocity = foot_xvel[..., 3:6]
         diagonal_diff = foot_velocity[:, [0, 1]] - foot_velocity[:, [3, 2]]
         return diagonal_diff.square().sum(dim=(-1, -2))
@@ -242,7 +242,7 @@ class FootContactWithoutCommand(BaseRewardTerm):
         
         super().__init__(*args, **kwargs)
 
-        self.geom_foot_ids = model_context.geom_foot_ids
+        self.foot_geom_ids = model_context.foot_geom_ids
         self.command_names = command_names
 
 

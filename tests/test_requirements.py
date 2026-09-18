@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from packaging.requirements import Requirement
@@ -8,7 +7,10 @@ from packaging.utils import canonicalize_name
 
 
 PROJECT_ROOT = Path(__file__).parents[1]
-ROOT_REQUIREMENTS = PROJECT_ROOT / "requirements.txt"
+ROOT_REQUIREMENTS = (
+    PROJECT_ROOT / "requirements-mujoco.txt",
+    PROJECT_ROOT / "requirements-isaacsim.txt",
+)
 
 
 def _parse_requirement_tree(
@@ -55,11 +57,13 @@ def _parse_requirement_tree(
             f"{path}:{line_number}: direct URL/path dependencies are not "
             "reproducible"
         )
-        specifiers = list(parsed.specifier)
-        assert len(specifiers) == 1 and specifiers[0].operator == "==", (
-            f"{path}:{line_number}: {parsed.name} must use one exact == pin"
-        )
         destination = constraints if constraint_file else requirements
+        if constraint_file:
+            specifiers = list(parsed.specifier)
+            assert len(specifiers) == 1 and specifiers[0].operator == "==", (
+                f"{path}:{line_number}: constraint {parsed.name} must use "
+                "one exact == pin"
+            )
         normalized_name = canonicalize_name(parsed.name)
         previous = destination.setdefault(normalized_name, parsed)
         assert str(previous.specifier) == str(parsed.specifier), (
@@ -67,55 +71,44 @@ def _parse_requirement_tree(
         )
 
 
-def _locked_requirements() -> tuple[
+def _locked_requirements(root: Path) -> tuple[
     dict[str, Requirement],
     dict[str, Requirement],
 ]:
     requirements: dict[str, Requirement] = {}
     constraints: dict[str, Requirement] = {}
     _parse_requirement_tree(
-        ROOT_REQUIREMENTS,
+        root,
         requirements,
         constraints,
     )
     return requirements, constraints
 
 
-def _installed_version(requirement: Requirement) -> str:
-    try:
-        return version(requirement.name)
-    except PackageNotFoundError as error:
-        raise AssertionError(
-            f"Required distribution {requirement.name!r} is not installed"
-        ) from error
+def test_requirement_profiles_are_reproducibly_locked() -> None:
+    for root in ROOT_REQUIREMENTS:
+        requirements, constraints = _locked_requirements(root)
 
+        assert requirements, f"{root}: no requirements found"
+        assert constraints, f"{root}: no constraints found"
 
-def test_requirements_use_only_exact_reproducible_pins() -> None:
-    requirements, constraints = _locked_requirements()
+        for name, requirement in requirements.items():
+            constraint = constraints.get(name)
+            effective = constraint or requirement
+            specifiers = list(effective.specifier)
+            assert (
+                len(specifiers) == 1 and specifiers[0].operator == "=="
+            ), (
+                f"{root}: {requirement.name} must be pinned directly or by "
+                "an exact constraint"
+            )
 
-    assert requirements
-    assert constraints
-
-
-def test_environment_matches_locked_requirements() -> None:
-    requirements, constraints = _locked_requirements()
-
-    for requirement in requirements.values():
-        installed = _installed_version(requirement)
-        assert requirement.specifier.contains(installed, prereleases=True), (
-            f"{requirement.name} {installed} does not match "
-            f"{requirement.specifier}"
-        )
-
-    # Constraints do not install packages themselves. If a constrained
-    # transitive dependency is present, however, its installed version must
-    # exactly match the lock.
-    for requirement in constraints.values():
-        try:
-            installed = version(requirement.name)
-        except PackageNotFoundError:
-            continue
-        assert requirement.specifier.contains(installed, prereleases=True), (
-            f"{requirement.name} {installed} does not match locked "
-            f"constraint {requirement.specifier}"
-        )
+            if constraint is not None:
+                locked_version = specifiers[0].version
+                assert requirement.specifier.contains(
+                    locked_version,
+                    prereleases=True,
+                ), (
+                    f"{root}: constraint {constraint} does not satisfy "
+                    f"requirement {requirement}"
+                )

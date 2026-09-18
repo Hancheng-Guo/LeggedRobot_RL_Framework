@@ -18,11 +18,11 @@ class BodyContact(BaseTerminationTerm):
         
         super().__init__(*args, **kwargs)
 
-        if model_context.geom_floor_ids.numel() == 0:
+        if model_context.floor_geom_ids.numel() == 0:
             raise ValueError(
-                "BodyContact requires 'model_context.geom_floor_ids'."
+                "BodyContact requires 'model_context.floor_geom_ids'."
             )
-        self.geom_floor_ids = model_context.geom_floor_ids
+        self.floor_geom_ids = model_context.floor_geom_ids
 
         self.geom_body_ids = self._extract_geom_ids(
             model_context,
@@ -87,8 +87,8 @@ class BodyContact(BaseTerminationTerm):
         geom2 = contact_geom_ids[..., 1]
         target_is_geom1 = torch.isin(geom1, self.geom_body_ids)
         target_is_geom2 = torch.isin(geom2, self.geom_body_ids)
-        ground_is_geom1 = torch.isin(geom1, self.geom_floor_ids)
-        ground_is_geom2 = torch.isin(geom2, self.geom_floor_ids)
+        ground_is_geom1 = torch.isin(geom1, self.floor_geom_ids)
+        ground_is_geom2 = torch.isin(geom2, self.floor_geom_ids)
 
         return (
             (target_is_geom1 & ground_is_geom2)

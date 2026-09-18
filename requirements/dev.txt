@@ -1,5 +1,3 @@
--r mujoco.txt
--r demo.txt
 -c constraints/dev.txt
 
 pyright==1.1.411

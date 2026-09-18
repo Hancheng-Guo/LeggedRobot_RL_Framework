@@ -35,6 +35,6 @@ class ModelContext:
 
     geom_names: tuple[str | None, ...]
     geom_body_ids: torch.Tensor
-    geom_foot_ids: torch.Tensor
-    geom_floor_ids: torch.Tensor
+    foot_geom_ids: torch.Tensor
+    floor_geom_ids: torch.Tensor
     # fatal_body_ids: torch.Tensor

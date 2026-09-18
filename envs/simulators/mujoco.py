@@ -7,11 +7,9 @@ if os.name == "nt":
 
 import mujoco
 import torch
-import warnings
 import numpy as np
 from mujoco import viewer
 from pathlib import Path
-from collections.abc import Callable
 
 from envs.simulators.base import BaseSimulator
 from envs.simulators.utils.context import ModelContext
@@ -27,14 +25,14 @@ class MujocoSimulator(BaseSimulator):
         context: RuntimeContext,
     ) -> None:
 
-        self.context = context
+        super().__init__(context)
 
         self.num_envs: int
         self.model_path: Path
         self.sim_dt: float
         self.frame_skip: int
-        self.geom_foot_names: tuple[str, ...]
-        self.geom_floor_names: tuple[str, ...]
+        self.foot_geom_names: tuple[str, ...]
+        self.floor_geom_names: tuple[str, ...]
         self.foot_contact_force_threshold: float = 15.0
         self.render_mode: str | None = None
         self.reset_keyframe: str | None = None
@@ -45,15 +43,6 @@ class MujocoSimulator(BaseSimulator):
         self.viewer = None
         self.renderer = None
 
-        self._RENDER_TYPE_MAP: dict[
-            str,
-            Callable[[], np.ndarray | None],
-        ] = {
-            "human": self._human_render,
-            "rgb_array": self._rgb_array_render
-        }
-
-
     def config_update(
         self,
         component: Component,
@@ -62,8 +51,8 @@ class MujocoSimulator(BaseSimulator):
         sim_dt: float | None = None,
         frame_skip: int | None = None,
         render_mode: str | None = None,
-        geom_foot_names: list[str] | tuple[str, ...] | None = None,
-        geom_floor_names: list[str] | tuple[str, ...] | None = None,
+        foot_geom_names: list[str] | tuple[str, ...] | None = None,
+        floor_geom_names: list[str] | tuple[str, ...] | None = None,
         foot_contact_force_threshold: float | None = None,
         reset_keyframe: str | None = None,
     ) -> None:
@@ -87,14 +76,14 @@ class MujocoSimulator(BaseSimulator):
             sim_dt=sim_dt,
             frame_skip=frame_skip,
             foot_contact_force_threshold=foot_contact_force_threshold,
-            geom_foot_names=(
-                tuple(geom_foot_names)
-                if geom_foot_names is not None
+            foot_geom_names=(
+                tuple(foot_geom_names)
+                if foot_geom_names is not None
                 else None
             ),
-            geom_floor_names=(
-                tuple(geom_floor_names)
-                if geom_floor_names is not None
+            floor_geom_names=(
+                tuple(floor_geom_names)
+                if floor_geom_names is not None
                 else None
             ),
         )
@@ -108,13 +97,9 @@ class MujocoSimulator(BaseSimulator):
             self.reset_keyframe = reset_keyframe
 
         if render_mode is not None:
-            if render_mode in self._RENDER_TYPE_MAP:
-                self.render_mode = render_mode
-            else:
-                warnings.warn(
-                    f"Unsupported render mode: {render_mode!r}."
-                )
-                self.render_mode = None
+            if render_mode not in self.SUPPORTED_RENDER_MODES:
+                raise ValueError(f"Unsupported render mode: {render_mode!r}.")
+            self.render_mode = render_mode
 
         self.models = [
             mujoco.MjModel.from_xml_path(   # pyright: ignore[reportAttributeAccessIssue]
@@ -149,6 +134,11 @@ class MujocoSimulator(BaseSimulator):
     def _build_model_context(self) -> None:
 
         model = self.models[0]
+        if model.na != 0:
+            raise NotImplementedError(
+                "MuJoCo actuator activation states are not supported; "
+                f"expected model.na == 0, got {model.na}."
+            )
         
         body_names = self._object_names(
             model,
@@ -192,22 +182,22 @@ class MujocoSimulator(BaseSimulator):
 
             # base_names=names(mujoco.mjtObj.mjOBJ_BODY, model.nbody),
             base_id=int(model.jnt_bodyid[base_id]),
-            base_pos_qpos_ids=self._indices(
+            base_pos_qpos_ids=self._index_tensor(
                 np.arange(base_qpos_adr, base_qpos_adr + 3)
             ),
-            base_quat_qpos_ids=self._indices(
+            base_quat_qpos_ids=self._index_tensor(
                 np.arange(base_qpos_adr + 3, base_qpos_adr + 7)
             ),
-            base_lin_vel_qvel_ids=self._indices(
+            base_lin_vel_qvel_ids=self._index_tensor(
                 np.arange(base_qvel_adr, base_qvel_adr + 3)
             ),
-            base_ang_vel_qvel_ids=self._indices(
+            base_ang_vel_qvel_ids=self._index_tensor(
                 np.arange(base_qvel_adr + 3, base_qvel_adr + 6)
             ),
             
             # joint_names=names(mujoco.mjtObj.mjOBJ_JOINT, model.njnt),
-            joint_qpos_ids=self._indices(joint_qpos_ids),
-            joint_qvel_ids=self._indices(
+            joint_qpos_ids=self._index_tensor(joint_qpos_ids),
+            joint_qvel_ids=self._index_tensor(
                 model.jnt_dofadr[actuator_joint_ids]
             ),
             joint_default_pos=self._tensor(joint_default_pos),
@@ -218,15 +208,15 @@ class MujocoSimulator(BaseSimulator):
             actuator_default_ctrl = self._tensor(actuator_default_ctrl),
 
             geom_names=geom_names,
-            geom_body_ids=self._indices(model.geom_bodyid),
-            geom_foot_ids=self._geom_ids_by_name(
+            geom_body_ids=self._index_tensor(model.geom_bodyid),
+            foot_geom_ids=self._geom_ids_by_name(
                 geom_names,
-                requested_names=self.geom_foot_names,
+                requested_names=self.foot_geom_names,
                 default_suffix="foot",
             ),
-            geom_floor_ids=self._geom_ids_by_name(
+            floor_geom_ids=self._geom_ids_by_name(
                 geom_names,
-                requested_names=self.geom_floor_names,
+                requested_names=self.floor_geom_names,
             ),
         )
 
@@ -241,30 +231,6 @@ class MujocoSimulator(BaseSimulator):
         return tuple(
             mujoco.mj_id2name(model, object_type, index)  # pyright: ignore[reportAttributeAccessIssue]
             for index in range(count)
-        )
-
-
-    def _tensor(
-        self,
-        value: np.ndarray,
-    ) -> torch.Tensor:
-        
-        return torch.as_tensor(
-            value,
-            dtype=self.context.dtype,
-            device=self.context.device,
-        )
-
-
-    def _indices(
-        self,
-        object_indices: np.ndarray,
-    ) -> torch.Tensor:
-        
-        return torch.as_tensor(
-            object_indices,
-            dtype=torch.long,
-            device=self.context.device,
         )
 
 
@@ -297,7 +263,7 @@ class MujocoSimulator(BaseSimulator):
         else:
             ids = []
 
-        return self._indices(np.asarray(ids, dtype=np.int64))
+        return self._index_tensor(np.asarray(ids, dtype=np.int64))
 
 
     def _find_base_joint_info(
@@ -432,11 +398,11 @@ class MujocoSimulator(BaseSimulator):
 
         if self.render_mode is None:
             return None
-
-        render_type = self._RENDER_TYPE_MAP[self.render_mode]
-        render_result = render_type()
-
-        return render_result
+        if self.render_mode == "human":
+            return self._human_render()
+        if self.render_mode == "rgb_array":
+            return self._rgb_array_render()
+        raise RuntimeError(f"Invalid configured render mode: {self.render_mode!r}.")
 
 
     def _human_render(self) -> None:
@@ -521,8 +487,8 @@ class MujocoSimulator(BaseSimulator):
     ) -> torch.Tensor:
         geom1 = contact_geom_ids[..., 0].unsqueeze(-1)
         geom2 = contact_geom_ids[..., 1].unsqueeze(-1)
-        foot_ids = self.model_context.geom_foot_ids.view(1, 1, -1)
-        floor_ids = self.model_context.geom_floor_ids
+        foot_ids = self.model_context.foot_geom_ids.view(1, 1, -1)
+        floor_ids = self.model_context.floor_geom_ids
         foot_ground_pair = (
             ((geom1 == foot_ids) & torch.isin(geom2, floor_ids))
             | ((geom2 == foot_ids) & torch.isin(geom1, floor_ids))

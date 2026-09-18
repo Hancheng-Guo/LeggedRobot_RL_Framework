@@ -7,15 +7,15 @@ from envs.tasks.utils.context import TaskContext
 
 
 def _foot_contact_output_dim(model_context: ModelContext) -> int:
-    if model_context.geom_foot_ids.numel() == 0:
+    if model_context.foot_geom_ids.numel() == 0:
         raise ValueError(
             "Foot contact observations require at least one foot geom."
         )
-    if model_context.geom_floor_ids.numel() == 0:
+    if model_context.floor_geom_ids.numel() == 0:
         raise ValueError(
             "Foot contact observations require at least one floor geom."
         )
-    return model_context.geom_foot_ids.numel()
+    return model_context.foot_geom_ids.numel()
 
 
 @register_observation
@@ -29,13 +29,13 @@ class FootHeight(BaseObservationTerm):
         
         super().__init__(*args, **kwargs)
 
-        if model_context.geom_foot_ids.numel() == 0:
+        if model_context.foot_geom_ids.numel() == 0:
             raise ValueError(
                 "FootHeight requires at least one foot geom."
             )
 
-        self.geom_foot_ids = model_context.geom_foot_ids
-        self.output_dim = self.geom_foot_ids.numel()
+        self.foot_geom_ids = model_context.foot_geom_ids
+        self.output_dim = self.foot_geom_ids.numel()
 
 
     def compute(
@@ -43,7 +43,7 @@ class FootHeight(BaseObservationTerm):
         task_context: TaskContext,
     ) -> torch.Tensor:
         
-        return task_context.state["geom_xpos"][:, self.geom_foot_ids, 2]
+        return task_context.state["geom_xpos"][:, self.foot_geom_ids, 2]
 
 
 

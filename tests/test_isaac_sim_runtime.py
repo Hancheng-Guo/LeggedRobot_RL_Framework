@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import threading
 from typing import Any
 
 import pytest
@@ -7,6 +9,7 @@ import torch
 
 from envs.simulators.isaac_sim_runtime import IsaacSimRuntime
 from envs.simulators.isaac_sim_model import IsaacSimModelConverter
+from envs.simulators import isaac_sim_runtime
 
 
 pytestmark = pytest.mark.isaacsim
@@ -110,6 +113,28 @@ def _model_converter(
         joint_stiffness=100.0,
         joint_damping=2.0,
     )
+
+
+def test_kit_log_bridge_forwards_selected_levels_without_recursion(
+    monkeypatch,
+) -> None:
+    runtime = IsaacSimRuntime.__new__(IsaacSimRuntime)
+    runtime._kit_log_levels = {2: logging.WARNING}
+    runtime._kit_log_forwarding = threading.local()
+    records: list[tuple[int, tuple[Any, ...]]] = []
+
+    def capture(level: int, message: str, *args: Any) -> None:
+        records.append((level, args))
+        runtime._forward_kit_log("nested", 2, "", 0, "ignored")
+
+    monkeypatch.setattr(isaac_sim_runtime.LOGGER, "log", capture)
+
+    runtime._forward_kit_log("omni.physx", 1, "", 0, "info")
+    runtime._forward_kit_log("omni.physx", 2, "", 0, "warning\n")
+
+    assert records == [
+        (logging.WARNING, ("omni.physx", "warning")),
+    ]
 
 
 def test_model_conversion_uses_model_usd_directory(tmp_path) -> None:

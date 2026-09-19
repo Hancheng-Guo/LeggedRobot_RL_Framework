@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import logging
+import threading
+
 import torch
 import numpy as np
 from collections.abc import Mapping, Sequence
@@ -9,6 +12,10 @@ from typing import Any
 from app.utils.context import RuntimeContext
 from envs.simulators.isaac_sim_backend import IsaacSimModelMetadata, IsaacSimResetState
 from envs.simulators.isaac_sim_model import IsaacSimModelConverter
+from utils.logging import get_logger
+
+
+LOGGER = get_logger("isaac_sim")
 
 
 class IsaacSimRuntime:
@@ -31,6 +38,11 @@ class IsaacSimRuntime:
         self._articulation: Any = None
         self._body_view: Any = None
         self._camera: Any = None
+        self._kit_logging: Any = None
+        self._kit_logger_handle: Any = None
+        self._kit_log_callback: Any = None
+        self._kit_log_forwarding = threading.local()
+        self._kit_log_levels: dict[int, int] = {}
         self._closed = False
 
 
@@ -100,7 +112,7 @@ class IsaacSimRuntime:
 
 
     def _start_application(self) -> None:
-        
+
         try:
             from isaacsim.simulation_app import SimulationApp  # pyright: ignore[reportMissingImports]
         except ModuleNotFoundError as error:
@@ -109,7 +121,81 @@ class IsaacSimRuntime:
             ) from error
 
         headless = self.render_mode != "human"
-        self._app = SimulationApp({"headless": headless})
+        LOGGER.info("Starting Isaac Sim runtime.")
+        self._app = SimulationApp(
+            {
+                "headless": headless,
+                "extra_args": ["--/log/outputStreamLevel=warn"],
+            }
+        )
+        self._start_log_bridge()
+        LOGGER.info("Isaac Sim runtime initialized.")
+
+
+    def _start_log_bridge(self) -> None:
+        """Forward runtime Kit warnings and errors through project logging."""
+
+        import carb.logging  # pyright: ignore[reportMissingImports]
+        import carb.settings  # pyright: ignore[reportMissingImports]
+
+        self._kit_log_levels = {
+            carb.logging.LEVEL_WARN: logging.WARNING,
+            carb.logging.LEVEL_ERROR: logging.ERROR,
+            carb.logging.LEVEL_FATAL: logging.CRITICAL,
+        }
+        self._kit_logging = carb.logging.acquire_logging()
+        self._kit_log_callback = self._forward_kit_log
+        self._kit_logger_handle = self._kit_logging.add_logger(
+            self._kit_log_callback
+        )
+        carb.settings.get_settings().set_string(
+            "/log/outputStreamLevel",
+            "fatal",
+        )
+
+
+    def _forward_kit_log(
+        self,
+        source: str,
+        level: int,
+        filename: str,
+        line_number: int,
+        message: str,
+    ) -> None:
+        """Send selected Kit records to the configured project handlers."""
+
+        project_level = self._kit_log_levels.get(level)
+        if project_level is None:
+            return
+        if getattr(self._kit_log_forwarding, "active", False):
+            return
+        self._kit_log_forwarding.active = True
+        try:
+            LOGGER.log(
+                project_level,
+                "[Isaac Sim: %s] %s",
+                source,
+                message.rstrip(),
+            )
+        finally:
+            self._kit_log_forwarding.active = False
+
+
+    def _stop_log_bridge(self) -> None:
+        """Restore native terminal warnings before Kit shuts down."""
+
+        if self._kit_logging is None or self._kit_logger_handle is None:
+            return
+        import carb.settings  # pyright: ignore[reportMissingImports]
+
+        carb.settings.get_settings().set_string(
+            "/log/outputStreamLevel",
+            "warn",
+        )
+        self._kit_logging.remove_logger(self._kit_logger_handle)
+        self._kit_logger_handle = None
+        self._kit_log_callback = None
+        self._kit_logging = None
 
 
     def _build_scene(self) -> None:
@@ -761,6 +847,7 @@ class IsaacSimRuntime:
             self._world.stop()
             self._world.clear()
         if self._app is not None:
+            self._stop_log_bridge()
             self._app.close()
         self._closed = True
 

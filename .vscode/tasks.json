@@ -15,14 +15,7 @@
             "group": "test",
             "problemMatcher": [],
             "options": {
-                "cwd": "${workspaceFolder}",
-                "shell": {
-                    "executable": "powershell.exe",
-                    "args": [
-                        "-NoProfile",
-                        "-Command"
-                    ]
-                }
+                "cwd": "${workspaceFolder}"
             }
         },
         {
@@ -39,14 +32,7 @@
             "group": "test",
             "problemMatcher": [],
             "options": {
-                "cwd": "${workspaceFolder}",
-                "shell": {
-                    "executable": "powershell.exe",
-                    "args": [
-                        "-NoProfile",
-                        "-Command"
-                    ]
-                }
+                "cwd": "${workspaceFolder}"
             }
         }
     ]

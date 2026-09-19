@@ -207,7 +207,6 @@ class IsaacSimRuntime:
                 reset_xform_properties=False,
             )
         )
-        self._world.reset()
 
         body_relative_paths = self._rigid_body_relative_paths(
             stage,
@@ -238,7 +237,6 @@ class IsaacSimRuntime:
                 contact_filter_prim_paths_expr=list(self.floor_prim_paths),
             )
         )
-        self._world.reset()
 
         if self.render_mode == "rgb_array":
             from isaacsim.sensors.camera import Camera  # pyright: ignore[reportMissingImports]
@@ -252,6 +250,12 @@ class IsaacSimRuntime:
                 frequency=1.0 / (self.sim_dt * self.frame_skip),
                 resolution=self.camera_resolution,
             )
+
+        # Initialize every physics-backed scene view together. Adding another
+        # view after reset invalidates the tensor simulation view created by
+        # the first reset.
+        self._world.reset()
+        if self._camera is not None:
             self._camera.initialize()
 
 

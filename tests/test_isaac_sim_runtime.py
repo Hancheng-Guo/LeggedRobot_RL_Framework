@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import sys
 import threading
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pytest
@@ -225,6 +225,76 @@ def test_rgb_camera_does_not_use_kit_run_loop_frequency() -> None:
         }
     ]
     assert "frequency" not in camera_arguments[0]
+
+
+def test_close_releases_camera_before_world_and_application() -> None:
+    lifecycle: list[str] = []
+
+    runtime = IsaacSimRuntime.__new__(IsaacSimRuntime)
+    runtime._closed = False
+    runtime._camera = SimpleNamespace(
+        destroy=lambda: lifecycle.append("camera.destroy")
+    )
+    runtime._world = SimpleNamespace(
+        stop=lambda: lifecycle.append("world.stop"),
+        clear=lambda: lifecycle.append("world.clear"),
+    )
+    runtime._body_view = object()
+    runtime._articulation = object()
+    runtime._stop_log_bridge = lambda: lifecycle.append("bridge.stop")
+    runtime._app = SimpleNamespace(
+        close=lambda: lifecycle.append("application.close")
+    )
+
+    runtime.close()
+
+    assert lifecycle == [
+        "camera.destroy",
+        "world.stop",
+        "world.clear",
+        "bridge.stop",
+        "application.close",
+    ]
+    assert runtime._camera is None
+    assert runtime._body_view is None
+    assert runtime._articulation is None
+    assert runtime._world is None
+    assert runtime._app is None
+    assert runtime._closed
+
+
+def test_close_continues_after_resource_cleanup_failure() -> None:
+    lifecycle: list[str] = []
+
+    def fail_camera_destroy() -> None:
+        lifecycle.append("camera.destroy")
+        raise RuntimeError("camera cleanup failed")
+
+    runtime = IsaacSimRuntime.__new__(IsaacSimRuntime)
+    runtime._closed = False
+    runtime._camera = SimpleNamespace(destroy=fail_camera_destroy)
+    runtime._world = SimpleNamespace(
+        stop=lambda: lifecycle.append("world.stop"),
+        clear=lambda: lifecycle.append("world.clear"),
+    )
+    runtime._body_view = object()
+    runtime._articulation = object()
+    runtime._stop_log_bridge = lambda: lifecycle.append("bridge.stop")
+    runtime._app = SimpleNamespace(
+        close=lambda: lifecycle.append("application.close")
+    )
+
+    with pytest.raises(RuntimeError, match="camera cleanup failed"):
+        runtime.close()
+
+    assert lifecycle == [
+        "camera.destroy",
+        "world.stop",
+        "world.clear",
+        "bridge.stop",
+        "application.close",
+    ]
+    assert runtime._closed
 
 
 def test_model_conversion_uses_model_usd_directory(tmp_path) -> None:

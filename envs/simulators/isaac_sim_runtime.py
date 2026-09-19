@@ -849,13 +849,35 @@ class IsaacSimRuntime:
 
         if self._closed:
             return
+        failures: list[Exception] = []
+
+        def attempt(operation: Any) -> None:
+            try:
+                operation()
+            except Exception as error:
+                failures.append(error)
+
+        if self._camera is not None:
+            attempt(self._camera.destroy)
+            self._camera = None
         if self._world is not None:
-            self._world.stop()
-            self._world.clear()
+            attempt(self._world.stop)
+            self._body_view = None
+            self._articulation = None
+            attempt(self._world.clear)
+            self._world = None
         if self._app is not None:
-            self._stop_log_bridge()
-            self._app.close()
+            attempt(self._stop_log_bridge)
+            attempt(self._app.close)
+            self._app = None
         self._closed = True
+        if len(failures) == 1:
+            raise failures[0]
+        if failures:
+            raise ExceptionGroup(
+                "Multiple errors occurred while closing Isaac Sim.",
+                failures,
+            )
 
 
     def _indices(

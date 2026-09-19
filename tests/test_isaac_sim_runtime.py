@@ -141,11 +141,15 @@ def test_kit_log_bridge_forwards_selected_levels_without_recursion(
 
 def test_start_application_disables_native_kit_console(
     monkeypatch,
+    capsys,
 ) -> None:
     launch_configs: list[dict[str, Any]] = []
+    lifecycle: list[str] = []
 
     class FakeSimulationApp:
         def __init__(self, config: dict[str, Any]) -> None:
+            lifecycle.append("application")
+            print("native startup info")
             launch_configs.append(config)
 
     simulation_app = ModuleType("isaacsim.simulation_app")
@@ -155,16 +159,48 @@ def test_start_application_disables_native_kit_console(
 
     runtime = IsaacSimRuntime.__new__(IsaacSimRuntime)
     runtime.render_mode = None
-    runtime._start_log_bridge = lambda: None
+    runtime._start_log_bridge = lambda: lifecycle.append("bridge")
 
     runtime._start_application()
 
     assert launch_configs == [
         {
             "headless": True,
-            "extra_args": ["--/log/enableStandardStreamOutput=false"],
+            "extra_args": [
+                "--/app/enableStdoutOutput=false",
+                "--/app/python/logSysStdOutput=false",
+                "--/log/enableStandardStreamOutput=false",
+            ],
         }
     ]
+    assert lifecycle == ["bridge", "application"]
+    assert "native startup info" not in capsys.readouterr().out
+
+
+def test_start_application_stops_log_bridge_after_startup_failure(
+    monkeypatch,
+) -> None:
+    lifecycle: list[str] = []
+
+    class FailingSimulationApp:
+        def __init__(self, config: dict[str, Any]) -> None:
+            lifecycle.append("application")
+            raise RuntimeError("startup failed")
+
+    simulation_app = ModuleType("isaacsim.simulation_app")
+    simulation_app.SimulationApp = FailingSimulationApp  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "isaacsim.simulation_app", simulation_app)
+    monkeypatch.setattr(isaac_sim_runtime.LOGGER, "info", lambda message: None)
+
+    runtime = IsaacSimRuntime.__new__(IsaacSimRuntime)
+    runtime.render_mode = None
+    runtime._start_log_bridge = lambda: lifecycle.append("bridge")
+    runtime._stop_log_bridge = lambda: lifecycle.append("stop")
+
+    with pytest.raises(RuntimeError, match="startup failed"):
+        runtime._start_application()
+
+    assert lifecycle == ["bridge", "application", "stop"]
 
 
 def test_model_conversion_uses_model_usd_directory(tmp_path) -> None:

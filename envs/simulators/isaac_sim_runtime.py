@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import logging
+import os
 import threading
 
 import torch
 import numpy as np
 from collections.abc import Mapping, Sequence
+from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Any
 
@@ -122,13 +124,23 @@ class IsaacSimRuntime:
 
         headless = self.render_mode != "human"
         LOGGER.info("Starting Isaac Sim runtime.")
-        self._app = SimulationApp(
-            {
-                "headless": headless,
-                "extra_args": ["--/log/enableStandardStreamOutput=false"],
-            }
-        )
         self._start_log_bridge()
+        try:
+            with open(os.devnull, "w", encoding="utf-8") as output_sink:
+                with redirect_stdout(output_sink):
+                    self._app = SimulationApp(
+                        {
+                            "headless": headless,
+                            "extra_args": [
+                                "--/app/enableStdoutOutput=false",
+                                "--/app/python/logSysStdOutput=false",
+                                "--/log/enableStandardStreamOutput=false",
+                            ],
+                        }
+                    )
+        except BaseException:
+            self._stop_log_bridge()
+            raise
         LOGGER.info("Isaac Sim runtime initialized.")
 
 

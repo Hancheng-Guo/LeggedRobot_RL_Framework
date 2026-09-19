@@ -118,7 +118,7 @@ class IsaacSimRuntime:
         from isaacsim.core.cloner import GridCloner  # pyright: ignore[reportMissingImports]
         from isaacsim.core.prims import Articulation, RigidPrim  # pyright: ignore[reportMissingImports]
         from isaacsim.core.utils.stage import add_reference_to_stage  # pyright: ignore[reportMissingImports]
-        from pxr import UsdGeom, UsdPhysics  # pyright: ignore[reportMissingImports]
+        from pxr import Usd, UsdGeom, UsdPhysics  # pyright: ignore[reportMissingImports]
 
         self._world = World(
             physics_dt=self.sim_dt,
@@ -140,6 +140,7 @@ class IsaacSimRuntime:
             self._find_articulation_root_relative_path(
                 stage,
                 source_robot_path,
+                Usd,
                 UsdPhysics,
             )
         )
@@ -199,6 +200,7 @@ class IsaacSimRuntime:
         body_relative_paths = self._rigid_body_relative_paths(
             stage,
             source_robot_path,
+            Usd,
             UsdPhysics,
         )
         if not body_relative_paths:
@@ -281,12 +283,13 @@ class IsaacSimRuntime:
     def _find_articulation_root_relative_path(
         stage: Any,
         robot_path: str,
+        usd: Any,
         usd_physics: Any,
     ) -> str:
         robot_prim = stage.GetPrimAtPath(robot_path)
         articulation_roots = [
             str(prim.GetPath())
-            for prim in (robot_prim, *robot_prim.GetDescendants())
+            for prim in usd.PrimRange(robot_prim)
             if prim.HasAPI(usd_physics.ArticulationRootAPI)
         ]
         if not articulation_roots:
@@ -306,12 +309,13 @@ class IsaacSimRuntime:
     def _rigid_body_relative_paths(
         stage: Any,
         robot_path: str,
+        usd: Any,
         usd_physics: Any,
     ) -> tuple[str, ...]:
         
         root = stage.GetPrimAtPath(robot_path)
         paths: list[str] = []
-        for prim in (root, *root.GetDescendants()):
+        for prim in usd.PrimRange(root):
             if prim.HasAPI(usd_physics.RigidBodyAPI):
                 paths.append(str(prim.GetPath())[len(robot_path):])
         return tuple(paths)

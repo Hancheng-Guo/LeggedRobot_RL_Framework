@@ -16,21 +16,26 @@ class FakePrim:
         path: str,
         *,
         articulation_root: bool = False,
+        rigid_body: bool = False,
         descendants: tuple[FakePrim, ...] = (),
     ) -> None:
         self.path = path
         self.articulation_root = articulation_root
+        self.rigid_body = rigid_body
         self.descendants = descendants
         self.variant_sets = FakeVariantSets()
 
     def GetPath(self) -> str:
         return self.path
 
-    def GetDescendants(self) -> tuple[FakePrim, ...]:
-        return self.descendants
-
     def HasAPI(self, api: Any) -> bool:
-        return api is FakeUsdPhysics.ArticulationRootAPI and self.articulation_root
+        return (
+            api is FakeUsdPhysics.ArticulationRootAPI
+            and self.articulation_root
+        ) or (
+            api is FakeUsdPhysics.RigidBodyAPI
+            and self.rigid_body
+        )
 
     def GetVariantSets(self) -> FakeVariantSets:
         return self.variant_sets
@@ -75,6 +80,15 @@ class FakeUsdPhysics:
     class ArticulationRootAPI:
         pass
 
+    class RigidBodyAPI:
+        pass
+
+
+class FakeUsd:
+    @staticmethod
+    def PrimRange(root: FakePrim) -> tuple[FakePrim, ...]:
+        return (root, *root.descendants)
+
 
 def test_selects_physx_variant_before_inspecting_robot() -> None:
     root = FakePrim("/World/envs/env_0/Robot")
@@ -114,6 +128,7 @@ def test_finds_nested_articulation_root_relative_to_model_prim() -> None:
     relative_path = IsaacSimRuntime._find_articulation_root_relative_path(
         FakeStage(root),
         root.path,
+        FakeUsd,
         FakeUsdPhysics,
     )
 
@@ -129,10 +144,31 @@ def test_accepts_model_prim_as_articulation_root() -> None:
     relative_path = IsaacSimRuntime._find_articulation_root_relative_path(
         FakeStage(root),
         root.path,
+        FakeUsd,
         FakeUsdPhysics,
     )
 
     assert relative_path == ""
+
+
+def test_finds_rigid_bodies_with_usd_prim_range() -> None:
+    root = FakePrim(
+        "/World/envs/env_0/Robot",
+        descendants=(
+            FakePrim("/World/envs/env_0/Robot/trunk", rigid_body=True),
+            FakePrim("/World/envs/env_0/Robot/visual"),
+            FakePrim("/World/envs/env_0/Robot/FR_foot", rigid_body=True),
+        ),
+    )
+
+    paths = IsaacSimRuntime._rigid_body_relative_paths(
+        FakeStage(root),
+        root.path,
+        FakeUsd,
+        FakeUsdPhysics,
+    )
+
+    assert paths == ("/trunk", "/FR_foot")
 
 
 @pytest.mark.parametrize(
@@ -161,5 +197,6 @@ def test_rejects_ambiguous_articulation_roots(
         IsaacSimRuntime._find_articulation_root_relative_path(
             FakeStage(root),
             root.path,
+            FakeUsd,
             FakeUsdPhysics,
         )

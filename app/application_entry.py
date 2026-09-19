@@ -121,6 +121,7 @@ class ApplicationEntry:
                 load_dir=self.load_dir,
             )
         except Exception:
+            logger.exception("Application setup failed.")
             self.logging_session.close()
             raise
 

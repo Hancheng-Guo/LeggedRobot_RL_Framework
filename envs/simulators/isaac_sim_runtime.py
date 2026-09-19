@@ -135,6 +135,7 @@ class IsaacSimRuntime:
             usd_path=str(self.model_path),
             prim_path=source_robot_path,
         )
+        self._select_physx_variant(stage, source_robot_path)
         articulation_root_relative_path = (
             self._find_articulation_root_relative_path(
                 stage,
@@ -242,6 +243,38 @@ class IsaacSimRuntime:
 
     def _normalized_robot_prim_path(self) -> str:
         return "/" + self.robot_prim_path.strip("/")
+
+
+    @staticmethod
+    def _select_physx_variant(stage: Any, robot_path: str) -> None:
+        """Select an imported asset's PhysX payload before inspecting it."""
+
+        robot_prim = stage.GetPrimAtPath(robot_path)
+        variant_sets = robot_prim.GetVariantSets()
+        if not variant_sets.HasVariantSet("Physics"):
+            return
+
+        physics_variant = variant_sets.GetVariantSet("Physics")
+        variant_names = tuple(physics_variant.GetVariantNames())
+        physx_variant = next(
+            (
+                name
+                for name in variant_names
+                if name.casefold() == "physx"
+            ),
+            None,
+        )
+        if physx_variant is None:
+            raise RuntimeError(
+                f"USD asset at {robot_path!r} defines a 'Physics' variant "
+                f"set without a PhysX variant; available variants: "
+                f"{list(variant_names)}."
+            )
+        if not physics_variant.SetVariantSelection(physx_variant):
+            raise RuntimeError(
+                f"Failed to select Physics={physx_variant!r} for "
+                f"{robot_path!r}."
+            )
 
 
     @staticmethod

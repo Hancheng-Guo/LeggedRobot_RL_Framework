@@ -868,7 +868,11 @@ class IsaacSimRuntime:
             self._world = None
         if self._app is not None:
             attempt(self._stop_log_bridge)
-            attempt(self._app.close)
+            # Camera render products and annotators have already been released
+            # above. Waiting for Replicator here can lazily recreate its global
+            # Orchestrator graph while Kit extensions are being unloaded, which
+            # can crash native shutdown (notably at OgnReadFabricTime).
+            attempt(lambda: self._app.close(wait_for_replicator=False))
             self._app = None
         self._closed = True
         if len(failures) == 1:

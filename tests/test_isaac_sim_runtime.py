@@ -243,7 +243,9 @@ def test_close_releases_camera_before_world_and_application() -> None:
     runtime._articulation = object()
     runtime._stop_log_bridge = lambda: lifecycle.append("bridge.stop")
     runtime._app = SimpleNamespace(
-        close=lambda: lifecycle.append("application.close")
+        close=lambda **kwargs: lifecycle.append(
+            f"application.close:{kwargs['wait_for_replicator']}"
+        )
     )
 
     runtime.close()
@@ -253,7 +255,7 @@ def test_close_releases_camera_before_world_and_application() -> None:
         "world.stop",
         "world.clear",
         "bridge.stop",
-        "application.close",
+        "application.close:False",
     ]
     assert runtime._camera is None
     assert runtime._body_view is None
@@ -281,7 +283,9 @@ def test_close_continues_after_resource_cleanup_failure() -> None:
     runtime._articulation = object()
     runtime._stop_log_bridge = lambda: lifecycle.append("bridge.stop")
     runtime._app = SimpleNamespace(
-        close=lambda: lifecycle.append("application.close")
+        close=lambda **kwargs: lifecycle.append(
+            f"application.close:{kwargs['wait_for_replicator']}"
+        )
     )
 
     with pytest.raises(RuntimeError, match="camera cleanup failed"):
@@ -292,7 +296,7 @@ def test_close_continues_after_resource_cleanup_failure() -> None:
         "world.stop",
         "world.clear",
         "bridge.stop",
-        "application.close",
+        "application.close:False",
     ]
     assert runtime._closed
 

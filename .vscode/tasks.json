@@ -3,7 +3,7 @@
     "tasks": [
         {
             "label": "Test: Core + MuJoCo",
-            "type": "shell",
+            "type": "process",
             "command": "${command:python.interpreterPath}",
             "args": [
                 "-m",
@@ -16,11 +16,33 @@
             "problemMatcher": [],
             "options": {
                 "cwd": "${workspaceFolder}"
+            },
+            "windows": {
+                "type": "shell",
+                "command": "&",
+                "args": [
+                    "${command:python.interpreterPath}",
+                    "-m",
+                    "pytest",
+                    "-m",
+                    "core or mujoco",
+                    "tests"
+                ],
+                "options": {
+                    "cwd": "${workspaceFolder}",
+                    "shell": {
+                        "executable": "powershell.exe",
+                        "args": [
+                            "-NoProfile",
+                            "-Command"
+                        ]
+                    }
+                }
             }
         },
         {
             "label": "Test: Core + Isaac Sim",
-            "type": "shell",
+            "type": "process",
             "command": "${command:python.interpreterPath}",
             "args": [
                 "-m",
@@ -33,6 +55,28 @@
             "problemMatcher": [],
             "options": {
                 "cwd": "${workspaceFolder}"
+            },
+            "windows": {
+                "type": "shell",
+                "command": "&",
+                "args": [
+                    "${command:python.interpreterPath}",
+                    "-m",
+                    "pytest",
+                    "-m",
+                    "core or isaacsim",
+                    "tests"
+                ],
+                "options": {
+                    "cwd": "${workspaceFolder}",
+                    "shell": {
+                        "executable": "powershell.exe",
+                        "args": [
+                            "-NoProfile",
+                            "-Command"
+                        ]
+                    }
+                }
             }
         }
     ]

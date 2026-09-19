@@ -7,9 +7,4 @@
 
 numpy==2.3.1
 
-isaacsim[extscache]==6.1.0.0
-isaacsim-app==6.1.0.0
-isaacsim-core==6.1.0.0
-isaacsim-asset==6.1.0.0
-isaacsim-rl==6.1.0.0
-isaacsim-sensor==6.1.0.0
+isaacsim[all,extscache]==6.1.0.0

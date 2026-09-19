@@ -135,6 +135,13 @@ class IsaacSimRuntime:
             usd_path=str(self.model_path),
             prim_path=source_robot_path,
         )
+        articulation_root_relative_path = (
+            self._find_articulation_root_relative_path(
+                stage,
+                source_robot_path,
+                UsdPhysics,
+            )
+        )
 
         if self._requested_floor_prim_paths:
             missing_floor_paths = [
@@ -177,6 +184,7 @@ class IsaacSimRuntime:
 
         robot_expression = (
             "/World/envs/env_.*/" + self._normalized_robot_prim_path().lstrip("/")
+            + articulation_root_relative_path
         )
         self._articulation = self._world.scene.add(
             Articulation(
@@ -234,6 +242,31 @@ class IsaacSimRuntime:
 
     def _normalized_robot_prim_path(self) -> str:
         return "/" + self.robot_prim_path.strip("/")
+
+
+    @staticmethod
+    def _find_articulation_root_relative_path(
+        stage: Any,
+        robot_path: str,
+        usd_physics: Any,
+    ) -> str:
+        robot_prim = stage.GetPrimAtPath(robot_path)
+        articulation_roots = [
+            str(prim.GetPath())
+            for prim in (robot_prim, *robot_prim.GetDescendants())
+            if prim.HasAPI(usd_physics.ArticulationRootAPI)
+        ]
+        if not articulation_roots:
+            raise RuntimeError(
+                "No articulation root was found at or below "
+                f"{robot_path!r}."
+            )
+        if len(articulation_roots) > 1:
+            raise RuntimeError(
+                "Expected one articulation root at or below "
+                f"{robot_path!r}, found {articulation_roots}."
+            )
+        return articulation_roots[0][len(robot_path):]
 
 
     @staticmethod

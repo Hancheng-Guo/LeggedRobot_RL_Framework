@@ -7,6 +7,22 @@ from app.utils.context import RuntimeContext
 from envs.simulators.utils.context import ModelContext
 
 
+BACKEND_MARKERS = {"mujoco", "isaacsim"}
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line("markers", "core: backend-independent unit tests")
+    config.addinivalue_line("markers", "mujoco: MuJoCo backend tests")
+    config.addinivalue_line("markers", "isaacsim: Isaac Sim backend tests")
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Treat every test without a backend marker as a core test."""
+    for item in items:
+        if not any(item.get_closest_marker(name) for name in BACKEND_MARKERS):
+            item.add_marker(pytest.mark.core)
+
+
 @pytest.fixture
 def runtime_context() -> RuntimeContext:
     return RuntimeContext(

@@ -16,6 +16,9 @@ from envs.simulators.registry import SIM_TYPE_MAP
 from utils.component import Component
 
 
+pytestmark = pytest.mark.isaacsim
+
+
 class FakeIsaacBackend:
     def __init__(self, context) -> None:
         self.context = context

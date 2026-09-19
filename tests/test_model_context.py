@@ -9,6 +9,9 @@ from envs.simulators.mujoco import MujocoSimulator
 from utils.component import Component
 
 
+pytestmark = pytest.mark.mujoco
+
+
 def _configure_go1_simulator(
     runtime_context,
     *,

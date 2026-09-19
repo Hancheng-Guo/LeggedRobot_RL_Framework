@@ -228,14 +228,15 @@ class IsaacSimRuntime:
             for env_id in range(self.num_envs)
             for relative in body_relative_paths
         ]
-        self._body_view = self._world.scene.add(
-            RigidPrim(
-                prim_paths_expr=body_paths,
-                name="isaac_sim_robot_bodies",
-                reset_xform_properties=False,
-                track_contact_forces=True,
-                contact_filter_prim_paths_expr=list(self.floor_prim_paths),
-            )
+        self._body_view = RigidPrim(
+            prim_paths_expr=body_paths,
+            name="isaac_sim_robot_bodies",
+            reset_xform_properties=False,
+            track_contact_forces=True,
+            contact_filter_prim_paths_expr=[
+                list(self.floor_prim_paths)
+                for _ in body_paths
+            ],
         )
 
         if self.render_mode == "rgb_array":
@@ -255,6 +256,10 @@ class IsaacSimRuntime:
         # view after reset invalidates the tensor simulation view created by
         # the first reset.
         self._world.reset()
+        # RigidPrim contains articulation links, whose poses must be controlled
+        # through the Articulation. Keep this read/contact view outside Scene's
+        # post-reset lifecycle so it does not try to restore link transforms.
+        self._body_view.initialize()
         if self._camera is not None:
             self._camera.initialize()
 
@@ -344,7 +349,7 @@ class IsaacSimRuntime:
             self._articulation.get_joint_positions(clone=True)[0]
         )
         joint_pos_limits = self._tensor(
-            self._articulation.get_dof_limits(clone=True)[0]
+            self._articulation.get_dof_limits()[0]
         )
         self.base_body_prim_path = (
             self._requested_base_body_prim_path

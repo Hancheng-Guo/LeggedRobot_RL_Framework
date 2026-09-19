@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+import torch
 
 from envs.simulators.isaac_sim_runtime import IsaacSimRuntime
 
@@ -198,6 +199,58 @@ def test_resolves_floor_container_to_collision_prim() -> None:
     )
 
     assert collision_path == "/World/GroundPlane/CollisionPlane"
+
+
+class FakeBodyView:
+    def __init__(self, contact_forces: torch.Tensor) -> None:
+        self.contact_forces = contact_forces
+
+    def get_contact_force_matrix(
+        self,
+        *,
+        dt: float,
+        clone: bool,
+    ) -> torch.Tensor:
+        assert dt == 0.002
+        assert clone
+        return self.contact_forces.clone()
+
+
+def test_precomputed_contact_layout_is_reused_for_state_queries(
+    runtime_context,
+) -> None:
+    runtime = object.__new__(IsaacSimRuntime)
+    runtime.context = runtime_context
+    runtime.num_envs = 2
+    runtime.sim_dt = 0.002
+    runtime.foot_contact_force_threshold = 15.0
+    runtime._body_names = ("trunk", "foot")
+    runtime._body_prim_paths = ("/trunk", "/foot")
+    runtime.foot_body_prim_paths = ("/foot",)
+    runtime.floor_prim_paths = ("/World/GroundPlane",)
+    runtime._body_view = FakeBodyView(torch.tensor([
+        [[0.0, 0.0, 0.0]],
+        [[0.0, 0.0, 20.0]],
+        [[0.0, 0.0, 5.0]],
+        [[0.0, 0.0, 10.0]],
+    ]))
+
+    runtime._prepare_state_buffers()
+    contact_ids, contact_forces, foot_contact = runtime._contact_state()
+
+    assert runtime._indices(None) is runtime._all_env_indices
+    assert contact_ids.tolist() == [
+        [[-1, -1], [1, 2]],
+        [[0, 2], [1, 2]],
+    ]
+    assert contact_forces[..., 0].tolist() == [
+        [0.0, 20.0],
+        [5.0, 10.0],
+    ]
+    assert foot_contact.squeeze(-1).tolist() == [
+        [False, True],
+        [False, False],
+    ]
 
 
 @pytest.mark.parametrize(

@@ -90,6 +90,7 @@ class IsaacSimRuntime:
         self.model_path = converter.convert_if_needed(self.model_path)
         self._build_scene()
         self._build_metadata()
+        self._prepare_state_buffers()
         self._capture_default_state()
         self._ctrl = self.metadata.actuator_default_ctrl.repeat(
             self.num_envs,
@@ -478,6 +479,63 @@ class IsaacSimRuntime:
         )
 
 
+    def _prepare_state_buffers(self) -> None:
+        """Precompute immutable tensor layouts used by every state query."""
+
+        self._body_count = len(self._body_names)
+        self._floor_count = len(self.floor_prim_paths)
+        self._all_env_indices = torch.arange(
+            self.num_envs,
+            dtype=torch.long,
+            device=self.context.device,
+        )
+        self._floor_geom_xpos = torch.zeros(
+            (self.num_envs, self._floor_count, 3),
+            dtype=self.context.dtype,
+            device=self.context.device,
+        )
+        self._floor_geom_xvel = torch.zeros(
+            (self.num_envs, self._floor_count, 6),
+            dtype=self.context.dtype,
+            device=self.context.device,
+        )
+
+        body_ids = torch.arange(
+            self._body_count,
+            dtype=torch.long,
+            device=self.context.device,
+        ).view(1, -1, 1).expand(
+            self.num_envs,
+            -1,
+            self._floor_count,
+        )
+        floor_ids = (
+            self._body_count
+            + torch.arange(
+                self._floor_count,
+                dtype=torch.long,
+                device=self.context.device,
+            )
+        ).view(1, 1, -1).expand_as(body_ids)
+        self._contact_geom_pairs = torch.stack(
+            (body_ids, floor_ids),
+            dim=-1,
+        ).reshape(self.num_envs, -1, 2)
+
+        foot_ids = torch.tensor(
+            [
+                self._body_prim_paths.index(path)
+                for path in self.foot_body_prim_paths
+            ],
+            dtype=torch.long,
+            device=self.context.device,
+        )
+        self._foot_contact_mask = (
+            body_ids.reshape(self.num_envs, -1, 1)
+            == foot_ids.view(1, 1, -1)
+        )
+
+
     def reset(
         self,
         env_ids: torch.Tensor | None = None
@@ -573,22 +631,14 @@ class IsaacSimRuntime:
         geom_xpos = torch.cat(
             (
                 body_pos,
-                torch.zeros(
-                    (self.num_envs, len(self.floor_prim_paths), 3),
-                    dtype=self.context.dtype,
-                    device=self.context.device,
-                ),
+                self._floor_geom_xpos,
             ),
             dim=1,
         )
         geom_xvel = torch.cat(
             (
                 geom_xvel,
-                torch.zeros(
-                    (self.num_envs, len(self.floor_prim_paths), 6),
-                    dtype=self.context.dtype,
-                    device=self.context.device,
-                ),
+                self._floor_geom_xvel,
             ),
             dim=1,
         )
@@ -635,63 +685,33 @@ class IsaacSimRuntime:
         )
         force_vectors = self._tensor(matrix).reshape(
             self.num_envs,
-            len(self._body_names),
-            len(self.floor_prim_paths),
+            self._body_count,
+            self._floor_count,
             3,
         )
         normal_force = force_vectors.norm(dim=-1)
-        active = normal_force > 0.0
-        body_ids = torch.arange(
-            len(self._body_names),
-            dtype=torch.long,
-            device=self.context.device,
-        ).view(1, -1, 1).expand(
-            self.num_envs,
-            -1,
-            len(self.floor_prim_paths),
-        )
-        floor_ids = (
-            len(self._body_names)
-            + torch.arange(
-                len(self.floor_prim_paths),
-                dtype=torch.long,
-                device=self.context.device,
-            )
-        ).view(1, 1, -1).expand_as(body_ids)
-        contact_ids = torch.stack(
-            (body_ids, floor_ids),
-            dim=-1,
-        ).reshape(self.num_envs, -1, 2)
         contact_ids = torch.where(
-            active.reshape(self.num_envs, -1, 1),
-            contact_ids,
-            torch.full_like(contact_ids, -1),
+            (normal_force > 0.0).reshape(self.num_envs, -1, 1),
+            self._contact_geom_pairs,
+            -1,
         )
         contact_forces = torch.zeros(
             (
                 self.num_envs,
-                len(self._body_names) * len(self.floor_prim_paths),
+                self._body_count * self._floor_count,
                 6,
             ),
             dtype=self.context.dtype,
             device=self.context.device,
         )
         contact_forces[..., 0] = normal_force.reshape(self.num_envs, -1)
-        foot_ids = torch.tensor(
-            [
-                self._body_prim_paths.index(path)
-                for path in self.metadata.foot_body_prim_paths
-            ],
-            dtype=torch.long,
-            device=self.context.device,
-        )
         foot_contact = (
-            body_ids.reshape(self.num_envs, -1, 1)
-            == foot_ids.view(1, 1, -1)
-        ) & (
-            normal_force.reshape(self.num_envs, -1)
-            >= self.foot_contact_force_threshold
-        ).unsqueeze(-1)
+            self._foot_contact_mask
+            & (
+                normal_force.reshape(self.num_envs, -1)
+                >= self.foot_contact_force_threshold
+            ).unsqueeze(-1)
+        )
         return contact_ids, contact_forces, foot_contact
 
 
@@ -752,11 +772,7 @@ class IsaacSimRuntime:
     ) -> torch.Tensor:
         
         if env_ids is None:
-            return torch.arange(
-                self.num_envs,
-                dtype=torch.long,
-                device=self.context.device,
-            )
+            return self._all_env_indices
         return env_ids.to(device=self.context.device, dtype=torch.long)
 
 

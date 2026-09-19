@@ -127,6 +127,15 @@ class IsaacSimRuntime:
             device=str(self.context.device),
             physics_prim_path="/World/physicsScene",
         )
+        physics_context = self._world.get_physics_context()
+        aggregate_pairs_capacity = max(1024, self.num_envs * 64)
+        if (
+            physics_context.get_gpu_found_lost_aggregate_pairs_capacity()
+            < aggregate_pairs_capacity
+        ):
+            physics_context.set_gpu_found_lost_aggregate_pairs_capacity(
+                aggregate_pairs_capacity
+            )
         stage = self._world.stage
         source_env_path = "/World/envs/env_0"
         source_robot_path = source_env_path + self._normalized_robot_prim_path()
@@ -175,7 +184,10 @@ class IsaacSimRuntime:
             base_env_path="/World/envs",
             root_path="/World/envs/env_",
             enable_env_ids=True,
-            clone_in_fabric=True,
+            # The legacy Articulation/RigidPrim views discover their default
+            # states from USD. Fabric-only clones leave those defaults at one
+            # row while the PhysX view contains every environment.
+            clone_in_fabric=False,
         )
         cloner.filter_collisions(
             physicsscene_path="/World/physicsScene",

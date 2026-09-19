@@ -173,6 +173,15 @@ class IsaacSimRuntime:
                 name="GroundPlane",
             )
             self.floor_prim_paths = (default_floor_path,)
+        self._floor_collision_prim_paths = tuple(
+            self._find_floor_collision_prim_path(
+                stage,
+                floor_path,
+                Usd,
+                UsdPhysics,
+            )
+            for floor_path in self.floor_prim_paths
+        )
 
         cloner = GridCloner(spacing=self.env_spacing, stage=stage)
         cloner.define_base_env("/World/envs")
@@ -234,7 +243,7 @@ class IsaacSimRuntime:
             reset_xform_properties=False,
             track_contact_forces=True,
             contact_filter_prim_paths_expr=[
-                list(self.floor_prim_paths)
+                list(self._floor_collision_prim_paths)
                 for _ in body_paths
             ],
         )
@@ -340,6 +349,31 @@ class IsaacSimRuntime:
             if prim.HasAPI(usd_physics.RigidBodyAPI):
                 paths.append(str(prim.GetPath())[len(robot_path):])
         return tuple(paths)
+
+
+    @staticmethod
+    def _find_floor_collision_prim_path(
+        stage: Any,
+        floor_path: str,
+        usd: Any,
+        usd_physics: Any,
+    ) -> str:
+        floor_prim = stage.GetPrimAtPath(floor_path)
+        collision_paths = tuple(
+            str(prim.GetPath())
+            for prim in usd.PrimRange(floor_prim)
+            if prim.HasAPI(usd_physics.CollisionAPI)
+        )
+        if not collision_paths:
+            raise ValueError(
+                f"Floor Prim {floor_path!r} contains no collision Prim."
+            )
+        if len(collision_paths) > 1:
+            raise ValueError(
+                f"Floor Prim {floor_path!r} must contain exactly one "
+                f"collision Prim, found {list(collision_paths)}."
+            )
+        return collision_paths[0]
 
 
     def _build_metadata(self) -> None:

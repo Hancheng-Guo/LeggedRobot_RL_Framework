@@ -6,8 +6,12 @@ frame_skip: 10
 # render_mode: rgb_array
 robot_prim_path: /Robot
 env_spacing: 2.0
-base_body_prim_path: /trunk
-foot_body_prim_paths: [/FR_foot, /FL_foot, /RR_foot, /RL_foot]
+base_body_prim_path: /Geometry/base/trunk
+foot_body_prim_paths:
+  - /Geometry/base/trunk/FR_hip/FR_thigh/FR_calf/FR_foot
+  - /Geometry/base/trunk/FL_hip/FL_thigh/FL_calf/FL_foot
+  - /Geometry/base/trunk/RR_hip/RR_thigh/RR_calf/RR_foot
+  - /Geometry/base/trunk/RL_hip/RL_thigh/RL_calf/RL_foot
 floor_prim_paths: []  # /World/GroundPlane
 foot_contact_force_threshold: 15.0
 camera_resolution: [640, 480]

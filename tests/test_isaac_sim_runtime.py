@@ -17,11 +17,13 @@ class FakePrim:
         *,
         articulation_root: bool = False,
         rigid_body: bool = False,
+        collision: bool = False,
         descendants: tuple[FakePrim, ...] = (),
     ) -> None:
         self.path = path
         self.articulation_root = articulation_root
         self.rigid_body = rigid_body
+        self.collision = collision
         self.descendants = descendants
         self.variant_sets = FakeVariantSets()
 
@@ -35,6 +37,9 @@ class FakePrim:
         ) or (
             api is FakeUsdPhysics.RigidBodyAPI
             and self.rigid_body
+        ) or (
+            api is FakeUsdPhysics.CollisionAPI
+            and self.collision
         )
 
     def GetVariantSets(self) -> FakeVariantSets:
@@ -81,6 +86,9 @@ class FakeUsdPhysics:
         pass
 
     class RigidBodyAPI:
+        pass
+
+    class CollisionAPI:
         pass
 
 
@@ -169,6 +177,27 @@ def test_finds_rigid_bodies_with_usd_prim_range() -> None:
     )
 
     assert paths == ("/trunk", "/FR_foot")
+
+
+def test_resolves_floor_container_to_collision_prim() -> None:
+    floor = FakePrim(
+        "/World/GroundPlane",
+        descendants=(
+            FakePrim(
+                "/World/GroundPlane/CollisionPlane",
+                collision=True,
+            ),
+        ),
+    )
+
+    collision_path = IsaacSimRuntime._find_floor_collision_prim_path(
+        FakeStage(floor),
+        floor.path,
+        FakeUsd,
+        FakeUsdPhysics,
+    )
+
+    assert collision_path == "/World/GroundPlane/CollisionPlane"
 
 
 @pytest.mark.parametrize(

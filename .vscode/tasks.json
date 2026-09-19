@@ -18,25 +18,21 @@
                 "cwd": "${workspaceFolder}"
             },
             "windows": {
-                "type": "shell",
-                "command": "&",
+                "type": "process",
+                "command": "powershell.exe",
                 "args": [
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    "${workspaceFolder}/.vscode/run-pytest.ps1",
+                    "-PythonPath",
                     "${command:python.interpreterPath}",
-                    "-m",
-                    "pytest",
-                    "-m",
-                    "core or mujoco",
-                    "tests"
+                    "-Marker",
+                    "core or mujoco"
                 ],
                 "options": {
-                    "cwd": "${workspaceFolder}",
-                    "shell": {
-                        "executable": "powershell.exe",
-                        "args": [
-                            "-NoProfile",
-                            "-Command"
-                        ]
-                    }
+                    "cwd": "${workspaceFolder}"
                 }
             }
         },
@@ -57,25 +53,21 @@
                 "cwd": "${workspaceFolder}"
             },
             "windows": {
-                "type": "shell",
-                "command": "&",
+                "type": "process",
+                "command": "powershell.exe",
                 "args": [
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    "${workspaceFolder}/.vscode/run-pytest.ps1",
+                    "-PythonPath",
                     "${command:python.interpreterPath}",
-                    "-m",
-                    "pytest",
-                    "-m",
-                    "core or isaacsim",
-                    "tests"
+                    "-Marker",
+                    "core or isaacsim"
                 ],
                 "options": {
-                    "cwd": "${workspaceFolder}",
-                    "shell": {
-                        "executable": "powershell.exe",
-                        "args": [
-                            "-NoProfile",
-                            "-Command"
-                        ]
-                    }
+                    "cwd": "${workspaceFolder}"
                 }
             }
         }

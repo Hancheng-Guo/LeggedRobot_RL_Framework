@@ -1,6 +1,7 @@
 .pytest*/
 .vscode/*
 !.vscode/tasks.json
+!.vscode/run-pytest.ps1
 __pycache__/
 checkpoints
 

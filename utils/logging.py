@@ -1,10 +1,32 @@
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from colorama import Back, Fore, Style, just_fix_windows_console
 
 
 LOGGER_NAME = "rl_framework"
 LOG_FORMAT = "%(asctime)s | %(levelname)s | %(message)s"
+
+
+class ColoredFormatter(logging.Formatter):
+    """Color an entire console record according to its severity."""
+
+    LEVEL_COLORS = {
+        logging.DEBUG: Fore.LIGHTBLACK_EX,
+        logging.INFO: Fore.WHITE,
+        logging.WARNING: Fore.YELLOW,
+        logging.ERROR: Fore.RED,
+        logging.CRITICAL: Style.BRIGHT + Back.RED + Fore.WHITE,
+    }
+
+    def format(self, record: logging.LogRecord) -> str:
+        message = super().format(record)
+        color = self.LEVEL_COLORS.get(record.levelno, "")
+        if not color:
+            return message
+        return f"{color}{message}{Style.RESET_ALL}"
 
 
 def get_logger(name: str | None = None) -> logging.Logger:
@@ -54,7 +76,15 @@ def configure_logging(
 
     if console:
         console_handler = logging.StreamHandler()
-        console_handler.setFormatter(formatter)
+        color_enabled = (
+            "NO_COLOR" not in os.environ
+            and console_handler.stream.isatty()
+        )
+        if color_enabled:
+            just_fix_windows_console()
+            console_handler.setFormatter(ColoredFormatter(LOG_FORMAT))
+        else:
+            console_handler.setFormatter(formatter)
         handlers.append(console_handler)
 
     for handler in handlers:

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import logging
+import sys
 import threading
+from types import ModuleType
 from typing import Any
 
 import pytest
@@ -134,6 +136,34 @@ def test_kit_log_bridge_forwards_selected_levels_without_recursion(
 
     assert records == [
         (logging.WARNING, ("omni.physx", "warning")),
+    ]
+
+
+def test_start_application_disables_native_kit_console(
+    monkeypatch,
+) -> None:
+    launch_configs: list[dict[str, Any]] = []
+
+    class FakeSimulationApp:
+        def __init__(self, config: dict[str, Any]) -> None:
+            launch_configs.append(config)
+
+    simulation_app = ModuleType("isaacsim.simulation_app")
+    simulation_app.SimulationApp = FakeSimulationApp  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "isaacsim.simulation_app", simulation_app)
+    monkeypatch.setattr(isaac_sim_runtime.LOGGER, "info", lambda message: None)
+
+    runtime = IsaacSimRuntime.__new__(IsaacSimRuntime)
+    runtime.render_mode = None
+    runtime._start_log_bridge = lambda: None
+
+    runtime._start_application()
+
+    assert launch_configs == [
+        {
+            "headless": True,
+            "extra_args": ["--/log/enableStandardStreamOutput=false"],
+        }
     ]
 
 

@@ -125,7 +125,7 @@ class IsaacSimRuntime:
         self._app = SimulationApp(
             {
                 "headless": headless,
-                "extra_args": ["--/log/outputStreamLevel=warn"],
+                "extra_args": ["--/log/enableStandardStreamOutput=false"],
             }
         )
         self._start_log_bridge()
@@ -136,7 +136,6 @@ class IsaacSimRuntime:
         """Forward runtime Kit warnings and errors through project logging."""
 
         import carb.logging  # pyright: ignore[reportMissingImports]
-        import carb.settings  # pyright: ignore[reportMissingImports]
 
         self._kit_log_levels = {
             carb.logging.LEVEL_WARN: logging.WARNING,
@@ -147,10 +146,6 @@ class IsaacSimRuntime:
         self._kit_log_callback = self._forward_kit_log
         self._kit_logger_handle = self._kit_logging.add_logger(
             self._kit_log_callback
-        )
-        carb.settings.get_settings().set_string(
-            "/log/outputStreamLevel",
-            "fatal",
         )
 
 
@@ -182,16 +177,10 @@ class IsaacSimRuntime:
 
 
     def _stop_log_bridge(self) -> None:
-        """Restore native terminal warnings before Kit shuts down."""
+        """Stop forwarding Kit records before Kit shuts down."""
 
         if self._kit_logging is None or self._kit_logger_handle is None:
             return
-        import carb.settings  # pyright: ignore[reportMissingImports]
-
-        carb.settings.get_settings().set_string(
-            "/log/outputStreamLevel",
-            "warn",
-        )
         self._kit_logging.remove_logger(self._kit_logger_handle)
         self._kit_logger_handle = None
         self._kit_log_callback = None

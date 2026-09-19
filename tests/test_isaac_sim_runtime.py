@@ -244,6 +244,7 @@ def test_close_releases_camera_before_world_and_application() -> None:
     runtime._articulation = object()
     runtime._stop_log_bridge = lambda: lifecycle.append("bridge.stop")
     runtime._app = SimpleNamespace(
+        update=lambda: lifecycle.append("application.update"),
         close=lambda **kwargs: lifecycle.append(
             f"application.close:{kwargs['wait_for_replicator']}"
         )
@@ -253,6 +254,7 @@ def test_close_releases_camera_before_world_and_application() -> None:
 
     assert lifecycle == [
         "camera.destroy",
+        "application.update",
         "world.stop",
         "world.clear",
         "bridge.stop",
@@ -284,6 +286,7 @@ def test_close_continues_after_resource_cleanup_failure() -> None:
     runtime._articulation = object()
     runtime._stop_log_bridge = lambda: lifecycle.append("bridge.stop")
     runtime._app = SimpleNamespace(
+        update=lambda: lifecycle.append("application.update"),
         close=lambda **kwargs: lifecycle.append(
             f"application.close:{kwargs['wait_for_replicator']}"
         )
@@ -294,6 +297,7 @@ def test_close_continues_after_resource_cleanup_failure() -> None:
 
     assert lifecycle == [
         "camera.destroy",
+        "application.update",
         "world.stop",
         "world.clear",
         "bridge.stop",

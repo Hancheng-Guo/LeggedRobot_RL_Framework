@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import logging
 import os
 import threading
@@ -864,6 +865,12 @@ class IsaacSimRuntime:
         if self._camera is not None:
             attempt(self._camera.destroy)
             self._camera = None
+            # Render-product and annotator destruction is applied through Kit's
+            # update loop. Flush it while Replicator extensions are still alive,
+            # then finalize Python wrappers before extension teardown begins.
+            if self._app is not None:
+                attempt(self._app.update)
+            gc.collect()
         if self._world is not None:
             attempt(self._world.stop)
             self._body_view = None

@@ -131,6 +131,10 @@ class IsaacSimRuntime:
                     self._app = SimulationApp(
                         {
                             "headless": headless,
+                            # Kit's quick-shutdown path can finalize Python-backed
+                            # extensions after their native state is already gone.
+                            # Use orderly extension teardown for this embedded app.
+                            "fast_shutdown": False,
                             "extra_args": [
                                 "--/app/enableStdoutOutput=false",
                                 "--/app/python/logSysStdOutput=false",
@@ -868,10 +872,9 @@ class IsaacSimRuntime:
             self._world = None
         if self._app is not None:
             attempt(self._stop_log_bridge)
-            # Camera render products and annotators have already been released
-            # above. Waiting for Replicator here can lazily recreate its global
-            # Orchestrator graph while Kit extensions are being unloaded, which
-            # can crash native shutdown (notably at OgnReadFabricTime).
+            # Camera render products have already been released, so there is no
+            # Replicator work to drain. Avoid its update loop while retaining the
+            # orderly Kit teardown selected by fast_shutdown=False.
             attempt(lambda: self._app.close(wait_for_replicator=False))
             self._app = None
         self._closed = True

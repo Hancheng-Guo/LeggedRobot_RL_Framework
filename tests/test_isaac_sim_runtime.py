@@ -166,6 +166,7 @@ def test_start_application_disables_native_kit_console(
     assert launch_configs == [
         {
             "headless": True,
+            "fast_shutdown": False,
             "extra_args": [
                 "--/app/enableStdoutOutput=false",
                 "--/app/python/logSysStdOutput=false",

@@ -6,6 +6,7 @@ import pytest
 import torch
 
 from envs.simulators.isaac_sim_runtime import IsaacSimRuntime
+from envs.simulators.isaac_sim_model import IsaacSimModelConverter
 
 
 pytestmark = pytest.mark.isaacsim
@@ -97,6 +98,56 @@ class FakeUsd:
     @staticmethod
     def PrimRange(root: FakePrim) -> tuple[FakePrim, ...]:
         return (root, *root.descendants)
+
+
+def _model_converter(
+    package_path: str = "assets/robot_description",
+) -> IsaacSimModelConverter:
+    return IsaacSimModelConverter(
+        ros_package_paths=({"robot_description": package_path},),
+        merge_fixed_joints=False,
+        allow_self_collision=False,
+        joint_stiffness=100.0,
+        joint_damping=2.0,
+    )
+
+
+def test_model_conversion_uses_model_usd_directory(tmp_path) -> None:
+    model_path = tmp_path / "assets" / "robots" / "go1.urdf"
+    model_path.parent.mkdir(parents=True)
+    model_path.write_text("<robot name='go1'/>", encoding="utf-8")
+
+    output_directory = _model_converter()._asset_output_directory(model_path)
+
+    assert output_directory == tmp_path / "assets" / "robots" / "USD"
+
+
+def test_conversion_cache_is_portable_across_package_locations(
+    tmp_path,
+) -> None:
+    model_path = tmp_path / "assets" / "robots" / "go1.urdf"
+    model_path.parent.mkdir(parents=True)
+    model_path.write_text("<robot name='go1'/>", encoding="utf-8")
+    first = _model_converter("C:/first/robot_description")
+    second = _model_converter("D:/second/robot_description")
+
+    first_fingerprint = first._conversion_fingerprint(model_path, "urdf")
+    second_fingerprint = second._conversion_fingerprint(model_path, "urdf")
+    output_directory = first._asset_output_directory(model_path)
+    output_path = output_directory / "go1" / "go1.usda"
+    output_path.parent.mkdir(parents=True)
+    output_path.write_text("#usda 1.0", encoding="utf-8")
+    first._write_conversion_manifest(
+        output_directory,
+        output_path,
+        first_fingerprint,
+    )
+
+    assert first_fingerprint == second_fingerprint
+    assert second._cached_import_path(
+        output_directory,
+        second_fingerprint,
+    ) == output_path
 
 
 def test_selects_physx_variant_before_inspecting_robot() -> None:

@@ -80,7 +80,6 @@ class IsaacSimRuntime:
 
         self._start_application()
         converter = IsaacSimModelConverter(
-            self.context,
             ros_package_paths=ros_package_paths,
             merge_fixed_joints=merge_fixed_joints,
             allow_self_collision=allow_self_collision,

@@ -90,6 +90,7 @@ class IsaacSimRuntime:
         self.model_path = converter.convert_if_needed(self.model_path)
         self._build_scene()
         self._build_metadata()
+        self._prepare_state_buffers()
         self._capture_default_state()
         self._ctrl = self.metadata.actuator_default_ctrl.repeat(
             self.num_envs,
@@ -118,7 +119,7 @@ class IsaacSimRuntime:
         from isaacsim.core.cloner import GridCloner  # pyright: ignore[reportMissingImports]
         from isaacsim.core.prims import Articulation, RigidPrim  # pyright: ignore[reportMissingImports]
         from isaacsim.core.utils.stage import add_reference_to_stage  # pyright: ignore[reportMissingImports]
-        from pxr import UsdGeom, UsdPhysics  # pyright: ignore[reportMissingImports]
+        from pxr import Usd, UsdGeom, UsdPhysics  # pyright: ignore[reportMissingImports]
 
         self._world = World(
             physics_dt=self.sim_dt,
@@ -127,6 +128,15 @@ class IsaacSimRuntime:
             device=str(self.context.device),
             physics_prim_path="/World/physicsScene",
         )
+        physics_context = self._world.get_physics_context()
+        aggregate_pairs_capacity = max(1024, self.num_envs * 64)
+        if (
+            physics_context.get_gpu_found_lost_aggregate_pairs_capacity()
+            < aggregate_pairs_capacity
+        ):
+            physics_context.set_gpu_found_lost_aggregate_pairs_capacity(
+                aggregate_pairs_capacity
+            )
         stage = self._world.stage
         source_env_path = "/World/envs/env_0"
         source_robot_path = source_env_path + self._normalized_robot_prim_path()
@@ -135,10 +145,12 @@ class IsaacSimRuntime:
             usd_path=str(self.model_path),
             prim_path=source_robot_path,
         )
+        self._select_physx_variant(stage, source_robot_path)
         articulation_root_relative_path = (
             self._find_articulation_root_relative_path(
                 stage,
                 source_robot_path,
+                Usd,
                 UsdPhysics,
             )
         )
@@ -162,6 +174,15 @@ class IsaacSimRuntime:
                 name="GroundPlane",
             )
             self.floor_prim_paths = (default_floor_path,)
+        self._floor_collision_prim_paths = tuple(
+            self._find_floor_collision_prim_path(
+                stage,
+                floor_path,
+                Usd,
+                UsdPhysics,
+            )
+            for floor_path in self.floor_prim_paths
+        )
 
         cloner = GridCloner(spacing=self.env_spacing, stage=stage)
         cloner.define_base_env("/World/envs")
@@ -173,7 +194,10 @@ class IsaacSimRuntime:
             base_env_path="/World/envs",
             root_path="/World/envs/env_",
             enable_env_ids=True,
-            clone_in_fabric=True,
+            # The legacy Articulation/RigidPrim views discover their default
+            # states from USD. Fabric-only clones leave those defaults at one
+            # row while the PhysX view contains every environment.
+            clone_in_fabric=False,
         )
         cloner.filter_collisions(
             physicsscene_path="/World/physicsScene",
@@ -193,11 +217,11 @@ class IsaacSimRuntime:
                 reset_xform_properties=False,
             )
         )
-        self._world.reset()
 
         body_relative_paths = self._rigid_body_relative_paths(
             stage,
             source_robot_path,
+            Usd,
             UsdPhysics,
         )
         if not body_relative_paths:
@@ -214,16 +238,16 @@ class IsaacSimRuntime:
             for env_id in range(self.num_envs)
             for relative in body_relative_paths
         ]
-        self._body_view = self._world.scene.add(
-            RigidPrim(
-                prim_paths_expr=body_paths,
-                name="isaac_sim_robot_bodies",
-                reset_xform_properties=False,
-                track_contact_forces=True,
-                contact_filter_prim_paths_expr=list(self.floor_prim_paths),
-            )
+        self._body_view = RigidPrim(
+            prim_paths_expr=body_paths,
+            name="isaac_sim_robot_bodies",
+            reset_xform_properties=False,
+            track_contact_forces=True,
+            contact_filter_prim_paths_expr=[
+                list(self._floor_collision_prim_paths)
+                for _ in body_paths
+            ],
         )
-        self._world.reset()
 
         if self.render_mode == "rgb_array":
             from isaacsim.sensors.camera import Camera  # pyright: ignore[reportMissingImports]
@@ -237,6 +261,16 @@ class IsaacSimRuntime:
                 frequency=1.0 / (self.sim_dt * self.frame_skip),
                 resolution=self.camera_resolution,
             )
+
+        # Initialize every physics-backed scene view together. Adding another
+        # view after reset invalidates the tensor simulation view created by
+        # the first reset.
+        self._world.reset()
+        # RigidPrim contains articulation links, whose poses must be controlled
+        # through the Articulation. Keep this read/contact view outside Scene's
+        # post-reset lifecycle so it does not try to restore link transforms.
+        self._body_view.initialize()
+        if self._camera is not None:
             self._camera.initialize()
 
 
@@ -245,15 +279,48 @@ class IsaacSimRuntime:
 
 
     @staticmethod
+    def _select_physx_variant(stage: Any, robot_path: str) -> None:
+        """Select an imported asset's PhysX payload before inspecting it."""
+
+        robot_prim = stage.GetPrimAtPath(robot_path)
+        variant_sets = robot_prim.GetVariantSets()
+        if not variant_sets.HasVariantSet("Physics"):
+            return
+
+        physics_variant = variant_sets.GetVariantSet("Physics")
+        variant_names = tuple(physics_variant.GetVariantNames())
+        physx_variant = next(
+            (
+                name
+                for name in variant_names
+                if name.casefold() == "physx"
+            ),
+            None,
+        )
+        if physx_variant is None:
+            raise RuntimeError(
+                f"USD asset at {robot_path!r} defines a 'Physics' variant "
+                f"set without a PhysX variant; available variants: "
+                f"{list(variant_names)}."
+            )
+        if not physics_variant.SetVariantSelection(physx_variant):
+            raise RuntimeError(
+                f"Failed to select Physics={physx_variant!r} for "
+                f"{robot_path!r}."
+            )
+
+
+    @staticmethod
     def _find_articulation_root_relative_path(
         stage: Any,
         robot_path: str,
+        usd: Any,
         usd_physics: Any,
     ) -> str:
         robot_prim = stage.GetPrimAtPath(robot_path)
         articulation_roots = [
             str(prim.GetPath())
-            for prim in (robot_prim, *robot_prim.GetDescendants())
+            for prim in usd.PrimRange(robot_prim)
             if prim.HasAPI(usd_physics.ArticulationRootAPI)
         ]
         if not articulation_roots:
@@ -273,15 +340,41 @@ class IsaacSimRuntime:
     def _rigid_body_relative_paths(
         stage: Any,
         robot_path: str,
+        usd: Any,
         usd_physics: Any,
     ) -> tuple[str, ...]:
         
         root = stage.GetPrimAtPath(robot_path)
         paths: list[str] = []
-        for prim in (root, *root.GetDescendants()):
+        for prim in usd.PrimRange(root):
             if prim.HasAPI(usd_physics.RigidBodyAPI):
                 paths.append(str(prim.GetPath())[len(robot_path):])
         return tuple(paths)
+
+
+    @staticmethod
+    def _find_floor_collision_prim_path(
+        stage: Any,
+        floor_path: str,
+        usd: Any,
+        usd_physics: Any,
+    ) -> str:
+        floor_prim = stage.GetPrimAtPath(floor_path)
+        collision_paths = tuple(
+            str(prim.GetPath())
+            for prim in usd.PrimRange(floor_prim)
+            if prim.HasAPI(usd_physics.CollisionAPI)
+        )
+        if not collision_paths:
+            raise ValueError(
+                f"Floor Prim {floor_path!r} contains no collision Prim."
+            )
+        if len(collision_paths) > 1:
+            raise ValueError(
+                f"Floor Prim {floor_path!r} must contain exactly one "
+                f"collision Prim, found {list(collision_paths)}."
+            )
+        return collision_paths[0]
 
 
     def _build_metadata(self) -> None:
@@ -291,7 +384,7 @@ class IsaacSimRuntime:
             self._articulation.get_joint_positions(clone=True)[0]
         )
         joint_pos_limits = self._tensor(
-            self._articulation.get_dof_limits(clone=True)[0]
+            self._articulation.get_dof_limits()[0]
         )
         self.base_body_prim_path = (
             self._requested_base_body_prim_path
@@ -383,6 +476,63 @@ class IsaacSimRuntime:
         self.metadata.joint_default_pos.copy_(self._default_joint_positions[0])
         self.metadata.actuator_default_ctrl.copy_(
             self._default_joint_positions[0]
+        )
+
+
+    def _prepare_state_buffers(self) -> None:
+        """Precompute immutable tensor layouts used by every state query."""
+
+        self._body_count = len(self._body_names)
+        self._floor_count = len(self.floor_prim_paths)
+        self._all_env_indices = torch.arange(
+            self.num_envs,
+            dtype=torch.long,
+            device=self.context.device,
+        )
+        self._floor_geom_xpos = torch.zeros(
+            (self.num_envs, self._floor_count, 3),
+            dtype=self.context.dtype,
+            device=self.context.device,
+        )
+        self._floor_geom_xvel = torch.zeros(
+            (self.num_envs, self._floor_count, 6),
+            dtype=self.context.dtype,
+            device=self.context.device,
+        )
+
+        body_ids = torch.arange(
+            self._body_count,
+            dtype=torch.long,
+            device=self.context.device,
+        ).view(1, -1, 1).expand(
+            self.num_envs,
+            -1,
+            self._floor_count,
+        )
+        floor_ids = (
+            self._body_count
+            + torch.arange(
+                self._floor_count,
+                dtype=torch.long,
+                device=self.context.device,
+            )
+        ).view(1, 1, -1).expand_as(body_ids)
+        self._contact_geom_pairs = torch.stack(
+            (body_ids, floor_ids),
+            dim=-1,
+        ).reshape(self.num_envs, -1, 2)
+
+        foot_ids = torch.tensor(
+            [
+                self._body_prim_paths.index(path)
+                for path in self.foot_body_prim_paths
+            ],
+            dtype=torch.long,
+            device=self.context.device,
+        )
+        self._foot_contact_mask = (
+            body_ids.reshape(self.num_envs, -1, 1)
+            == foot_ids.view(1, 1, -1)
         )
 
 
@@ -481,22 +631,14 @@ class IsaacSimRuntime:
         geom_xpos = torch.cat(
             (
                 body_pos,
-                torch.zeros(
-                    (self.num_envs, len(self.floor_prim_paths), 3),
-                    dtype=self.context.dtype,
-                    device=self.context.device,
-                ),
+                self._floor_geom_xpos,
             ),
             dim=1,
         )
         geom_xvel = torch.cat(
             (
                 geom_xvel,
-                torch.zeros(
-                    (self.num_envs, len(self.floor_prim_paths), 6),
-                    dtype=self.context.dtype,
-                    device=self.context.device,
-                ),
+                self._floor_geom_xvel,
             ),
             dim=1,
         )
@@ -543,63 +685,33 @@ class IsaacSimRuntime:
         )
         force_vectors = self._tensor(matrix).reshape(
             self.num_envs,
-            len(self._body_names),
-            len(self.floor_prim_paths),
+            self._body_count,
+            self._floor_count,
             3,
         )
         normal_force = force_vectors.norm(dim=-1)
-        active = normal_force > 0.0
-        body_ids = torch.arange(
-            len(self._body_names),
-            dtype=torch.long,
-            device=self.context.device,
-        ).view(1, -1, 1).expand(
-            self.num_envs,
-            -1,
-            len(self.floor_prim_paths),
-        )
-        floor_ids = (
-            len(self._body_names)
-            + torch.arange(
-                len(self.floor_prim_paths),
-                dtype=torch.long,
-                device=self.context.device,
-            )
-        ).view(1, 1, -1).expand_as(body_ids)
-        contact_ids = torch.stack(
-            (body_ids, floor_ids),
-            dim=-1,
-        ).reshape(self.num_envs, -1, 2)
         contact_ids = torch.where(
-            active.reshape(self.num_envs, -1, 1),
-            contact_ids,
-            torch.full_like(contact_ids, -1),
+            (normal_force > 0.0).reshape(self.num_envs, -1, 1),
+            self._contact_geom_pairs,
+            -1,
         )
         contact_forces = torch.zeros(
             (
                 self.num_envs,
-                len(self._body_names) * len(self.floor_prim_paths),
+                self._body_count * self._floor_count,
                 6,
             ),
             dtype=self.context.dtype,
             device=self.context.device,
         )
         contact_forces[..., 0] = normal_force.reshape(self.num_envs, -1)
-        foot_ids = torch.tensor(
-            [
-                self._body_prim_paths.index(path)
-                for path in self.metadata.foot_body_prim_paths
-            ],
-            dtype=torch.long,
-            device=self.context.device,
-        )
         foot_contact = (
-            body_ids.reshape(self.num_envs, -1, 1)
-            == foot_ids.view(1, 1, -1)
-        ) & (
-            normal_force.reshape(self.num_envs, -1)
-            >= self.foot_contact_force_threshold
-        ).unsqueeze(-1)
+            self._foot_contact_mask
+            & (
+                normal_force.reshape(self.num_envs, -1)
+                >= self.foot_contact_force_threshold
+            ).unsqueeze(-1)
+        )
         return contact_ids, contact_forces, foot_contact
 
 
@@ -660,11 +772,7 @@ class IsaacSimRuntime:
     ) -> torch.Tensor:
         
         if env_ids is None:
-            return torch.arange(
-                self.num_envs,
-                dtype=torch.long,
-                device=self.context.device,
-            )
+            return self._all_env_indices
         return env_ids.to(device=self.context.device, dtype=torch.long)
 
 

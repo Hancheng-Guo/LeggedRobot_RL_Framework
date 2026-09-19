@@ -2,6 +2,7 @@ import warnings
 import shutil
 from pathlib import Path
 from datetime import datetime
+from types import TracebackType
 
 from app.stage_manager import StageManager
 from app.utils.context import create_runtime_context, RuntimeContext
@@ -121,6 +122,7 @@ class ApplicationEntry:
                 load_dir=self.load_dir,
             )
         except Exception:
+            logger.exception("Application setup failed.")
             self.logging_session.close()
             raise
 
@@ -208,5 +210,16 @@ class ApplicationEntry:
         return self
 
 
-    def __exit__(self, *args) -> None:
+    def __exit__(
+        self,
+        exception_type: type[BaseException] | None,
+        exception: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        if exception_type is not None and exception is not None:
+            logger.error(
+                "Application execution failed.",
+                exc_info=(exception_type, exception, traceback),
+            )
+            self.logging_session.flush()
         self.close()

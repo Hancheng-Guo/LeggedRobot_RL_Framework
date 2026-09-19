@@ -203,6 +203,30 @@ def test_start_application_stops_log_bridge_after_startup_failure(
     assert lifecycle == ["bridge", "application", "stop"]
 
 
+def test_rgb_camera_does_not_use_kit_run_loop_frequency() -> None:
+    camera_arguments: list[dict[str, Any]] = []
+
+    class FakeCamera:
+        def __init__(self, **kwargs: Any) -> None:
+            camera_arguments.append(kwargs)
+
+    runtime = IsaacSimRuntime.__new__(IsaacSimRuntime)
+    runtime._requested_camera_prim_path = None
+    runtime.camera_resolution = (640, 480)
+
+    runtime._build_camera(FakeCamera)
+
+    assert runtime.camera_prim_path == "/World/Camera"
+    assert camera_arguments == [
+        {
+            "prim_path": "/World/Camera",
+            "position": pytest.approx((2.5, 2.5, 1.8)),
+            "resolution": (640, 480),
+        }
+    ]
+    assert "frequency" not in camera_arguments[0]
+
+
 def test_model_conversion_uses_model_usd_directory(tmp_path) -> None:
     model_path = tmp_path / "assets" / "robots" / "go1.urdf"
     model_path.parent.mkdir(parents=True)

@@ -338,15 +338,7 @@ class IsaacSimRuntime:
         if self.render_mode == "rgb_array":
             from isaacsim.sensors.camera import Camera  # pyright: ignore[reportMissingImports]
 
-            self.camera_prim_path = (
-                self._requested_camera_prim_path or "/World/Camera"
-            )
-            self._camera = Camera(
-                prim_path=self.camera_prim_path,
-                position=np.asarray((2.5, 2.5, 1.8)),
-                frequency=1.0 / (self.sim_dt * self.frame_skip),
-                resolution=self.camera_resolution,
-            )
+            self._build_camera(Camera)
 
         # Initialize every physics-backed scene view together. Adding another
         # view after reset invalidates the tensor simulation view created by
@@ -358,6 +350,19 @@ class IsaacSimRuntime:
         self._body_view.initialize()
         if self._camera is not None:
             self._camera.initialize()
+
+
+    def _build_camera(self, camera_type: Any) -> None:
+        """Create a camera rendered explicitly once per control step."""
+
+        self.camera_prim_path = (
+            self._requested_camera_prim_path or "/World/Camera"
+        )
+        self._camera = camera_type(
+            prim_path=self.camera_prim_path,
+            position=np.asarray((2.5, 2.5, 1.8)),
+            resolution=self.camera_resolution,
+        )
 
 
     def _normalized_robot_prim_path(self) -> str:

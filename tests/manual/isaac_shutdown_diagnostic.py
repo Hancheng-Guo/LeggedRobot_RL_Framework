@@ -122,7 +122,7 @@ def build_project_scene(
     from isaacsim.core.api import World
     from isaacsim.core.cloner import GridCloner
     from isaacsim.core.prims import Articulation as LegacyArticulation
-    from isaacsim.core.prims import RigidPrim
+    from isaacsim.core.prims import RigidPrim as LegacyRigidPrim
     from isaacsim.core.utils.stage import add_reference_to_stage
     from pxr import Usd, UsdGeom, UsdPhysics
 
@@ -229,18 +229,27 @@ def build_project_scene(
         for env_id in range(num_envs)
         for relative_path in body_relative_paths
     ]
-    body_view = RigidPrim(
-        prim_paths_expr=body_paths,
-        name="diagnostic_robot_bodies",
-        reset_xform_properties=False,
-        track_contact_forces=True,
-        contact_filter_prim_paths_expr=[
-            [floor_collision_path]
-            for _ in body_paths
-        ],
-    )
+    if mode == "experimental-contacts":
+        from isaacsim.core.experimental.prims import RigidPrim
+
+        body_view = RigidPrim(
+            body_paths,
+            contact_filter_paths=[floor_collision_path],
+        )
+    else:
+        body_view = LegacyRigidPrim(
+            prim_paths_expr=body_paths,
+            name="diagnostic_robot_bodies",
+            reset_xform_properties=False,
+            track_contact_forces=True,
+            contact_filter_prim_paths_expr=[
+                [floor_collision_path]
+                for _ in body_paths
+            ],
+        )
     world.reset()
-    body_view.initialize()
+    if mode != "experimental-contacts":
+        body_view.initialize()
     LOGGER.info(
         "Contact view initialized for %d rigid bodies.",
         len(body_paths),
@@ -299,6 +308,20 @@ def main() -> None:
             for _ in range(arguments.steps):
                 world.step(render=False)
             LOGGER.info("Completed %d simulation steps.", arguments.steps)
+            if body_view is not None:
+                if arguments.mode == "experimental-contacts":
+                    contact_matrix = body_view.get_contact_force_matrix(
+                        dt=0.002
+                    )
+                else:
+                    contact_matrix = body_view.get_contact_force_matrix(
+                        dt=0.002,
+                        clone=True,
+                    )
+                LOGGER.info(
+                    "Contact force matrix queried with shape %s.",
+                    contact_matrix.shape,
+                )
     finally:
         if world is not None:
             world.stop()
@@ -321,7 +344,8 @@ def main() -> None:
                 articulation = None
                 LOGGER.info("Articulation view released.")
             if body_view is not None:
-                body_view._physics_view = None
+                if arguments.mode != "experimental-contacts":
+                    body_view._physics_view = None
                 body_view = None
                 LOGGER.info("Rigid contact view explicitly invalidated.")
 

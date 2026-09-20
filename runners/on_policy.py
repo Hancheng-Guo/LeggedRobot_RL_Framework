@@ -625,10 +625,12 @@ class OnPolicyRunner(BaseRunner):
             raise ValueError("'num_steps' must be a positive integer.")
 
         original_environment = self.environment
-        temporary_environment = self._create_temporary_environment(
-            num_envs=1,
-        )
-        self.environment = temporary_environment
+        temporary_environment: BaseEnv | None = None
+        if original_environment.supports_concurrent_instances:
+            temporary_environment = self._create_temporary_environment(
+                num_envs=1,
+            )
+            self.environment = temporary_environment
 
         try:
             self._play_steps(
@@ -638,7 +640,8 @@ class OnPolicyRunner(BaseRunner):
             )
         finally:
             self.algorithm.reset_policy_state()
-            temporary_environment.close()
+            if temporary_environment is not None:
+                temporary_environment.close()
             self.environment = original_environment
 
 

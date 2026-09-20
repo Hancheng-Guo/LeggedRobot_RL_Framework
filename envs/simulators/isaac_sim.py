@@ -38,6 +38,8 @@ class IsaacSimSimulator(BaseSimulator):
     runtime.
     """
 
+    SUPPORTS_CONCURRENT_INSTANCES = False
+
     def __init__(
         self,
         context: RuntimeContext,

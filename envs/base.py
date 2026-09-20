@@ -8,12 +8,20 @@ from app.utils.context import RuntimeContext
 
 class BaseEnv(ABC):
 
+    SUPPORTS_CONCURRENT_INSTANCES = True
+
     def __init__(
         self,
         context: RuntimeContext,
     ) -> None:
         self.num_envs: int
         self.context = context
+
+
+    @property
+    def supports_concurrent_instances(self) -> bool:
+        """Whether another environment may coexist in this process."""
+        return self.SUPPORTS_CONCURRENT_INSTANCES
 
 
     @abstractmethod

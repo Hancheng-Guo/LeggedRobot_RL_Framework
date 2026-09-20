@@ -18,6 +18,7 @@ SCENE_MODES = (
     "articulation",
     "experimental-articulation",
     "contacts",
+    "experimental-contacts",
 )
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
@@ -199,7 +200,7 @@ def build_project_scene(
     articulation_path_expression = (
         "/World/envs/env_.*/Robot" + articulation_relative_path
     )
-    if mode == "experimental-articulation":
+    if mode in {"experimental-articulation", "experimental-contacts"}:
         from isaacsim.core.experimental.prims import Articulation
 
         articulation = Articulation(articulation_path_expression)
@@ -302,7 +303,10 @@ def main() -> None:
         if world is not None:
             world.stop()
             if articulation is not None:
-                if arguments.mode == "experimental-articulation":
+                if arguments.mode in {
+                    "experimental-articulation",
+                    "experimental-contacts",
+                }:
                     LOGGER.info(
                         "Releasing experimental Articulation view."
                     )

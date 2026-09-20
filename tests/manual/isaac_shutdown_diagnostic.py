@@ -12,7 +12,13 @@ from isaacsim.simulation_app import SimulationApp
 
 
 LOGGER = logging.getLogger("isaac_shutdown_diagnostic")
-SCENE_MODES = ("model", "cloner", "articulation", "contacts")
+SCENE_MODES = (
+    "model",
+    "cloner",
+    "articulation",
+    "experimental-articulation",
+    "contacts",
+)
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -114,7 +120,8 @@ def build_project_scene(
 
     from isaacsim.core.api import World
     from isaacsim.core.cloner import GridCloner
-    from isaacsim.core.prims import Articulation, RigidPrim
+    from isaacsim.core.prims import Articulation as LegacyArticulation
+    from isaacsim.core.prims import RigidPrim
     from isaacsim.core.utils.stage import add_reference_to_stage
     from pxr import Usd, UsdGeom, UsdPhysics
 
@@ -189,17 +196,24 @@ def build_project_scene(
         world.reset()
         return world, articulation, body_view
 
-    articulation = world.scene.add(
-        Articulation(
-            prim_paths_expr=(
-                "/World/envs/env_.*/Robot" + articulation_relative_path
-            ),
-            name="diagnostic_robots",
-            reset_xform_properties=False,
-        )
+    articulation_path_expression = (
+        "/World/envs/env_.*/Robot" + articulation_relative_path
     )
-    LOGGER.info("Articulation view created.")
-    if mode == "articulation":
+    if mode == "experimental-articulation":
+        from isaacsim.core.experimental.prims import Articulation
+
+        articulation = Articulation(articulation_path_expression)
+        LOGGER.info("Experimental Articulation view created.")
+    else:
+        articulation = world.scene.add(
+            LegacyArticulation(
+                prim_paths_expr=articulation_path_expression,
+                name="diagnostic_robots",
+                reset_xform_properties=False,
+            )
+        )
+        LOGGER.info("Legacy Articulation view created.")
+    if mode in {"articulation", "experimental-articulation"}:
         world.reset()
         return world, articulation, body_view
 
@@ -288,15 +302,20 @@ def main() -> None:
         if world is not None:
             world.stop()
             if articulation is not None:
-                articulation._invalidate_physics_handle_callback(None)
-                articulation._invalidation_callback = None
-                if world.scene.object_exists("diagnostic_robots"):
-                    world.scene.remove_object(
-                        "diagnostic_robots",
-                        registry_only=True,
+                if arguments.mode == "experimental-articulation":
+                    LOGGER.info(
+                        "Releasing experimental Articulation view."
                     )
+                else:
+                    articulation._invalidate_physics_handle_callback(None)
+                    articulation._invalidation_callback = None
+                    if world.scene.object_exists("diagnostic_robots"):
+                        world.scene.remove_object(
+                            "diagnostic_robots",
+                            registry_only=True,
+                        )
                 articulation = None
-                LOGGER.info("Articulation view explicitly invalidated.")
+                LOGGER.info("Articulation view released.")
             if body_view is not None:
                 body_view._physics_view = None
                 body_view = None

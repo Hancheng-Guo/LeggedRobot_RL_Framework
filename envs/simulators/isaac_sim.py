@@ -38,6 +38,8 @@ class IsaacSimSimulator(BaseSimulator):
     runtime.
     """
 
+    SUPPORTS_CONCURRENT_INSTANCES = False
+
     def __init__(
         self,
         context: RuntimeContext,
@@ -88,7 +90,38 @@ class IsaacSimSimulator(BaseSimulator):
         joint_damping: float | Mapping[str, float] | None = None,
         reset_state: Mapping[str, object] | None = None,
     ) -> None:
-        
+
+        backend_configuration_changed = any(
+            value is not None
+            for value in (
+                model_path,
+                ros_package_paths,
+                sim_dt,
+                frame_skip,
+                render_mode,
+                env_spacing,
+                robot_prim_path,
+                base_body_prim_path,
+                foot_body_prim_paths,
+                floor_prim_paths,
+                foot_contact_force_threshold,
+                camera_prim_path,
+                camera_resolution,
+                merge_fixed_joints,
+                allow_self_collision,
+                joint_stiffness,
+                joint_damping,
+                reset_state,
+            )
+        )
+        if (
+            self._backend is not None
+            and component.simulator is None
+            and not backend_configuration_changed
+            and (num_envs is None or num_envs == self.num_envs)
+        ):
+            return
+
         if num_envs is not None and num_envs <= 0:
             raise ValueError("'num_envs' must be greater than 0.")
         if sim_dt is not None and sim_dt <= 0.0:

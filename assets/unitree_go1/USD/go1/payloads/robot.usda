@@ -1,0 +1,592 @@
+#usda 1.0
+(
+    customLayerData = {
+        string creator = "URDF USD Converter v0.3.2"
+    }
+    defaultPrim = "go1"
+    endTimeCode = 1000000
+    kilogramsPerUnit = 1
+    metersPerUnit = 1
+    startTimeCode = 0
+    upAxis = "Z"
+)
+
+over "go1" (
+    prepend apiSchemas = ["IsaacRobotAPI"]
+)
+{
+    prepend rel isaac:physics:robotJoints = [
+        </go1/Physics/floating_base>,
+        </go1/Physics/imu_joint>,
+        </go1/Physics/FR_hip_joint>,
+        </go1/Physics/FR_hip_rotor_joint>,
+        </go1/Physics/FL_hip_joint>,
+        </go1/Physics/FL_hip_rotor_joint>,
+        </go1/Physics/RR_hip_joint>,
+        </go1/Physics/RR_hip_rotor_joint>,
+        </go1/Physics/RL_hip_joint>,
+        </go1/Physics/RL_hip_rotor_joint>,
+        </go1/Physics/camera_joint_face>,
+        </go1/Physics/camera_joint_chin>,
+        </go1/Physics/camera_joint_left>,
+        </go1/Physics/camera_joint_right>,
+        </go1/Physics/camera_joint_rearDown>,
+        </go1/Physics/ultraSound_joint_left>,
+        </go1/Physics/ultraSound_joint_right>,
+        </go1/Physics/ultraSound_joint_face>,
+        </go1/Physics/FR_thigh_joint>,
+        </go1/Physics/FR_thigh_rotor_joint>,
+        </go1/Physics/FR_calf_joint>,
+        </go1/Physics/FR_calf_rotor_joint>,
+        </go1/Physics/FR_foot_fixed>,
+        </go1/Physics/FL_thigh_joint>,
+        </go1/Physics/FL_thigh_rotor_joint>,
+        </go1/Physics/FL_calf_joint>,
+        </go1/Physics/FL_calf_rotor_joint>,
+        </go1/Physics/FL_foot_fixed>,
+        </go1/Physics/RR_thigh_joint>,
+        </go1/Physics/RR_thigh_rotor_joint>,
+        </go1/Physics/RR_calf_joint>,
+        </go1/Physics/RR_calf_rotor_joint>,
+        </go1/Physics/RR_foot_fixed>,
+        </go1/Physics/RL_thigh_joint>,
+        </go1/Physics/RL_thigh_rotor_joint>,
+        </go1/Physics/RL_calf_joint>,
+        </go1/Physics/RL_calf_rotor_joint>,
+        </go1/Physics/RL_foot_fixed>,
+    ]
+    prepend rel isaac:physics:robotLinks = [
+        </go1/Geometry/base>,
+        </go1/Geometry/base/trunk>,
+        </go1/Geometry/base/trunk/imu_link>,
+        </go1/Geometry/base/trunk/FR_hip>,
+        </go1/Geometry/base/trunk/FR_hip/FR_thigh>,
+        </go1/Geometry/base/trunk/FR_hip/FR_thigh/FR_calf>,
+        </go1/Geometry/base/trunk/FR_hip/FR_thigh/FR_calf/FR_foot>,
+        </go1/Geometry/base/trunk/FR_hip/FR_thigh/FR_calf_rotor>,
+        </go1/Geometry/base/trunk/FR_hip/FR_thigh_rotor>,
+        </go1/Geometry/base/trunk/FR_hip_rotor>,
+        </go1/Geometry/base/trunk/FL_hip>,
+        </go1/Geometry/base/trunk/FL_hip/FL_thigh>,
+        </go1/Geometry/base/trunk/FL_hip/FL_thigh/FL_calf>,
+        </go1/Geometry/base/trunk/FL_hip/FL_thigh/FL_calf/FL_foot>,
+        </go1/Geometry/base/trunk/FL_hip/FL_thigh/FL_calf_rotor>,
+        </go1/Geometry/base/trunk/FL_hip/FL_thigh_rotor>,
+        </go1/Geometry/base/trunk/FL_hip_rotor>,
+        </go1/Geometry/base/trunk/RR_hip>,
+        </go1/Geometry/base/trunk/RR_hip/RR_thigh>,
+        </go1/Geometry/base/trunk/RR_hip/RR_thigh/RR_calf>,
+        </go1/Geometry/base/trunk/RR_hip/RR_thigh/RR_calf/RR_foot>,
+        </go1/Geometry/base/trunk/RR_hip/RR_thigh/RR_calf_rotor>,
+        </go1/Geometry/base/trunk/RR_hip/RR_thigh_rotor>,
+        </go1/Geometry/base/trunk/RR_hip_rotor>,
+        </go1/Geometry/base/trunk/RL_hip>,
+        </go1/Geometry/base/trunk/RL_hip/RL_thigh>,
+        </go1/Geometry/base/trunk/RL_hip/RL_thigh/RL_calf>,
+        </go1/Geometry/base/trunk/RL_hip/RL_thigh/RL_calf/RL_foot>,
+        </go1/Geometry/base/trunk/RL_hip/RL_thigh/RL_calf_rotor>,
+        </go1/Geometry/base/trunk/RL_hip/RL_thigh_rotor>,
+        </go1/Geometry/base/trunk/RL_hip_rotor>,
+        </go1/Geometry/base/trunk/camera_face>,
+        </go1/Geometry/base/trunk/camera_chin>,
+        </go1/Geometry/base/trunk/camera_left>,
+        </go1/Geometry/base/trunk/camera_right>,
+        </go1/Geometry/base/trunk/camera_rearDown>,
+        </go1/Geometry/base/trunk/ultraSound_left>,
+        </go1/Geometry/base/trunk/ultraSound_right>,
+        </go1/Geometry/base/trunk/ultraSound_face>,
+    ]
+    token isaac:robotType = "Quadruped"
+
+    over "Geometry"
+    {
+        over "base" (
+            prepend apiSchemas = ["IsaacLinkAPI"]
+        )
+        {
+            over "trunk" (
+                prepend apiSchemas = ["IsaacLinkAPI"]
+            )
+            {
+                over "FR_hip" (
+                    prepend apiSchemas = ["IsaacLinkAPI"]
+                )
+                {
+                    over "FR_thigh" (
+                        prepend apiSchemas = ["IsaacLinkAPI"]
+                    )
+                    {
+                        over "FR_calf_rotor" (
+                            prepend apiSchemas = ["IsaacLinkAPI"]
+                        )
+                        {
+                        }
+
+                        over "FR_calf" (
+                            prepend apiSchemas = ["IsaacLinkAPI"]
+                        )
+                        {
+                            over "FR_foot" (
+                                prepend apiSchemas = ["IsaacLinkAPI"]
+                            )
+                            {
+                            }
+                        }
+                    }
+
+                    over "FR_thigh_rotor" (
+                        prepend apiSchemas = ["IsaacLinkAPI"]
+                    )
+                    {
+                    }
+                }
+
+                over "FR_hip_rotor" (
+                    prepend apiSchemas = ["IsaacLinkAPI"]
+                )
+                {
+                }
+
+                over "FL_hip" (
+                    prepend apiSchemas = ["IsaacLinkAPI"]
+                )
+                {
+                    over "FL_thigh" (
+                        prepend apiSchemas = ["IsaacLinkAPI"]
+                    )
+                    {
+                        over "FL_calf_rotor" (
+                            prepend apiSchemas = ["IsaacLinkAPI"]
+                        )
+                        {
+                        }
+
+                        over "FL_calf" (
+                            prepend apiSchemas = ["IsaacLinkAPI"]
+                        )
+                        {
+                            over "FL_foot" (
+                                prepend apiSchemas = ["IsaacLinkAPI"]
+                            )
+                            {
+                            }
+                        }
+                    }
+
+                    over "FL_thigh_rotor" (
+                        prepend apiSchemas = ["IsaacLinkAPI"]
+                    )
+                    {
+                    }
+                }
+
+                over "FL_hip_rotor" (
+                    prepend apiSchemas = ["IsaacLinkAPI"]
+                )
+                {
+                }
+
+                over "RR_hip" (
+                    prepend apiSchemas = ["IsaacLinkAPI"]
+                )
+                {
+                    over "RR_thigh" (
+                        prepend apiSchemas = ["IsaacLinkAPI"]
+                    )
+                    {
+                        over "RR_calf_rotor" (
+                            prepend apiSchemas = ["IsaacLinkAPI"]
+                        )
+                        {
+                        }
+
+                        over "RR_calf" (
+                            prepend apiSchemas = ["IsaacLinkAPI"]
+                        )
+                        {
+                            over "RR_foot" (
+                                prepend apiSchemas = ["IsaacLinkAPI"]
+                            )
+                            {
+                            }
+                        }
+                    }
+
+                    over "RR_thigh_rotor" (
+                        prepend apiSchemas = ["IsaacLinkAPI"]
+                    )
+                    {
+                    }
+                }
+
+                over "RR_hip_rotor" (
+                    prepend apiSchemas = ["IsaacLinkAPI"]
+                )
+                {
+                }
+
+                over "RL_hip" (
+                    prepend apiSchemas = ["IsaacLinkAPI"]
+                )
+                {
+                    over "RL_thigh" (
+                        prepend apiSchemas = ["IsaacLinkAPI"]
+                    )
+                    {
+                        over "RL_calf_rotor" (
+                            prepend apiSchemas = ["IsaacLinkAPI"]
+                        )
+                        {
+                        }
+
+                        over "RL_calf" (
+                            prepend apiSchemas = ["IsaacLinkAPI"]
+                        )
+                        {
+                            over "RL_foot" (
+                                prepend apiSchemas = ["IsaacLinkAPI"]
+                            )
+                            {
+                            }
+                        }
+                    }
+
+                    over "RL_thigh_rotor" (
+                        prepend apiSchemas = ["IsaacLinkAPI"]
+                    )
+                    {
+                    }
+                }
+
+                over "RL_hip_rotor" (
+                    prepend apiSchemas = ["IsaacLinkAPI"]
+                )
+                {
+                }
+
+                over "camera_face" (
+                    prepend apiSchemas = ["IsaacLinkAPI"]
+                )
+                {
+                    over "camera_optical_face" (
+                        prepend apiSchemas = ["IsaacSiteAPI"]
+                    )
+                    {
+                    }
+                }
+
+                over "camera_chin" (
+                    prepend apiSchemas = ["IsaacLinkAPI"]
+                )
+                {
+                    over "camera_optical_chin" (
+                        prepend apiSchemas = ["IsaacSiteAPI"]
+                    )
+                    {
+                    }
+                }
+
+                over "camera_left" (
+                    prepend apiSchemas = ["IsaacLinkAPI"]
+                )
+                {
+                    over "camera_optical_left" (
+                        prepend apiSchemas = ["IsaacSiteAPI"]
+                    )
+                    {
+                    }
+
+                    over "camera_laserscan_link_left" (
+                        prepend apiSchemas = ["IsaacSiteAPI"]
+                    )
+                    {
+                    }
+                }
+
+                over "camera_right" (
+                    prepend apiSchemas = ["IsaacLinkAPI"]
+                )
+                {
+                    over "camera_optical_right" (
+                        prepend apiSchemas = ["IsaacSiteAPI"]
+                    )
+                    {
+                    }
+
+                    over "camera_laserscan_link_right" (
+                        prepend apiSchemas = ["IsaacSiteAPI"]
+                    )
+                    {
+                    }
+                }
+
+                over "camera_rearDown" (
+                    prepend apiSchemas = ["IsaacLinkAPI"]
+                )
+                {
+                    over "camera_optical_rearDown" (
+                        prepend apiSchemas = ["IsaacSiteAPI"]
+                    )
+                    {
+                    }
+                }
+
+                over "ultraSound_left" (
+                    prepend apiSchemas = ["IsaacLinkAPI"]
+                )
+                {
+                }
+
+                over "ultraSound_right" (
+                    prepend apiSchemas = ["IsaacLinkAPI"]
+                )
+                {
+                }
+
+                over "ultraSound_face" (
+                    prepend apiSchemas = ["IsaacLinkAPI"]
+                )
+                {
+                }
+
+                over "imu_link" (
+                    prepend apiSchemas = ["IsaacLinkAPI"]
+                )
+                {
+                }
+            }
+        }
+    }
+
+    over "Physics"
+    {
+        over "floating_base" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "imu_joint" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "FR_hip_joint" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "FR_hip_rotor_joint" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "FR_thigh_joint" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "FR_thigh_rotor_joint" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "FR_calf_joint" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "FR_calf_rotor_joint" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "FR_foot_fixed" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "FL_hip_joint" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "FL_hip_rotor_joint" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "FL_thigh_joint" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "FL_thigh_rotor_joint" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "FL_calf_joint" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "FL_calf_rotor_joint" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "FL_foot_fixed" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "RR_hip_joint" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "RR_hip_rotor_joint" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "RR_thigh_joint" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "RR_thigh_rotor_joint" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "RR_calf_joint" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "RR_calf_rotor_joint" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "RR_foot_fixed" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "RL_hip_joint" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "RL_hip_rotor_joint" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "RL_thigh_joint" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "RL_thigh_rotor_joint" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "RL_calf_joint" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "RL_calf_rotor_joint" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "RL_foot_fixed" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "camera_joint_face" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "camera_joint_chin" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "camera_joint_left" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "camera_joint_right" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "camera_joint_rearDown" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "ultraSound_joint_left" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "ultraSound_joint_right" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "ultraSound_joint_face" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+    }
+}
+

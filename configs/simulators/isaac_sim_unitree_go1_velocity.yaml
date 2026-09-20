@@ -1,9 +1,9 @@
-model_path: .\assets\unitree_go1\URDF\urdf\go1.urdf
-ros_package_paths:
-  - {go1_description: .\assets\unitree_go1\URDF}
+model_path: .\assets\unitree_go1\USD\go1\go1.usda
+# ros_package_paths:
+#   - {go1_description: .\assets\unitree_go1\URDF}
 sim_dt: 0.002
 frame_skip: 10
-# render_mode: rgb_array
+render_mode: rgb_array
 robot_prim_path: /Robot
 env_spacing: 2.0
 base_body_prim_path: /Geometry/base/trunk

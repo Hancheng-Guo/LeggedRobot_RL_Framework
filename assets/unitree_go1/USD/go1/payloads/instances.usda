@@ -1,0 +1,134 @@
+#usda 1.0
+(
+    customLayerData = {
+        string creator = "URDF USD Converter v0.3.2"
+    }
+    endTimeCode = 1000000
+    kilogramsPerUnit = 1
+    metersPerUnit = 1
+    startTimeCode = 0
+    upAxis = "Z"
+)
+
+def Scope "Instances"
+{
+    def Xform "thigh_mirror" (
+        prepend references = @./geometries.usd@</Geometries/thigh_mirror>
+    )
+    {
+        over "thigh_mirror" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/thigh_mirror/VisualMaterials/tn__003_y4hfh3Zjx0>
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "tn__003_y4hfh3Zjx0" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/tn__003_y4hfh3Zjx0>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "calf" (
+        prepend references = @./geometries.usd@</Geometries/calf>
+    )
+    {
+        over "calf"
+        {
+        }
+    }
+
+    def Xform "hip" (
+        prepend references = @./geometries.usd@</Geometries/hip>
+    )
+    {
+        over "hip"
+        {
+        }
+    }
+
+    def Xform "thigh" (
+        prepend references = @./geometries.usd@</Geometries/thigh>
+    )
+    {
+        over "thigh" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/thigh/VisualMaterials/tn__002_y4hfh3Zjx0>
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "tn__002_y4hfh3Zjx0" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/tn__003_y4hfh3Zjx0>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "depthCamera" (
+        prepend references = @./geometries.usd@</Geometries/depthCamera>
+    )
+    {
+        over "depthCamera" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/depthCamera/VisualMaterials/tn__akQXZJ>
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "tn__akQXZJ" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/tn__akQXZJ>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "ultraSound" (
+        prepend references = @./geometries.usd@</Geometries/ultraSound>
+    )
+    {
+        over "ultraSound" (
+            apiSchemas = ["MaterialBindingAPI"]
+        )
+        {
+            custom rel material:binding
+            prepend rel material:binding = </Instances/ultraSound/VisualMaterials/tn__001_y4hfh3Zjx0>
+        }
+
+        def Scope "VisualMaterials"
+        {
+            def Material "tn__001_y4hfh3Zjx0" (
+                instanceable = true
+                prepend references = @./materials.usda@</Materials/tn__001_y4hfh3Zjx0>
+            )
+            {
+            }
+        }
+    }
+
+    def Xform "trunk" (
+        prepend references = @./geometries.usd@</Geometries/trunk>
+    )
+    {
+        over "trunk"
+        {
+        }
+    }
+}
+

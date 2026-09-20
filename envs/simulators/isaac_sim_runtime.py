@@ -1,14 +1,24 @@
 from __future__ import annotations
 
+import gc
+import logging
+import os
+import threading
+
 import torch
 import numpy as np
 from collections.abc import Mapping, Sequence
+from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Any
 
 from app.utils.context import RuntimeContext
 from envs.simulators.isaac_sim_backend import IsaacSimModelMetadata, IsaacSimResetState
 from envs.simulators.isaac_sim_model import IsaacSimModelConverter
+from utils.logging import get_logger
+
+
+LOGGER = get_logger("isaac_sim")
 
 
 class IsaacSimRuntime:
@@ -31,6 +41,12 @@ class IsaacSimRuntime:
         self._articulation: Any = None
         self._body_view: Any = None
         self._camera: Any = None
+        self._simulation_manager: Any = None
+        self._kit_logging: Any = None
+        self._kit_logger_handle: Any = None
+        self._kit_log_callback: Any = None
+        self._kit_log_forwarding = threading.local()
+        self._kit_log_levels: dict[int, int] = {}
         self._closed = False
 
 
@@ -80,7 +96,6 @@ class IsaacSimRuntime:
 
         self._start_application()
         converter = IsaacSimModelConverter(
-            self.context,
             ros_package_paths=ros_package_paths,
             merge_fixed_joints=merge_fixed_joints,
             allow_self_collision=allow_self_collision,
@@ -101,7 +116,7 @@ class IsaacSimRuntime:
 
 
     def _start_application(self) -> None:
-        
+
         try:
             from isaacsim.simulation_app import SimulationApp  # pyright: ignore[reportMissingImports]
         except ModuleNotFoundError as error:
@@ -110,17 +125,96 @@ class IsaacSimRuntime:
             ) from error
 
         headless = self.render_mode != "human"
-        self._app = SimulationApp({"headless": headless})
+        LOGGER.info("Starting Isaac Sim runtime.")
+        self._start_log_bridge()
+        try:
+            with open(os.devnull, "w", encoding="utf-8") as output_sink:
+                with redirect_stdout(output_sink):
+                    self._app = SimulationApp(
+                        {
+                            "headless": headless,
+                            # Kit's quick-shutdown path can finalize Python-backed
+                            # extensions after their native state is already gone.
+                            # Use orderly extension teardown for this embedded app.
+                            "fast_shutdown": False,
+                            "extra_args": [
+                                "--/app/enableStdoutOutput=false",
+                                "--/app/python/logSysStdOutput=false",
+                                "--/log/enableStandardStreamOutput=false",
+                            ],
+                        }
+                    )
+        except BaseException:
+            self._stop_log_bridge()
+            raise
+        LOGGER.info("Isaac Sim runtime initialized.")
+
+
+    def _start_log_bridge(self) -> None:
+        """Forward runtime Kit warnings and errors through project logging."""
+
+        import carb.logging  # pyright: ignore[reportMissingImports]
+
+        self._kit_log_levels = {
+            carb.logging.LEVEL_WARN: logging.WARNING,
+            carb.logging.LEVEL_ERROR: logging.ERROR,
+            carb.logging.LEVEL_FATAL: logging.CRITICAL,
+        }
+        self._kit_logging = carb.logging.acquire_logging()
+        self._kit_log_callback = self._forward_kit_log
+        self._kit_logger_handle = self._kit_logging.add_logger(
+            self._kit_log_callback
+        )
+
+
+    def _forward_kit_log(
+        self,
+        source: str,
+        level: int,
+        filename: str,
+        line_number: int,
+        message: str,
+    ) -> None:
+        """Send selected Kit records to the configured project handlers."""
+
+        project_level = self._kit_log_levels.get(level)
+        if project_level is None:
+            return
+        if getattr(self._kit_log_forwarding, "active", False):
+            return
+        self._kit_log_forwarding.active = True
+        try:
+            LOGGER.log(
+                project_level,
+                "[Isaac Sim: %s] %s",
+                source,
+                message.rstrip(),
+            )
+        finally:
+            self._kit_log_forwarding.active = False
+
+
+    def _stop_log_bridge(self) -> None:
+        """Stop forwarding Kit records before Kit shuts down."""
+
+        if self._kit_logging is None or self._kit_logger_handle is None:
+            return
+        self._kit_logging.remove_logger(self._kit_logger_handle)
+        self._kit_logger_handle = None
+        self._kit_log_callback = None
+        self._kit_logging = None
 
 
     def _build_scene(self) -> None:
         # Isaac/Omniverse modules must be imported after SimulationApp starts.
         from isaacsim.core.api import World  # pyright: ignore[reportMissingImports]
         from isaacsim.core.cloner import GridCloner  # pyright: ignore[reportMissingImports]
-        from isaacsim.core.prims import Articulation, RigidPrim  # pyright: ignore[reportMissingImports]
+        from isaacsim.core.experimental.prims import Articulation, RigidPrim  # pyright: ignore[reportMissingImports]
+        from isaacsim.core.simulation_manager import SimulationManager  # pyright: ignore[reportMissingImports]
         from isaacsim.core.utils.stage import add_reference_to_stage  # pyright: ignore[reportMissingImports]
         from pxr import Usd, UsdGeom, UsdPhysics  # pyright: ignore[reportMissingImports]
 
+        self._simulation_manager = SimulationManager
         self._world = World(
             physics_dt=self.sim_dt,
             rendering_dt=self.sim_dt,
@@ -210,13 +304,11 @@ class IsaacSimRuntime:
             "/World/envs/env_.*/" + self._normalized_robot_prim_path().lstrip("/")
             + articulation_root_relative_path
         )
-        self._articulation = self._world.scene.add(
-            Articulation(
-                prim_paths_expr=robot_expression,
-                name="isaac_sim_robots",
-                reset_xform_properties=False,
-            )
-        )
+        # The legacy isaacsim.core.prims.Articulation crashes during native
+        # interpreter teardown on Isaac Sim 6.1. The experimental wrapper is
+        # the current implementation and owns its lifecycle subscriptions via
+        # weak references, so it can be released cleanly before Kit shuts down.
+        self._articulation = Articulation(robot_expression)
 
         body_relative_paths = self._rigid_body_relative_paths(
             stage,
@@ -239,39 +331,36 @@ class IsaacSimRuntime:
             for relative in body_relative_paths
         ]
         self._body_view = RigidPrim(
-            prim_paths_expr=body_paths,
-            name="isaac_sim_robot_bodies",
-            reset_xform_properties=False,
-            track_contact_forces=True,
-            contact_filter_prim_paths_expr=[
-                list(self._floor_collision_prim_paths)
-                for _ in body_paths
-            ],
+            body_paths,
+            contact_filter_paths=list(self._floor_collision_prim_paths),
         )
+        # Contact filters alone do not apply PhysxContactReportAPI in the
+        # experimental wrapper. Enable it before reset creates tensor views.
+        self._body_view.set_enabled_contact_tracking([True])
 
         if self.render_mode == "rgb_array":
             from isaacsim.sensors.camera import Camera  # pyright: ignore[reportMissingImports]
 
-            self.camera_prim_path = (
-                self._requested_camera_prim_path or "/World/Camera"
-            )
-            self._camera = Camera(
-                prim_path=self.camera_prim_path,
-                position=np.asarray((2.5, 2.5, 1.8)),
-                frequency=1.0 / (self.sim_dt * self.frame_skip),
-                resolution=self.camera_resolution,
-            )
+            self._build_camera(Camera)
 
-        # Initialize every physics-backed scene view together. Adding another
-        # view after reset invalidates the tensor simulation view created by
-        # the first reset.
+        # Initialize every physics-backed view together through the simulation
+        # manager callbacks triggered by reset.
         self._world.reset()
-        # RigidPrim contains articulation links, whose poses must be controlled
-        # through the Articulation. Keep this read/contact view outside Scene's
-        # post-reset lifecycle so it does not try to restore link transforms.
-        self._body_view.initialize()
         if self._camera is not None:
             self._camera.initialize()
+
+
+    def _build_camera(self, camera_type: Any) -> None:
+        """Create a camera rendered explicitly once per control step."""
+
+        self.camera_prim_path = (
+            self._requested_camera_prim_path or "/World/Camera"
+        )
+        self._camera = camera_type(
+            prim_path=self.camera_prim_path,
+            position=np.asarray((2.5, 2.5, 1.8)),
+            resolution=self.camera_resolution,
+        )
 
 
     def _normalized_robot_prim_path(self) -> str:
@@ -381,10 +470,12 @@ class IsaacSimRuntime:
 
         dof_names = tuple(self._articulation.dof_names)
         joint_default_pos = self._tensor(
-            self._articulation.get_joint_positions(clone=True)[0]
+            self._articulation.get_dof_positions()[0]
         )
-        joint_pos_limits = self._tensor(
-            self._articulation.get_dof_limits()[0]
+        lower_limits, upper_limits = self._articulation.get_dof_limits()
+        joint_pos_limits = torch.stack(
+            (self._tensor(lower_limits)[0], self._tensor(upper_limits)[0]),
+            dim=-1,
         )
         self.base_body_prim_path = (
             self._requested_base_body_prim_path
@@ -431,13 +522,11 @@ class IsaacSimRuntime:
 
     def _capture_default_state(self) -> None:
 
-        root_positions, root_orientations = self._articulation.get_world_poses(
-            clone=True
-        )
+        root_positions, root_orientations = self._articulation.get_world_poses()
         self._default_root_positions = self._tensor(root_positions)
         self._default_root_orientations = self._tensor(root_orientations)
         self._default_joint_positions = self._tensor(
-            self._articulation.get_joint_positions(clone=True)
+            self._articulation.get_dof_positions()
         )
         if self.reset_state.base_position is not None:
             base_position = torch.tensor(
@@ -543,29 +632,34 @@ class IsaacSimRuntime:
         
         indices = self._indices(env_ids)
         self._articulation.set_world_poses(
-            positions=self._default_root_positions[indices],
-            orientations=self._default_root_orientations[indices],
-            indices=indices,
+            positions=self._warp(self._default_root_positions[indices]),
+            orientations=self._warp(self._default_root_orientations[indices]),
+            indices=self._warp(indices),
         )
         self._articulation.set_velocities(
-            torch.zeros(
-                (indices.numel(), 6),
+            linear_velocities=self._warp(torch.zeros(
+                (indices.numel(), 3),
                 dtype=self.context.dtype,
                 device=self.context.device,
-            ),
-            indices=indices,
+            )),
+            angular_velocities=self._warp(torch.zeros(
+                (indices.numel(), 3),
+                dtype=self.context.dtype,
+                device=self.context.device,
+            )),
+            indices=self._warp(indices),
         )
-        self._articulation.set_joint_positions(
-            self._default_joint_positions[indices],
-            indices=indices,
+        self._articulation.set_dof_positions(
+            self._warp(self._default_joint_positions[indices]),
+            indices=self._warp(indices),
         )
-        self._articulation.set_joint_velocities(
-            torch.zeros_like(self._default_joint_positions[indices]),
-            indices=indices,
+        self._articulation.set_dof_velocities(
+            self._warp(torch.zeros_like(self._default_joint_positions[indices])),
+            indices=self._warp(indices),
         )
-        self._articulation.set_joint_position_targets(
-            self._default_joint_positions[indices],
-            indices=indices,
+        self._articulation.set_dof_position_targets(
+            self._warp(self._default_joint_positions[indices]),
+            indices=self._warp(indices),
         )
         self._ctrl[indices] = self._default_joint_positions[indices]
         self._previous_qvel = None
@@ -578,7 +672,7 @@ class IsaacSimRuntime:
     ) -> None:
         
         targets = action.to(device=self.context.device, dtype=self.context.dtype)
-        self._articulation.set_joint_position_targets(targets)
+        self._articulation.set_dof_position_targets(self._warp(targets))
         self._ctrl.copy_(targets)
         self._last_frame_skip = frame_skip
         for _ in range(frame_skip):
@@ -599,13 +693,21 @@ class IsaacSimRuntime:
 
     def _get_full_state(self) -> dict[str, torch.Tensor]:
 
-        root_pos, root_quat = self._articulation.get_world_poses(clone=True)
-        root_velocity = self._articulation.get_velocities(clone=True)
-        joint_pos = self._articulation.get_joint_positions(clone=True)
-        joint_vel = self._articulation.get_joint_velocities(clone=True)
+        root_pos, root_quat = self._articulation.get_world_poses()
+        root_linear_velocity, root_angular_velocity = (
+            self._articulation.get_velocities()
+        )
+        joint_pos = self._articulation.get_dof_positions()
+        joint_vel = self._articulation.get_dof_velocities()
         root_pos = self._tensor(root_pos)
         root_quat = self._tensor(root_quat)
-        root_velocity = self._tensor(root_velocity)
+        root_velocity = torch.cat(
+            (
+                self._tensor(root_linear_velocity),
+                self._tensor(root_angular_velocity),
+            ),
+            dim=-1,
+        )
         joint_pos = self._tensor(joint_pos)
         joint_vel = self._tensor(joint_vel)
         qpos = torch.cat((root_pos, root_quat, joint_pos), dim=-1)
@@ -618,8 +720,17 @@ class IsaacSimRuntime:
             ) / (self.sim_dt * self._last_frame_skip)
         self._previous_qvel = qvel.clone()
 
-        body_pos, _ = self._body_view.get_world_poses(clone=True)
-        body_velocity = self._tensor(self._body_view.get_velocities(clone=True))
+        body_pos, _ = self._body_view.get_world_poses()
+        body_linear_velocity, body_angular_velocity = (
+            self._body_view.get_velocities()
+        )
+        body_velocity = torch.cat(
+            (
+                self._tensor(body_linear_velocity),
+                self._tensor(body_angular_velocity),
+            ),
+            dim=-1,
+        )
         body_pos = self._tensor(body_pos).reshape(self.num_envs, -1, 3)
         body_velocity = body_velocity.reshape(self.num_envs, -1, 6)
         # Isaac uses [linear, angular], while the framework follows MuJoCo's
@@ -643,12 +754,9 @@ class IsaacSimRuntime:
             dim=1,
         )
         contact_ids, contact_forces, foot_contact = self._contact_state()
-        measured_effort = self._articulation.get_measured_joint_efforts(
-            clone=True
+        actuator_force = self._tensor(
+            self._articulation.get_dof_projected_joint_forces()
         )
-        actuator_force = self._tensor(measured_effort)[
-            ..., -len(self.metadata.dof_names):
-        ]
 
         rotation_world_to_body = self._quaternion_inverse_rotate_matrix(root_quat)
         base_lin_vel_body = torch.bmm(
@@ -681,7 +789,6 @@ class IsaacSimRuntime:
 
         matrix = self._body_view.get_contact_force_matrix(
             dt=self.sim_dt,
-            clone=True,
         )
         force_vectors = self._tensor(matrix).reshape(
             self.num_envs,
@@ -758,12 +865,51 @@ class IsaacSimRuntime:
 
         if self._closed:
             return
+        failures: list[Exception] = []
+
+        def attempt(operation: Any) -> None:
+            try:
+                operation()
+            except Exception as error:
+                failures.append(error)
+
+        if self._camera is not None:
+            attempt(self._camera.destroy)
+            self._camera = None
+            # Render-product and annotator destruction is applied through Kit's
+            # update loop. Flush it while Replicator extensions are still alive,
+            # then finalize Python wrappers before extension teardown begins.
+            if self._app is not None:
+                attempt(self._app.update)
+            gc.collect()
         if self._world is not None:
-            self._world.stop()
-            self._world.clear()
+            attempt(self._world.stop)
+            self._body_view = None
+            self._articulation = None
+            simulation_manager = getattr(self, "_simulation_manager", None)
+            if simulation_manager is not None:
+                attempt(simulation_manager.invalidate_physics)
+            attempt(self._world.clear)
+            self._world = None
+            self._simulation_manager = None
+            # Finalize the experimental views and their weak lifecycle
+            # subscriptions while Kit and PhysX modules are still loaded.
+            gc.collect()
         if self._app is not None:
-            self._app.close()
+            attempt(self._stop_log_bridge)
+            # Camera render products have already been released, so there is no
+            # Replicator work to drain. Avoid its update loop while retaining the
+            # orderly Kit teardown selected by fast_shutdown=False.
+            attempt(lambda: self._app.close(wait_for_replicator=False))
+            self._app = None
         self._closed = True
+        if len(failures) == 1:
+            raise failures[0]
+        if failures:
+            raise ExceptionGroup(
+                "Multiple errors occurred while closing Isaac Sim.",
+                failures,
+            )
 
 
     def _indices(
@@ -786,8 +932,24 @@ class IsaacSimRuntime:
                 device=self.context.device,
                 dtype=self.context.dtype,
             )
+        if type(value).__module__.startswith("warp."):
+            import warp as wp  # pyright: ignore[reportMissingImports]
+
+            return wp.to_torch(value).to(
+                device=self.context.device,
+                dtype=self.context.dtype,
+            )
         return torch.as_tensor(
             value,
             dtype=self.context.dtype,
             device=self.context.device,
         )
+
+
+    @staticmethod
+    def _warp(value: torch.Tensor) -> Any:
+        """Expose a contiguous Torch tensor to Isaac's Warp-based API."""
+
+        import warp as wp  # pyright: ignore[reportMissingImports]
+
+        return wp.from_torch(value.contiguous())

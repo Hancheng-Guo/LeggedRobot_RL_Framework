@@ -56,6 +56,11 @@ class VectorEnv(BaseEnv):
         )
 
 
+    @property
+    def supports_concurrent_instances(self) -> bool:
+        return self.simulator.SUPPORTS_CONCURRENT_INSTANCES
+
+
     def _build_simulator(
         self,
         component: Component

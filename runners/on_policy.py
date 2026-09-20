@@ -518,7 +518,10 @@ class OnPolicyRunner(BaseRunner):
         self.algorithm.set_eval_mode()
         obs = self.environment.reset()
 
-        if not self._run_callbacks("_on_test_start"):
+        if not self._run_callbacks(
+            "_on_test_start",
+            num_episodes=num_episodes,
+        ):
             self._run_callbacks("_on_test_end")
             return
 
@@ -582,7 +585,12 @@ class OnPolicyRunner(BaseRunner):
 
             obs = next_obs
 
-            if not self._run_callbacks("_on_step_end", info=info):
+            if not self._run_callbacks(
+                "_on_step_end",
+                info=info,
+                completed_episodes=len(completed_rewards),
+                total_episodes=num_episodes,
+            ):
                 break
 
         test_info = {
@@ -625,10 +633,12 @@ class OnPolicyRunner(BaseRunner):
             raise ValueError("'num_steps' must be a positive integer.")
 
         original_environment = self.environment
-        temporary_environment = self._create_temporary_environment(
-            num_envs=1,
-        )
-        self.environment = temporary_environment
+        temporary_environment: BaseEnv | None = None
+        if original_environment.supports_concurrent_instances:
+            temporary_environment = self._create_temporary_environment(
+                num_envs=1,
+            )
+            self.environment = temporary_environment
 
         try:
             self._play_steps(
@@ -638,7 +648,8 @@ class OnPolicyRunner(BaseRunner):
             )
         finally:
             self.algorithm.reset_policy_state()
-            temporary_environment.close()
+            if temporary_environment is not None:
+                temporary_environment.close()
             self.environment = original_environment
 
 
@@ -657,7 +668,10 @@ class OnPolicyRunner(BaseRunner):
         self.algorithm.set_eval_mode()
         obs = self.environment.reset()
 
-        if not self._run_callbacks("_on_play_start"):
+        if not self._run_callbacks(
+            "_on_play_start",
+            num_steps=num_steps,
+        ):
             self._run_callbacks("_on_play_end")
             return
 
@@ -699,14 +713,21 @@ class OnPolicyRunner(BaseRunner):
                 break
             step += 1
 
-        if len(frames):
-            frame_saver(
+        output_paths: list[Path] = []
+        if frames:
+            output_paths = frame_saver(
                 frames,
                 directory=Path(self.context.save_dir) / "videos",
                 fps=self.environment.render_fps,
                 formats=formats,
             )
-        self._run_callbacks("_on_play_end")
+        self._run_callbacks(
+            "_on_play_end",
+            info={
+                "frame_count": len(frames),
+                "output_paths": output_paths,
+            },
+        )
 
 
     def _prepare_algorithm_from_pending_checkpoint(self) -> None:

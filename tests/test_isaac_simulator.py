@@ -213,6 +213,37 @@ def test_isaac_sim_forwards_reset_step_state_render_and_close(
     assert backend.closed
 
 
+def test_isaac_sim_reuses_backend_when_stage_configuration_is_unchanged(
+    tmp_path: Path,
+    runtime_context,
+) -> None:
+    simulator, backend = _configure(tmp_path, runtime_context)
+
+    simulator.config_update(
+        component=_component(),
+        num_envs=2,
+    )
+
+    assert simulator._backend is backend
+    assert not backend.closed
+
+
+def test_isaac_sim_rebuilds_backend_when_environment_count_changes(
+    tmp_path: Path,
+    runtime_context,
+) -> None:
+    simulator, original_backend = _configure(tmp_path, runtime_context)
+
+    simulator.config_update(
+        component=_component(),
+        num_envs=3,
+    )
+
+    assert simulator._backend is not original_backend
+    assert original_backend.closed
+    assert simulator.num_envs == 3
+
+
 def test_isaac_sim_builds_multiple_floor_geom_ids(
     tmp_path: Path,
     runtime_context,

@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import logging
+import sys
+import threading
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pytest
 import torch
 
 from envs.simulators.isaac_sim_runtime import IsaacSimRuntime
+from envs.simulators.isaac_sim_model import IsaacSimModelConverter
+from envs.simulators import isaac_sim_runtime
 
 
 pytestmark = pytest.mark.isaacsim
@@ -97,6 +103,245 @@ class FakeUsd:
     @staticmethod
     def PrimRange(root: FakePrim) -> tuple[FakePrim, ...]:
         return (root, *root.descendants)
+
+
+def _model_converter(
+    package_path: str = "assets/robot_description",
+) -> IsaacSimModelConverter:
+    return IsaacSimModelConverter(
+        ros_package_paths=({"robot_description": package_path},),
+        merge_fixed_joints=False,
+        allow_self_collision=False,
+        joint_stiffness=100.0,
+        joint_damping=2.0,
+    )
+
+
+def test_kit_log_bridge_forwards_selected_levels_without_recursion(
+    monkeypatch,
+) -> None:
+    runtime = IsaacSimRuntime.__new__(IsaacSimRuntime)
+    runtime._kit_log_levels = {2: logging.WARNING}
+    runtime._kit_log_forwarding = threading.local()
+    records: list[tuple[int, tuple[Any, ...]]] = []
+
+    def capture(level: int, message: str, *args: Any) -> None:
+        records.append((level, args))
+        runtime._forward_kit_log("nested", 2, "", 0, "ignored")
+
+    monkeypatch.setattr(isaac_sim_runtime.LOGGER, "log", capture)
+
+    runtime._forward_kit_log("omni.physx", 1, "", 0, "info")
+    runtime._forward_kit_log("omni.physx", 2, "", 0, "warning\n")
+
+    assert records == [
+        (logging.WARNING, ("omni.physx", "warning")),
+    ]
+
+
+def test_start_application_disables_native_kit_console(
+    monkeypatch,
+    capsys,
+) -> None:
+    launch_configs: list[dict[str, Any]] = []
+    lifecycle: list[str] = []
+
+    class FakeSimulationApp:
+        def __init__(self, config: dict[str, Any]) -> None:
+            lifecycle.append("application")
+            print("native startup info")
+            launch_configs.append(config)
+
+    simulation_app = ModuleType("isaacsim.simulation_app")
+    simulation_app.SimulationApp = FakeSimulationApp  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "isaacsim.simulation_app", simulation_app)
+    monkeypatch.setattr(isaac_sim_runtime.LOGGER, "info", lambda message: None)
+
+    runtime = IsaacSimRuntime.__new__(IsaacSimRuntime)
+    runtime.render_mode = None
+    runtime._start_log_bridge = lambda: lifecycle.append("bridge")
+
+    runtime._start_application()
+
+    assert launch_configs == [
+        {
+            "headless": True,
+            "fast_shutdown": False,
+            "extra_args": [
+                "--/app/enableStdoutOutput=false",
+                "--/app/python/logSysStdOutput=false",
+                "--/log/enableStandardStreamOutput=false",
+            ],
+        }
+    ]
+    assert lifecycle == ["bridge", "application"]
+    assert "native startup info" not in capsys.readouterr().out
+
+
+def test_start_application_stops_log_bridge_after_startup_failure(
+    monkeypatch,
+) -> None:
+    lifecycle: list[str] = []
+
+    class FailingSimulationApp:
+        def __init__(self, config: dict[str, Any]) -> None:
+            lifecycle.append("application")
+            raise RuntimeError("startup failed")
+
+    simulation_app = ModuleType("isaacsim.simulation_app")
+    simulation_app.SimulationApp = FailingSimulationApp  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "isaacsim.simulation_app", simulation_app)
+    monkeypatch.setattr(isaac_sim_runtime.LOGGER, "info", lambda message: None)
+
+    runtime = IsaacSimRuntime.__new__(IsaacSimRuntime)
+    runtime.render_mode = None
+    runtime._start_log_bridge = lambda: lifecycle.append("bridge")
+    runtime._stop_log_bridge = lambda: lifecycle.append("stop")
+
+    with pytest.raises(RuntimeError, match="startup failed"):
+        runtime._start_application()
+
+    assert lifecycle == ["bridge", "application", "stop"]
+
+
+def test_rgb_camera_does_not_use_kit_run_loop_frequency() -> None:
+    camera_arguments: list[dict[str, Any]] = []
+
+    class FakeCamera:
+        def __init__(self, **kwargs: Any) -> None:
+            camera_arguments.append(kwargs)
+
+    runtime = IsaacSimRuntime.__new__(IsaacSimRuntime)
+    runtime._requested_camera_prim_path = None
+    runtime.camera_resolution = (640, 480)
+
+    runtime._build_camera(FakeCamera)
+
+    assert runtime.camera_prim_path == "/World/Camera"
+    assert camera_arguments == [
+        {
+            "prim_path": "/World/Camera",
+            "position": pytest.approx((2.5, 2.5, 1.8)),
+            "resolution": (640, 480),
+        }
+    ]
+    assert "frequency" not in camera_arguments[0]
+
+
+def test_close_releases_camera_before_world_and_application() -> None:
+    lifecycle: list[str] = []
+
+    runtime = IsaacSimRuntime.__new__(IsaacSimRuntime)
+    runtime._closed = False
+    runtime._camera = SimpleNamespace(
+        destroy=lambda: lifecycle.append("camera.destroy")
+    )
+    runtime._world = SimpleNamespace(
+        stop=lambda: lifecycle.append("world.stop"),
+        clear=lambda: lifecycle.append("world.clear"),
+    )
+    runtime._body_view = object()
+    runtime._articulation = object()
+    runtime._stop_log_bridge = lambda: lifecycle.append("bridge.stop")
+    runtime._app = SimpleNamespace(
+        update=lambda: lifecycle.append("application.update"),
+        close=lambda **kwargs: lifecycle.append(
+            f"application.close:{kwargs['wait_for_replicator']}"
+        )
+    )
+
+    runtime.close()
+
+    assert lifecycle == [
+        "camera.destroy",
+        "application.update",
+        "world.stop",
+        "world.clear",
+        "bridge.stop",
+        "application.close:False",
+    ]
+    assert runtime._camera is None
+    assert runtime._body_view is None
+    assert runtime._articulation is None
+    assert runtime._world is None
+    assert runtime._app is None
+    assert runtime._closed
+
+
+def test_close_continues_after_resource_cleanup_failure() -> None:
+    lifecycle: list[str] = []
+
+    def fail_camera_destroy() -> None:
+        lifecycle.append("camera.destroy")
+        raise RuntimeError("camera cleanup failed")
+
+    runtime = IsaacSimRuntime.__new__(IsaacSimRuntime)
+    runtime._closed = False
+    runtime._camera = SimpleNamespace(destroy=fail_camera_destroy)
+    runtime._world = SimpleNamespace(
+        stop=lambda: lifecycle.append("world.stop"),
+        clear=lambda: lifecycle.append("world.clear"),
+    )
+    runtime._body_view = object()
+    runtime._articulation = object()
+    runtime._stop_log_bridge = lambda: lifecycle.append("bridge.stop")
+    runtime._app = SimpleNamespace(
+        update=lambda: lifecycle.append("application.update"),
+        close=lambda **kwargs: lifecycle.append(
+            f"application.close:{kwargs['wait_for_replicator']}"
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="camera cleanup failed"):
+        runtime.close()
+
+    assert lifecycle == [
+        "camera.destroy",
+        "application.update",
+        "world.stop",
+        "world.clear",
+        "bridge.stop",
+        "application.close:False",
+    ]
+    assert runtime._closed
+
+
+def test_model_conversion_uses_model_usd_directory(tmp_path) -> None:
+    model_path = tmp_path / "assets" / "robots" / "go1.urdf"
+    model_path.parent.mkdir(parents=True)
+    model_path.write_text("<robot name='go1'/>", encoding="utf-8")
+
+    output_directory = _model_converter()._asset_output_directory(model_path)
+
+    assert output_directory == tmp_path / "assets" / "robots" / "USD"
+
+
+def test_conversion_cache_is_portable_across_package_locations(
+    tmp_path,
+) -> None:
+    model_path = tmp_path / "assets" / "robots" / "go1.urdf"
+    model_path.parent.mkdir(parents=True)
+    model_path.write_text("<robot name='go1'/>", encoding="utf-8")
+    first = _model_converter("C:/first/robot_description")
+    second = _model_converter("D:/second/robot_description")
+
+    first_fingerprint = first._conversion_fingerprint(model_path, "urdf")
+    second_fingerprint = second._conversion_fingerprint(model_path, "urdf")
+    output_directory = first._asset_output_directory(model_path)
+    output_path = output_directory / "go1" / "go1.usda"
+    output_path.parent.mkdir(parents=True)
+    output_path.write_text("#usda 1.0", encoding="utf-8")
+    first._write_conversion_manifest(
+        output_directory,
+        output_path,
+        first_fingerprint,
+    )
+
+    assert first_fingerprint == second_fingerprint
+    assert second._cached_import_path(
+        output_directory,
+        second_fingerprint,
+    ) == output_path
 
 
 def test_selects_physx_variant_before_inspecting_robot() -> None:
@@ -209,11 +454,9 @@ class FakeBodyView:
         self,
         *,
         dt: float,
-        clone: bool,
     ) -> torch.Tensor:
         assert dt == 0.002
-        assert clone
-        return self.contact_forces.clone()
+        return self.contact_forces
 
 
 def test_precomputed_contact_layout_is_reused_for_state_queries(

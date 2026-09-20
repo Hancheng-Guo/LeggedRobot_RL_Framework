@@ -11,6 +11,7 @@ from app.utils.context import RuntimeContext
 class BaseSimulator(ABC):
 
     SUPPORTED_RENDER_MODES = frozenset(("human", "rgb_array"))
+    SUPPORTS_CONCURRENT_INSTANCES = True
 
     def __init__(
         self,

@@ -321,3 +321,34 @@ def test_play_restores_original_environment_after_failure(
     assert runner.environment is original_environment
     assert original_environment.closed is False
     assert original_environment.num_envs == 64
+
+
+def test_play_reuses_environment_when_concurrent_instances_are_unsupported(
+    runtime_context: RuntimeContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    TrackingEnvironment.instances.clear()
+    runner = OnPolicyRunner(context=runtime_context)
+    environment = TrackingEnvironment(runtime_context)
+    environment.num_envs = 64
+    environment.SUPPORTS_CONCURRENT_INSTANCES = False
+    runner.environment = environment
+    runner.algorithm = MinimalAlgorithm(runtime_context)
+
+    def fail_during_play(
+        num_steps: int,
+        formats: str | Sequence[str],
+        frame_saver: Any,
+    ) -> None:
+        assert runner.environment is environment
+        assert runner.environment.num_envs == 64
+        raise RuntimeError("play failed")
+
+    monkeypatch.setattr(runner, "_play_steps", fail_during_play)
+
+    with pytest.raises(RuntimeError, match="play failed"):
+        runner.play(num_steps=1)
+
+    assert TrackingEnvironment.instances == [environment]
+    assert environment.closed is False
+    assert runner.environment is environment

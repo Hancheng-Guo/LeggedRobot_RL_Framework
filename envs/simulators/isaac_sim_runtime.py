@@ -41,6 +41,7 @@ class IsaacSimRuntime:
         self._articulation: Any = None
         self._body_view: Any = None
         self._camera: Any = None
+        self._simulation_manager: Any = None
         self._kit_logging: Any = None
         self._kit_logger_handle: Any = None
         self._kit_log_callback: Any = None
@@ -209,9 +210,11 @@ class IsaacSimRuntime:
         from isaacsim.core.api import World  # pyright: ignore[reportMissingImports]
         from isaacsim.core.cloner import GridCloner  # pyright: ignore[reportMissingImports]
         from isaacsim.core.experimental.prims import Articulation, RigidPrim  # pyright: ignore[reportMissingImports]
+        from isaacsim.core.simulation_manager import SimulationManager  # pyright: ignore[reportMissingImports]
         from isaacsim.core.utils.stage import add_reference_to_stage  # pyright: ignore[reportMissingImports]
         from pxr import Usd, UsdGeom, UsdPhysics  # pyright: ignore[reportMissingImports]
 
+        self._simulation_manager = SimulationManager
         self._world = World(
             physics_dt=self.sim_dt,
             rendering_dt=self.sim_dt,
@@ -883,8 +886,15 @@ class IsaacSimRuntime:
             attempt(self._world.stop)
             self._body_view = None
             self._articulation = None
+            simulation_manager = getattr(self, "_simulation_manager", None)
+            if simulation_manager is not None:
+                attempt(simulation_manager.invalidate_physics)
             attempt(self._world.clear)
             self._world = None
+            self._simulation_manager = None
+            # Finalize the experimental views and their weak lifecycle
+            # subscriptions while Kit and PhysX modules are still loaded.
+            gc.collect()
         if self._app is not None:
             attempt(self._stop_log_bridge)
             # Camera render products have already been released, so there is no

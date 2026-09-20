@@ -208,7 +208,8 @@ class IsaacSimRuntime:
         # Isaac/Omniverse modules must be imported after SimulationApp starts.
         from isaacsim.core.api import World  # pyright: ignore[reportMissingImports]
         from isaacsim.core.cloner import GridCloner  # pyright: ignore[reportMissingImports]
-        from isaacsim.core.prims import Articulation, RigidPrim  # pyright: ignore[reportMissingImports]
+        from isaacsim.core.experimental.prims import Articulation  # pyright: ignore[reportMissingImports]
+        from isaacsim.core.prims import RigidPrim  # pyright: ignore[reportMissingImports]
         from isaacsim.core.utils.stage import add_reference_to_stage  # pyright: ignore[reportMissingImports]
         from pxr import Usd, UsdGeom, UsdPhysics  # pyright: ignore[reportMissingImports]
 
@@ -301,13 +302,11 @@ class IsaacSimRuntime:
             "/World/envs/env_.*/" + self._normalized_robot_prim_path().lstrip("/")
             + articulation_root_relative_path
         )
-        self._articulation = self._world.scene.add(
-            Articulation(
-                prim_paths_expr=robot_expression,
-                name="isaac_sim_robots",
-                reset_xform_properties=False,
-            )
-        )
+        # The legacy isaacsim.core.prims.Articulation crashes during native
+        # interpreter teardown on Isaac Sim 6.1. The experimental wrapper is
+        # the current implementation and owns its lifecycle subscriptions via
+        # weak references, so it can be released cleanly before Kit shuts down.
+        self._articulation = Articulation(robot_expression)
 
         body_relative_paths = self._rigid_body_relative_paths(
             stage,
@@ -477,10 +476,12 @@ class IsaacSimRuntime:
 
         dof_names = tuple(self._articulation.dof_names)
         joint_default_pos = self._tensor(
-            self._articulation.get_joint_positions(clone=True)[0]
+            self._articulation.get_dof_positions()[0]
         )
-        joint_pos_limits = self._tensor(
-            self._articulation.get_dof_limits()[0]
+        lower_limits, upper_limits = self._articulation.get_dof_limits()
+        joint_pos_limits = torch.stack(
+            (self._tensor(lower_limits)[0], self._tensor(upper_limits)[0]),
+            dim=-1,
         )
         self.base_body_prim_path = (
             self._requested_base_body_prim_path
@@ -527,13 +528,11 @@ class IsaacSimRuntime:
 
     def _capture_default_state(self) -> None:
 
-        root_positions, root_orientations = self._articulation.get_world_poses(
-            clone=True
-        )
+        root_positions, root_orientations = self._articulation.get_world_poses()
         self._default_root_positions = self._tensor(root_positions)
         self._default_root_orientations = self._tensor(root_orientations)
         self._default_joint_positions = self._tensor(
-            self._articulation.get_joint_positions(clone=True)
+            self._articulation.get_dof_positions()
         )
         if self.reset_state.base_position is not None:
             base_position = torch.tensor(
@@ -639,29 +638,34 @@ class IsaacSimRuntime:
         
         indices = self._indices(env_ids)
         self._articulation.set_world_poses(
-            positions=self._default_root_positions[indices],
-            orientations=self._default_root_orientations[indices],
-            indices=indices,
+            positions=self._warp(self._default_root_positions[indices]),
+            orientations=self._warp(self._default_root_orientations[indices]),
+            indices=self._warp(indices),
         )
         self._articulation.set_velocities(
-            torch.zeros(
-                (indices.numel(), 6),
+            linear_velocities=self._warp(torch.zeros(
+                (indices.numel(), 3),
                 dtype=self.context.dtype,
                 device=self.context.device,
-            ),
-            indices=indices,
+            )),
+            angular_velocities=self._warp(torch.zeros(
+                (indices.numel(), 3),
+                dtype=self.context.dtype,
+                device=self.context.device,
+            )),
+            indices=self._warp(indices),
         )
-        self._articulation.set_joint_positions(
-            self._default_joint_positions[indices],
-            indices=indices,
+        self._articulation.set_dof_positions(
+            self._warp(self._default_joint_positions[indices]),
+            indices=self._warp(indices),
         )
-        self._articulation.set_joint_velocities(
-            torch.zeros_like(self._default_joint_positions[indices]),
-            indices=indices,
+        self._articulation.set_dof_velocities(
+            self._warp(torch.zeros_like(self._default_joint_positions[indices])),
+            indices=self._warp(indices),
         )
-        self._articulation.set_joint_position_targets(
-            self._default_joint_positions[indices],
-            indices=indices,
+        self._articulation.set_dof_position_targets(
+            self._warp(self._default_joint_positions[indices]),
+            indices=self._warp(indices),
         )
         self._ctrl[indices] = self._default_joint_positions[indices]
         self._previous_qvel = None
@@ -674,7 +678,7 @@ class IsaacSimRuntime:
     ) -> None:
         
         targets = action.to(device=self.context.device, dtype=self.context.dtype)
-        self._articulation.set_joint_position_targets(targets)
+        self._articulation.set_dof_position_targets(self._warp(targets))
         self._ctrl.copy_(targets)
         self._last_frame_skip = frame_skip
         for _ in range(frame_skip):
@@ -695,13 +699,21 @@ class IsaacSimRuntime:
 
     def _get_full_state(self) -> dict[str, torch.Tensor]:
 
-        root_pos, root_quat = self._articulation.get_world_poses(clone=True)
-        root_velocity = self._articulation.get_velocities(clone=True)
-        joint_pos = self._articulation.get_joint_positions(clone=True)
-        joint_vel = self._articulation.get_joint_velocities(clone=True)
+        root_pos, root_quat = self._articulation.get_world_poses()
+        root_linear_velocity, root_angular_velocity = (
+            self._articulation.get_velocities()
+        )
+        joint_pos = self._articulation.get_dof_positions()
+        joint_vel = self._articulation.get_dof_velocities()
         root_pos = self._tensor(root_pos)
         root_quat = self._tensor(root_quat)
-        root_velocity = self._tensor(root_velocity)
+        root_velocity = torch.cat(
+            (
+                self._tensor(root_linear_velocity),
+                self._tensor(root_angular_velocity),
+            ),
+            dim=-1,
+        )
         joint_pos = self._tensor(joint_pos)
         joint_vel = self._tensor(joint_vel)
         qpos = torch.cat((root_pos, root_quat, joint_pos), dim=-1)
@@ -739,12 +751,9 @@ class IsaacSimRuntime:
             dim=1,
         )
         contact_ids, contact_forces, foot_contact = self._contact_state()
-        measured_effort = self._articulation.get_measured_joint_efforts(
-            clone=True
+        actuator_force = self._tensor(
+            self._articulation.get_dof_projected_joint_forces()
         )
-        actuator_force = self._tensor(measured_effort)[
-            ..., -len(self.metadata.dof_names):
-        ]
 
         rotation_world_to_body = self._quaternion_inverse_rotate_matrix(root_quat)
         base_lin_vel_body = torch.bmm(
@@ -914,8 +923,24 @@ class IsaacSimRuntime:
                 device=self.context.device,
                 dtype=self.context.dtype,
             )
+        if type(value).__module__.startswith("warp."):
+            import warp as wp  # pyright: ignore[reportMissingImports]
+
+            return wp.to_torch(value).to(
+                device=self.context.device,
+                dtype=self.context.dtype,
+            )
         return torch.as_tensor(
             value,
             dtype=self.context.dtype,
             device=self.context.device,
         )
+
+
+    @staticmethod
+    def _warp(value: torch.Tensor) -> Any:
+        """Expose a contiguous Torch tensor to Isaac's Warp-based API."""
+
+        import warp as wp  # pyright: ignore[reportMissingImports]
+
+        return wp.from_torch(value.contiguous())

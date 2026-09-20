@@ -127,6 +127,19 @@ class IsaacSimRuntime:
         headless = self.render_mode != "human"
         LOGGER.info("Starting Isaac Sim runtime.")
         self._start_log_bridge()
+        extra_args = [
+            "--/app/enableStdoutOutput=false",
+            "--/app/python/logSysStdOutput=false",
+            "--/log/enableStandardStreamOutput=false",
+        ]
+        if self.render_mode == "rgb_array":
+            # A standalone camera does not benefit from deferred texture
+            # residency, and the streaming client can stall Kit teardown after
+            # its render product has been destroyed.
+            extra_args.append(
+                "--/rtx-transient/resourcemanager/"
+                "texturestreaming/enabled=false"
+            )
         try:
             with open(os.devnull, "w", encoding="utf-8") as output_sink:
                 with redirect_stdout(output_sink):
@@ -137,11 +150,7 @@ class IsaacSimRuntime:
                             # extensions after their native state is already gone.
                             # Use orderly extension teardown for this embedded app.
                             "fast_shutdown": False,
-                            "extra_args": [
-                                "--/app/enableStdoutOutput=false",
-                                "--/app/python/logSysStdOutput=false",
-                                "--/log/enableStandardStreamOutput=false",
-                            ],
+                            "extra_args": extra_args,
                         }
                     )
         except BaseException:
@@ -856,9 +865,14 @@ class IsaacSimRuntime:
             raise RuntimeError("The Isaac Sim RGB camera was not initialized.")
         self._world.render()
         frame = self._camera.get_rgba()
+        if frame is None:
+            return None
         if isinstance(frame, torch.Tensor):
             frame = frame.detach().cpu().numpy()
-        return np.asarray(frame)[..., :3]
+        frame_array = np.asarray(frame)
+        if frame_array.ndim != 3 or frame_array.shape[-1] < 3:
+            return None
+        return frame_array[..., :3]
 
 
     def close(self) -> None:

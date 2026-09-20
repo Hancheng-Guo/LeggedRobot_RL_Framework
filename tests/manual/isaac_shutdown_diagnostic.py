@@ -286,9 +286,25 @@ def main() -> None:
             LOGGER.info("Completed %d simulation steps.", arguments.steps)
     finally:
         if world is not None:
-            body_view = None
-            articulation = None
             world.stop()
+            if articulation is not None:
+                articulation._invalidate_physics_handle_callback(None)
+                articulation._invalidation_callback = None
+                if world.scene.object_exists("diagnostic_robots"):
+                    world.scene.remove_object(
+                        "diagnostic_robots",
+                        registry_only=True,
+                    )
+                articulation = None
+                LOGGER.info("Articulation view explicitly invalidated.")
+            if body_view is not None:
+                body_view._physics_view = None
+                body_view = None
+                LOGGER.info("Rigid contact view explicitly invalidated.")
+
+            from isaacsim.core.simulation_manager import SimulationManager
+
+            SimulationManager.invalidate_physics()
             world.clear()
             world = None
             LOGGER.info("World cleared.")

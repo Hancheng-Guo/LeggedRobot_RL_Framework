@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import logging
 import sys
 import threading
@@ -289,7 +290,13 @@ def main() -> None:
             articulation = None
             world.stop()
             world.clear()
+            world = None
             LOGGER.info("World cleared.")
+            collected = gc.collect()
+            LOGGER.info(
+                "Collected %d Python objects before Kit shutdown.",
+                collected,
+            )
         bridge.stop()
         LOGGER.info("Closing SimulationApp.")
         app.close(wait_for_replicator=False)

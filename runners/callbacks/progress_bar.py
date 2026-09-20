@@ -38,6 +38,11 @@ class ProgressBarCallback(BaseCallback):
         self._completed_steps = 0
         self._cursor_position = 0
         self._last_refresh_time = 0.0
+        self._training = False
+        self._mode: str | None = None
+        self._play_total_steps = 0
+        self._test_completed_episodes = 0
+        self._test_total_episodes = 0
 
 
     def _on_train_start(
@@ -45,6 +50,8 @@ class ProgressBarCallback(BaseCallback):
         *args, **kwargs,
     ) -> bool:
         
+        self._training = True
+        self._mode = "train"
         self._last_length = 0
         self._completed_iterations = self.runner.current_iteration + 1
         self._completed_steps = (
@@ -58,16 +65,30 @@ class ProgressBarCallback(BaseCallback):
 
     def _on_step_end(
         self,
+        completed_episodes: int | None = None,
+        total_episodes: int | None = None,
         *args, **kwargs,
     ) -> bool:
 
+        if self._mode is None:
+            return True
+
         self._completed_steps += 1
+        if completed_episodes is not None:
+            self._test_completed_episodes = completed_episodes
+        if total_episodes is not None:
+            self._test_total_episodes = total_episodes
         now = monotonic()
         if now - self._last_refresh_time < self.refresh_interval:
             return True
         
         self._advance_cursor()
-        self._render(now=now)
+        if self._mode == "train":
+            self._render_train(now=now)
+        elif self._mode == "play":
+            self._render_play(now=now)
+        else:
+            self._render_test(now=now)
 
         return True
 
@@ -93,11 +114,59 @@ class ProgressBarCallback(BaseCallback):
     ) -> bool:
         
         self._clear()
+        self._training = False
+        self._mode = None
         self._last_length = 0
         return True
 
 
-    def _render(
+    def _on_play_start(
+        self,
+        num_steps: int,
+        *args, **kwargs,
+    ) -> bool:
+        self._start_evaluation(mode="play")
+        self._play_total_steps = num_steps
+        return True
+
+
+    def _on_play_end(self, *args, **kwargs) -> bool:
+        self._finish_evaluation()
+        return True
+
+
+    def _on_test_start(
+        self,
+        num_episodes: int,
+        *args, **kwargs,
+    ) -> bool:
+        self._start_evaluation(mode="test")
+        self._test_total_episodes = num_episodes
+        self._test_completed_episodes = 0
+        return True
+
+
+    def _on_test_end(self, *args, **kwargs) -> bool:
+        self._finish_evaluation()
+        return True
+
+
+    def _start_evaluation(self, mode: str) -> None:
+        self._clear()
+        self._mode = mode
+        self._training = False
+        self._completed_steps = 0
+        self._cursor_position = 0
+        self._last_refresh_time = monotonic()
+
+
+    def _finish_evaluation(self) -> None:
+        self._clear()
+        self._mode = None
+        self._last_length = 0
+
+
+    def _render_train(
         self,
         now: float,
     ) -> None:
@@ -110,9 +179,43 @@ class ProgressBarCallback(BaseCallback):
         filled = round(self.width * fraction)
         bar = self._build_bar(filled)
         message = (
-            f"\r[{bar}] {completed}/{self.max_iterations} "
+            f"\r[{bar}] {completed}/{self.max_iterations} iterations "
             f"({fraction:6.2%})"
         )
+        padding = " " * max(0, self._last_length - len(message))
+        print(message + padding, end="", flush=True)
+        self._last_length = len(message)
+        self._last_refresh_time = now
+
+
+    def _render_play(self, now: float) -> None:
+        completed = min(self._completed_steps, self._play_total_steps)
+        fraction = completed / self._play_total_steps
+        filled = round(self.width * fraction)
+        bar = self._build_moving_bar(filled)
+        self._print_progress(
+            f"\r[{bar}] {completed}/{self._play_total_steps} steps "
+            f"({fraction:6.2%})",
+            now,
+        )
+
+
+    def _render_test(self, now: float) -> None:
+        fraction = min(
+            self._test_completed_episodes,
+            self._test_total_episodes,
+        ) / self._test_total_episodes
+        filled = round(self.width * fraction)
+        bar = self._build_moving_bar(filled)
+        self._print_progress(
+            f"\r[{bar}] {self._test_completed_episodes}/"
+            f"{self._test_total_episodes} episodes "
+            f"({fraction:6.2%})",
+            now,
+        )
+
+
+    def _print_progress(self, message: str, now: float) -> None:
         padding = " " * max(0, self._last_length - len(message))
         print(message + padding, end="", flush=True)
         self._last_length = len(message)
@@ -150,4 +253,14 @@ class ProgressBarCallback(BaseCallback):
         if self._cursor_position >= filled:
             bar_parts[self._cursor_position] = ">"
 
+        return "".join(bar_parts)
+
+
+    def _build_moving_bar(self, filled: int) -> str:
+        filled = min(max(filled, 0), self.width)
+        bar_parts = [
+            "#" if index < filled else "-"
+            for index in range(self.width)
+        ]
+        bar_parts[self._cursor_position] = ">"
         return "".join(bar_parts)

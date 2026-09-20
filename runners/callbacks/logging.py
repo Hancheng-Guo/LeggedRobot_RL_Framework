@@ -22,12 +22,17 @@ class LoggingCallback(BaseCallback):
         self.logger = get_logger()
 
 
+    def _stage_label(self) -> str:
+        stage_index = self.runner.stage_index
+        return "evaluation" if stage_index is None else f"stage {stage_index}"
+
+
     def _on_train_start(
         self,
         *args, **kwargs,
     ) -> bool:
         
-        self.logger.info("Training started.")
+        self.logger.info(f"Training started for {self._stage_label()}.")
         return True
 
 
@@ -46,7 +51,11 @@ class LoggingCallback(BaseCallback):
 
         metrics = scalar_metrics(info)
         sorted_metrics = sorted(metrics.items())
-        message_lines = [f"Iteration {iteration}"]
+        message_lines = [
+            f"Stage {self.runner.stage_index}, iteration {iteration}"
+            if self.runner.stage_index is not None
+            else f"Iteration {iteration}"
+        ]
         if sorted_metrics:
             name_width = max(len(name) for name, _ in sorted_metrics)
             message_lines.extend(
@@ -63,5 +72,51 @@ class LoggingCallback(BaseCallback):
         *args, **kwargs,
     ) -> bool:
         
-        self.logger.info("Training ended.")
+        self.logger.info(f"Training ended for {self._stage_label()}.")
+        return True
+
+
+    def _on_test_start(self, *args, **kwargs) -> bool:
+        self.logger.info(f"Testing started for {self._stage_label()}.")
+        return True
+
+
+    def _on_test_end(
+        self,
+        info: dict[str, Any] | None = None,
+        *args, **kwargs,
+    ) -> bool:
+        if info is None:
+            self.logger.info(f"Testing ended for {self._stage_label()}.")
+        else:
+            self.logger.info(
+                f"Testing ended for {self._stage_label()}: "
+                f"{info['num_episodes']} episodes, "
+                f"mean reward {info['mean_reward']:.6g}, "
+                f"mean episode length {info['mean_episode_length']:.6g}."
+            )
+        return True
+
+
+    def _on_play_start(self, *args, **kwargs) -> bool:
+        self.logger.info(f"Playback started for {self._stage_label()}.")
+        return True
+
+
+    def _on_play_end(
+        self,
+        info: dict[str, Any] | None = None,
+        *args, **kwargs,
+    ) -> bool:
+        output_paths = () if info is None else info.get("output_paths", ())
+        if output_paths:
+            self.logger.info(
+                "Playback ended. Saved output to: %s",
+                ", ".join(str(path) for path in output_paths),
+            )
+        else:
+            self.logger.warning(
+                "Playback ended without saving output because no rendered "
+                "frames were produced."
+            )
         return True

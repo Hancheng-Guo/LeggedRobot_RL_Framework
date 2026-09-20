@@ -393,6 +393,7 @@ def test_logging_callback_writes_scalar_metrics(tmp_path: Path) -> None:
         console=False,
     )
     runner = make_runner()
+    runner.stage_index = 0
     callback = LoggingCallback(runner=runner)
     callback._on_train_start()
     callback._on_iteration_end({
@@ -406,13 +407,44 @@ def test_logging_callback_writes_scalar_metrics(tmp_path: Path) -> None:
     content = (tmp_path / "logs" / "training.log").read_text(
         encoding="utf-8"
     )
-    assert "Iteration 1" in content
-    assert " | INFO | Training started.\n" in content
+    assert "Stage 0, iteration 1" in content
+    assert " | INFO | Training started for stage 0.\n" in content
     assert "\n    loss" in content
     assert ":         1.25" in content
     assert "runner/current_iter" in content
     assert "structured" not in content
     assert "runner/current_iter :            0\n" in content
+
+
+def test_logging_callback_reports_test_and_play_lifecycle(
+    tmp_path: Path,
+) -> None:
+    session = configure_logging(
+        tmp_path / "logs" / "training.log",
+        console=False,
+    )
+    runner = make_runner()
+    runner.stage_index = 1
+    callback = LoggingCallback(runner=runner)
+
+    callback._on_test_start()
+    callback._on_test_end({
+        "num_episodes": 3,
+        "mean_reward": 1.25,
+        "mean_episode_length": 20.0,
+    })
+    callback._on_play_start()
+    output_path = tmp_path / "videos" / "play.gif"
+    callback._on_play_end({"output_paths": [output_path]})
+    session.close()
+
+    content = (tmp_path / "logs" / "training.log").read_text(
+        encoding="utf-8"
+    )
+    assert "Testing started for stage 1." in content
+    assert "Testing ended for stage 1: 3 episodes" in content
+    assert "Playback started for stage 1." in content
+    assert f"Playback ended. Saved output to: {output_path}" in content
 
 
 def test_global_logger_uses_callback_handlers(
@@ -859,7 +891,7 @@ def test_progress_bar_reports_completed_iteration(
     cleared_output = capsys.readouterr().out
 
     assert ">" in progress_output
-    assert "0/2" in progress_output
+    assert "0/2 iterations" in progress_output
     assert "12.50%" in progress_output
     assert "step=" not in progress_output
     assert "elapsed=" not in progress_output
@@ -885,3 +917,45 @@ def test_progress_bar_cursor_wraps_and_can_be_hidden() -> None:
     callback._cursor_position = 13
     callback._advance_cursor()
     assert callback._build_bar(filled=2) == "##------------"
+
+
+def test_progress_bar_tracks_play_steps(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    callback = ProgressBarCallback(
+        runner=make_runner(),
+        max_iterations=2,
+        rollout_length=4,
+        width=4,
+        refresh_interval=0.0,
+    )
+
+    callback._on_play_start(num_steps=4)
+    callback._on_step_end()
+    output = capsys.readouterr().out
+    callback._on_play_end()
+
+    assert "[#>--]" in output
+    assert "1/4 steps" in output
+    assert "25.00%" in output
+
+
+def test_progress_bar_tracks_test_steps_and_episodes(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    callback = ProgressBarCallback(
+        runner=make_runner(),
+        max_iterations=2,
+        rollout_length=4,
+        width=4,
+        refresh_interval=0.0,
+    )
+
+    callback._on_test_start(num_episodes=10)
+    callback._on_step_end(completed_episodes=3, total_episodes=10)
+    output = capsys.readouterr().out
+    callback._on_test_end()
+
+    assert "#>--]" in output
+    assert "3/10 episodes" in output
+    assert "30.00%" in output

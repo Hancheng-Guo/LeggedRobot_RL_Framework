@@ -28,6 +28,34 @@ class BaseCallback(ABC):
         return True
 
 
+    def _on_test_start(
+        self,
+        *args, **kwargs,
+    ) -> bool:
+        return True
+
+
+    def _on_test_end(
+        self,
+        *args, **kwargs,
+    ) -> bool:
+        return True
+
+
+    def _on_play_start(
+        self,
+        *args, **kwargs,
+    ) -> bool:
+        return True
+
+
+    def _on_play_end(
+        self,
+        *args, **kwargs,
+    ) -> bool:
+        return True
+
+
     def _on_iteration_start(
         self,
         *args, **kwargs,

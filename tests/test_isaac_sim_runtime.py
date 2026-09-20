@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import sys
 import threading
 from types import ModuleType, SimpleNamespace
@@ -285,6 +286,45 @@ def test_render_returns_rgb_channels_after_camera_warmup() -> None:
     assert frame is not None
     assert frame.shape == (4, 6, 3)
     assert np.array_equal(frame, rgba[..., :3])
+
+
+def test_camera_follows_selected_environment_robot() -> None:
+    poses: list[dict[str, Any]] = []
+    runtime = IsaacSimRuntime.__new__(IsaacSimRuntime)
+    runtime.context = SimpleNamespace(
+        device=torch.device("cpu"),
+        dtype=torch.float32,
+    )
+    runtime._camera_env_index = 1
+    runtime._articulation = SimpleNamespace(
+        get_world_poses=lambda: (
+            torch.tensor(((10.0, 10.0, 0.3), (1.0, 2.0, 0.3))),
+            torch.zeros(2, 4),
+        )
+    )
+    runtime._camera = SimpleNamespace(
+        set_world_pose=lambda **kwargs: poses.append(kwargs)
+    )
+
+    runtime._update_camera_pose()
+
+    assert len(poses) == 1
+    np.testing.assert_allclose(
+        poses[0]["position"],
+        np.asarray((-1.5, 2.0, 1.5)),
+    )
+    np.testing.assert_allclose(
+        poses[0]["orientation"],
+        np.asarray(
+            (
+                math.cos(math.atan2(1.2, 2.5) / 2.0),
+                0.0,
+                math.sin(math.atan2(1.2, 2.5) / 2.0),
+                0.0,
+            )
+        ),
+    )
+    assert poses[0]["camera_axes"] == "world"
 
 
 def test_close_releases_camera_before_world_and_application() -> None:

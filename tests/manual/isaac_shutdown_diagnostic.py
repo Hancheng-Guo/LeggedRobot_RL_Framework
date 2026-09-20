@@ -236,6 +236,10 @@ def build_project_scene(
             body_paths,
             contact_filter_paths=[floor_collision_path],
         )
+        # The experimental wrapper does not apply PhysxContactReportAPI merely
+        # because filters were configured. Enable reporting on the wrapped
+        # rigid bodies before the first physics reset creates tensor views.
+        body_view.set_enabled_contact_tracking([True])
     else:
         body_view = LegacyRigidPrim(
             prim_paths_expr=body_paths,

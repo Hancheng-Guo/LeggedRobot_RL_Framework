@@ -208,8 +208,7 @@ class IsaacSimRuntime:
         # Isaac/Omniverse modules must be imported after SimulationApp starts.
         from isaacsim.core.api import World  # pyright: ignore[reportMissingImports]
         from isaacsim.core.cloner import GridCloner  # pyright: ignore[reportMissingImports]
-        from isaacsim.core.experimental.prims import Articulation  # pyright: ignore[reportMissingImports]
-        from isaacsim.core.prims import RigidPrim  # pyright: ignore[reportMissingImports]
+        from isaacsim.core.experimental.prims import Articulation, RigidPrim  # pyright: ignore[reportMissingImports]
         from isaacsim.core.utils.stage import add_reference_to_stage  # pyright: ignore[reportMissingImports]
         from pxr import Usd, UsdGeom, UsdPhysics  # pyright: ignore[reportMissingImports]
 
@@ -329,29 +328,21 @@ class IsaacSimRuntime:
             for relative in body_relative_paths
         ]
         self._body_view = RigidPrim(
-            prim_paths_expr=body_paths,
-            name="isaac_sim_robot_bodies",
-            reset_xform_properties=False,
-            track_contact_forces=True,
-            contact_filter_prim_paths_expr=[
-                list(self._floor_collision_prim_paths)
-                for _ in body_paths
-            ],
+            body_paths,
+            contact_filter_paths=list(self._floor_collision_prim_paths),
         )
+        # Contact filters alone do not apply PhysxContactReportAPI in the
+        # experimental wrapper. Enable it before reset creates tensor views.
+        self._body_view.set_enabled_contact_tracking([True])
 
         if self.render_mode == "rgb_array":
             from isaacsim.sensors.camera import Camera  # pyright: ignore[reportMissingImports]
 
             self._build_camera(Camera)
 
-        # Initialize every physics-backed scene view together. Adding another
-        # view after reset invalidates the tensor simulation view created by
-        # the first reset.
+        # Initialize every physics-backed view together through the simulation
+        # manager callbacks triggered by reset.
         self._world.reset()
-        # RigidPrim contains articulation links, whose poses must be controlled
-        # through the Articulation. Keep this read/contact view outside Scene's
-        # post-reset lifecycle so it does not try to restore link transforms.
-        self._body_view.initialize()
         if self._camera is not None:
             self._camera.initialize()
 
@@ -726,8 +717,17 @@ class IsaacSimRuntime:
             ) / (self.sim_dt * self._last_frame_skip)
         self._previous_qvel = qvel.clone()
 
-        body_pos, _ = self._body_view.get_world_poses(clone=True)
-        body_velocity = self._tensor(self._body_view.get_velocities(clone=True))
+        body_pos, _ = self._body_view.get_world_poses()
+        body_linear_velocity, body_angular_velocity = (
+            self._body_view.get_velocities()
+        )
+        body_velocity = torch.cat(
+            (
+                self._tensor(body_linear_velocity),
+                self._tensor(body_angular_velocity),
+            ),
+            dim=-1,
+        )
         body_pos = self._tensor(body_pos).reshape(self.num_envs, -1, 3)
         body_velocity = body_velocity.reshape(self.num_envs, -1, 6)
         # Isaac uses [linear, angular], while the framework follows MuJoCo's
@@ -786,7 +786,6 @@ class IsaacSimRuntime:
 
         matrix = self._body_view.get_contact_force_matrix(
             dt=self.sim_dt,
-            clone=True,
         )
         force_vectors = self._tensor(matrix).reshape(
             self.num_envs,

@@ -454,11 +454,9 @@ class FakeBodyView:
         self,
         *,
         dt: float,
-        clone: bool,
     ) -> torch.Tensor:
         assert dt == 0.002
-        assert clone
-        return self.contact_forces.clone()
+        return self.contact_forces
 
 
 def test_precomputed_contact_layout_is_reused_for_state_queries(

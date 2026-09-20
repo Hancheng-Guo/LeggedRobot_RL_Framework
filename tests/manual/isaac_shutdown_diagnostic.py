@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import sys
 import threading
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,9 @@ from isaacsim.simulation_app import SimulationApp
 
 LOGGER = logging.getLogger("isaac_shutdown_diagnostic")
 SCENE_MODES = ("model", "cloner", "articulation", "contacts")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 
 class KitLogBridge:
@@ -88,7 +92,7 @@ def parse_arguments() -> argparse.Namespace:
         "--model-path",
         type=Path,
         default=(
-            Path(__file__).resolve().parents[2]
+            PROJECT_ROOT
             / "assets"
             / "unitree_go1"
             / "USD"
@@ -248,47 +252,48 @@ def main() -> None:
     )
     LOGGER.info("SimulationApp initialized.")
 
-    if arguments.mode in {"bridge-after", "world", *SCENE_MODES}:
+    if arguments.mode in {"bridge-after", "world"}:
         bridge.start()
 
     world: Any = None
     articulation: Any = None
     body_view: Any = None
-    if arguments.mode == "world":
-        from isaacsim.core.api import World
+    try:
+        if arguments.mode == "world":
+            from isaacsim.core.api import World
 
-        LOGGER.info("Creating World.")
-        world = World(
-            physics_dt=1.0 / 200.0,
-            rendering_dt=1.0 / 60.0,
-            backend="torch",
-            device="cuda:0",
-        )
-        world.reset()
-        LOGGER.info("World initialized.")
+            LOGGER.info("Creating World.")
+            world = World(
+                physics_dt=1.0 / 200.0,
+                rendering_dt=1.0 / 60.0,
+                backend="torch",
+                device="cuda:0",
+            )
+            world.reset()
+            LOGGER.info("World initialized.")
 
-    if arguments.mode in SCENE_MODES:
-        world, articulation, body_view = build_project_scene(
-            arguments.mode,
-            model_path=arguments.model_path,
-            num_envs=arguments.num_envs,
-        )
+        if arguments.mode in SCENE_MODES:
+            world, articulation, body_view = build_project_scene(
+                arguments.mode,
+                model_path=arguments.model_path,
+                num_envs=arguments.num_envs,
+            )
 
-    if world is not None:
-        for _ in range(arguments.steps):
-            world.step(render=False)
-        LOGGER.info("Completed %d simulation steps.", arguments.steps)
+        if world is not None:
+            for _ in range(arguments.steps):
+                world.step(render=False)
+            LOGGER.info("Completed %d simulation steps.", arguments.steps)
+    finally:
+        if world is not None:
+            body_view = None
+            articulation = None
+            world.stop()
+            world.clear()
+            LOGGER.info("World cleared.")
+        bridge.stop()
+        LOGGER.info("Closing SimulationApp.")
+        app.close(wait_for_replicator=False)
 
-    if world is not None:
-        body_view = None
-        articulation = None
-        world.stop()
-        world.clear()
-        LOGGER.info("World cleared.")
-
-    bridge.stop()
-    LOGGER.info("Closing SimulationApp.")
-    app.close(wait_for_replicator=False)
     print("DIAGNOSTIC COMPLETED SUCCESSFULLY", flush=True)
 
 

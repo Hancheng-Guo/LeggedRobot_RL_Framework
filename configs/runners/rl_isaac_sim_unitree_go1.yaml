@@ -1,0 +1,27 @@
+rollout_length: 32
+rollout_length_history_size: 50
+callbacks:
+  - progress_bar
+  - adaptive_learning_rate:
+      monitor: "*/approx_kl"
+      allowed_range: [0.005, 0.1]
+      factor: 0.5
+  - checkpoint:
+      save_iter_interval: 25
+  - logging
+  - tensorboard:
+      step_log_interval: 10
+      histogram_step_interval: 10000
+      initial_load_timeout: 1200
+      max_reload_threads: 4
+      step_metrics:
+        "reward": [value]
+        "reward/*": [mean]
+        "termination/*": [mean]
+        "command/*": [histogram]
+        "curriculum/*": [histogram]
+#   - early_stopping:
+#       monitor: "*/loss"
+#       mode: min
+#       max_no_improve_iters: 20
+#       min_delta: 0.0

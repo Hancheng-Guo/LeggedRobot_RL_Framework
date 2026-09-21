@@ -700,6 +700,7 @@ class OnPolicyRunner(BaseRunner):
             done_ids = (terminated | truncated).nonzero(
                 as_tuple=False,
             ).flatten()
+            playback_done = bool((terminated | truncated)[0].item())
             if done_ids.numel() > 0:
                 self.algorithm.reset_policy_state(done_ids)
 
@@ -712,6 +713,8 @@ class OnPolicyRunner(BaseRunner):
             if not self._run_callbacks("_on_step_end", info=info):
                 break
             step += 1
+            if playback_done:
+                break
 
         output_paths: list[Path] = []
         if frames:

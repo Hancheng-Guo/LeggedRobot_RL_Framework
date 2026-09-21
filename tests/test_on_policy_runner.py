@@ -1,5 +1,6 @@
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
@@ -352,3 +353,45 @@ def test_play_reuses_environment_when_concurrent_instances_are_unsupported(
     assert TrackingEnvironment.instances == [environment]
     assert environment.closed is False
     assert runner.environment is environment
+
+
+def test_play_stops_when_primary_environment_episode_ends(
+    runtime_context: RuntimeContext,
+) -> None:
+    class PlaybackEnvironment(TrackingEnvironment):
+        def __init__(self, context: RuntimeContext) -> None:
+            super().__init__(context)
+            self.num_envs = 2
+            self.steps = 0
+
+        def step(self, action: torch.Tensor):
+            self.steps += 1
+            done = torch.tensor([self.steps == 2, False])
+            obs = torch.zeros(2, 1)
+            return obs, obs, torch.zeros(2), done, torch.zeros(2, dtype=torch.bool), {}
+
+        def render(self) -> np.ndarray:
+            return np.zeros((2, 2, 3), dtype=np.uint8)
+
+    environment = PlaybackEnvironment(runtime_context)
+    runner = OnPolicyRunner(context=runtime_context)
+    runner.environment = environment
+    runner.callbacks = []
+    runner.algorithm = MinimalAlgorithm(runtime_context)
+    runner.algorithm.set_eval_mode = lambda: None
+    runner.algorithm.act = lambda obs, deterministic: SimpleNamespace(
+        action=torch.zeros(2, 1)
+    )
+    runner.algorithm.reset_policy_state = lambda env_ids=None: None
+    saved_frame_counts: list[int] = []
+
+    runner._play_steps(
+        num_steps=10,
+        formats="gif",
+        frame_saver=lambda frames, **kwargs: (
+            saved_frame_counts.append(len(frames)) or []
+        ),
+    )
+
+    assert environment.steps == 2
+    assert saved_frame_counts == [2]

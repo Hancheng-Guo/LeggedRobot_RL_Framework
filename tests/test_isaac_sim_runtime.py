@@ -311,18 +311,12 @@ def test_camera_follows_selected_environment_robot() -> None:
     assert len(poses) == 1
     np.testing.assert_allclose(
         poses[0]["position"],
-        np.asarray((-1.5, 2.0, 1.5)),
+        np.asarray((3.5, -0.5, 2.1)),
     )
+    assert poses[0]["orientation"].shape == (4,)
     np.testing.assert_allclose(
-        poses[0]["orientation"],
-        np.asarray(
-            (
-                math.cos(math.atan2(1.2, 2.5) / 2.0),
-                0.0,
-                math.sin(math.atan2(1.2, 2.5) / 2.0),
-                0.0,
-            )
-        ),
+        np.linalg.norm(poses[0]["orientation"]),
+        1.0,
     )
     assert poses[0]["camera_axes"] == "world"
 

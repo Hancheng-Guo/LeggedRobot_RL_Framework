@@ -537,13 +537,7 @@ class IsaacSimRuntime:
         self._default_root_positions = self._tensor(root_positions)
         self._default_root_orientations = self._tensor(root_orientations)
         if self._camera is not None:
-            self._camera_env_index = int(
-                self._default_root_positions[:, :2]
-                .square()
-                .sum(dim=-1)
-                .argmin()
-                .item()
-            )
+            self._camera_env_index = 0
         self._default_joint_positions = self._tensor(
             self._articulation.get_dof_positions()
         )
@@ -887,7 +881,7 @@ class IsaacSimRuntime:
 
 
     def _update_camera_pose(self) -> None:
-        """Follow the robot in the clone closest to the world origin."""
+        """Follow environment zero from an elevated front-right viewpoint."""
 
         camera_env_index = getattr(self, "_camera_env_index", None)
         if camera_env_index is None:
@@ -896,19 +890,24 @@ class IsaacSimRuntime:
         target = self._tensor(root_positions)[camera_env_index]
         target_array = target.detach().cpu().numpy()
 
-        follow_distance = 2.5
-        follow_height = 1.2
-        pitch = math.atan2(follow_height, follow_distance)
+        forward_offset = 2.5
+        right_offset = -2.5
+        follow_height = 1.8
+        horizontal_distance = math.hypot(forward_offset, right_offset)
+        yaw = math.atan2(-right_offset, -forward_offset)
+        pitch = math.atan2(follow_height, horizontal_distance)
         camera_position = target_array + np.asarray(
-            (-follow_distance, 0.0, follow_height),
+            (forward_offset, right_offset, follow_height),
             dtype=target_array.dtype,
         )
+        half_yaw = yaw / 2.0
+        half_pitch = pitch / 2.0
         camera_orientation = np.asarray(
             (
-                math.cos(pitch / 2.0),
-                0.0,
-                math.sin(pitch / 2.0),
-                0.0,
+                math.cos(half_yaw) * math.cos(half_pitch),
+                -math.sin(half_yaw) * math.sin(half_pitch),
+                math.cos(half_yaw) * math.sin(half_pitch),
+                math.sin(half_yaw) * math.cos(half_pitch),
             ),
             dtype=target_array.dtype,
         )

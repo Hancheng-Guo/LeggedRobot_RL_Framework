@@ -61,6 +61,11 @@ class VectorEnv(BaseEnv):
         return self.simulator.SUPPORTS_CONCURRENT_INSTANCES
 
 
+    @property
+    def render_mode(self) -> str | None:
+        return self.simulator.render_mode
+
+
     def _build_simulator(
         self,
         component: Component

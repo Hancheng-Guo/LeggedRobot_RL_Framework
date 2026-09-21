@@ -395,3 +395,49 @@ def test_play_stops_when_primary_environment_episode_ends(
 
     assert environment.steps == 2
     assert saved_frame_counts == [2]
+
+
+def test_play_warms_up_renderer_before_progress_callbacks(
+    runtime_context: RuntimeContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lifecycle: list[str] = []
+
+    class WarmupEnvironment(TrackingEnvironment):
+        render_mode = "rgb_array"
+
+        def __init__(self, context: RuntimeContext) -> None:
+            super().__init__(context)
+            self.num_envs = 1
+            self.render_calls = 0
+
+        def render(self) -> np.ndarray | None:
+            self.render_calls += 1
+            lifecycle.append(f"render:{self.render_calls}")
+            if self.render_calls < 3:
+                return None
+            return np.zeros((2, 2, 3), dtype=np.uint8)
+
+    environment = WarmupEnvironment(runtime_context)
+    runner = OnPolicyRunner(context=runtime_context)
+    runner.environment = environment
+    callback = StopAtStepStartCallback()
+    callback._on_play_start = lambda **kwargs: (
+        lifecycle.append("play.start") or True
+    )
+    runner.callbacks = [callback]
+    runner.algorithm = MinimalAlgorithm(runtime_context)
+    runner.algorithm.set_eval_mode = lambda: None
+
+    runner._play_steps(
+        num_steps=10,
+        formats="gif",
+        frame_saver=lambda frames, **kwargs: [],
+    )
+
+    assert lifecycle[:4] == [
+        "render:1",
+        "render:2",
+        "render:3",
+        "play.start",
+    ]

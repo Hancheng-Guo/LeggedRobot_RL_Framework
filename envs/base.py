@@ -24,6 +24,12 @@ class BaseEnv(ABC):
         return self.SUPPORTS_CONCURRENT_INSTANCES
 
 
+    @property
+    def render_mode(self) -> str | None:
+        """Rendering mode used by this environment, if any."""
+        return None
+
+
     @abstractmethod
     def config_update(
         self,

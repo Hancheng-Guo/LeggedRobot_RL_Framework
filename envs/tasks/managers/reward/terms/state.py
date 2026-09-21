@@ -64,6 +64,8 @@ class BaseHeightL2(BaseRewardTerm):
         self,
         model_context: ModelContext,
         target_height: float,
+        std: float = 1.0,
+        max_normalized_error: float | None = None,
         *args, **kwargs,
     ) -> None:
         
@@ -71,6 +73,12 @@ class BaseHeightL2(BaseRewardTerm):
 
         self.height_qpos_id = int(model_context.base_pos_qpos_ids[2].item())
         self.target_height = target_height
+        if std <= 0.0:
+            raise ValueError("'std' must be positive.")
+        if max_normalized_error is not None and max_normalized_error <= 0.0:
+            raise ValueError("'max_normalized_error' must be positive.")
+        self.std = std
+        self.max_normalized_error = max_normalized_error
 
 
     def compute(
@@ -79,7 +87,13 @@ class BaseHeightL2(BaseRewardTerm):
     ) -> torch.Tensor:
         
         height = task_context.state["qpos"][:, self.height_qpos_id]
-        return (height - self.target_height).square()
+        normalized_error = (height - self.target_height) / self.std
+        if self.max_normalized_error is not None:
+            normalized_error = normalized_error.clamp(
+                min=-self.max_normalized_error,
+                max=self.max_normalized_error,
+            )
+        return normalized_error.square()
 
 
 @register_reward

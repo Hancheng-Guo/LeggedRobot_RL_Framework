@@ -44,7 +44,7 @@ def _named_tensor_squeeze(
 
 
 @register_reward
-class TrotLoopDurationTanh(BaseRewardTerm):
+class TrotLoopTanh(BaseRewardTerm):
 
     def __init__(
         self,
@@ -56,6 +56,10 @@ class TrotLoopDurationTanh(BaseRewardTerm):
             "ang_vel_z",
         ),
         growth_rate: float = 1.0,
+        min_phase_duration: float = 0.04,
+        max_phase_duration: float = 0.30,
+        phase_duration_std: float = 0.10,
+        early_transition_penalty: float = 1.0,
         *args, **kwargs,
     ) -> None:
 
@@ -63,25 +67,42 @@ class TrotLoopDurationTanh(BaseRewardTerm):
 
         if model_context.foot_geom_ids.numel() != 4:
             raise ValueError(
-                "TrotLoopDurationTanh requires exactly four foot geoms."
+                "TrotLoopTanh requires exactly four foot geoms."
             )
         if not command_names or any(
             not isinstance(name, str) or not name
             for name in command_names
         ):
             raise ValueError("'command_names' must contain valid names.")
+        if min_phase_duration < 0.0:
+            raise ValueError("'min_phase_duration' must be non-negative.")
+        if max_phase_duration <= min_phase_duration:
+            raise ValueError(
+                "'max_phase_duration' must be greater than "
+                "'min_phase_duration'."
+            )
+        if phase_duration_std <= 0.0:
+            raise ValueError("'phase_duration_std' must be positive.")
+        if early_transition_penalty < 0.0:
+            raise ValueError("'early_transition_penalty' must be non-negative.")
 
         self.command_names = tuple(command_names)
         self.growth_rate = growth_rate
+        self.min_phase_duration = min_phase_duration
+        self.max_phase_duration = max_phase_duration
+        self.phase_duration_std = phase_duration_std
+        self.early_transition_penalty = early_transition_penalty
         self.gait_is_moving: list[bool | None] = [None] * num_envs
         self.gait_phases: list[list[int]] = [
             [] for _ in range(num_envs)
         ]
+        self.foot_states: list[int | None] = [None] * num_envs
         self.gait_loop_duration = torch.zeros(
             num_envs,
             dtype=self.context.dtype,
             device=self.context.device,
         )
+        self.phase_duration = torch.zeros_like(self.gait_loop_duration)
 
 
     @staticmethod
@@ -98,7 +119,7 @@ class TrotLoopDurationTanh(BaseRewardTerm):
 
 
     @staticmethod
-    def _next_phases(
+    def _advanced_phases(
         loop: tuple[tuple[int, int], ...],
         phases: list[int],
         foot_state: int,
@@ -107,7 +128,7 @@ class TrotLoopDurationTanh(BaseRewardTerm):
         next_phases: list[int] = []
         for phase in phases:
             max_advance = loop[phase][1]
-            for advance in range(max_advance + 1):
+            for advance in range(1, max_advance + 1):
                 candidate = (phase + advance) % len(loop)
                 if loop[candidate][0] == foot_state:
                     next_phases.append(candidate)
@@ -133,27 +154,70 @@ class TrotLoopDurationTanh(BaseRewardTerm):
             dim=-1,
         )
         moving = (speed >= _IDLE_SPEED_THRESHOLD).detach().cpu().tolist()
+        early_transition_penalty = torch.zeros_like(self.phase_duration)
 
         for env_id, (is_moving, foot_state) in enumerate(
             zip(moving, foot_states)
         ):
             loop = _TROT_LOOPS[is_moving]
             phases = self.gait_phases[env_id]
-            if is_moving == self.gait_is_moving[env_id] and phases:
-                phases = self._next_phases(loop, phases, foot_state)
-            else:
+            same_mode = is_moving == self.gait_is_moving[env_id]
+            same_state = foot_state == self.foot_states[env_id]
+
+            if not same_mode or not phases:
                 self.gait_is_moving[env_id] = is_moving
                 phases = self._initial_phases(loop, foot_state)
-            self.gait_phases[env_id] = phases
-
-            if phases:
+                self.gait_loop_duration[env_id] = (
+                    task_context.step_dt if phases else 0.0
+                )
+                self.phase_duration[env_id] = task_context.step_dt
+            elif same_state:
                 self.gait_loop_duration[env_id] += task_context.step_dt
+                self.phase_duration[env_id] += task_context.step_dt
             else:
-                self.gait_loop_duration[env_id] = 0.0
+                next_phases = self._advanced_phases(loop, phases, foot_state)
+                if next_phases:
+                    if (
+                        is_moving
+                        and self.phase_duration[env_id] < self.min_phase_duration
+                    ):
+                        early_transition_penalty[env_id] = (
+                            self.early_transition_penalty
+                            * (
+                                self.min_phase_duration
+                                - self.phase_duration[env_id]
+                            )
+                            / max(
+                                self.min_phase_duration,
+                                torch.finfo(self.context.dtype).eps,
+                            )
+                        )
+                    phases = next_phases
+                    self.gait_loop_duration[env_id] += task_context.step_dt
+                    self.phase_duration[env_id] = task_context.step_dt
+                else:
+                    phases = self._initial_phases(loop, foot_state)
+                    self.gait_loop_duration[env_id] = 0.0
+                    self.phase_duration[env_id] = task_context.step_dt
 
-        return torch.tanh(
-            self.growth_rate * self.gait_loop_duration
+            self.gait_phases[env_id] = phases
+            self.foot_states[env_id] = foot_state
+
+        overtime = (
+            self.phase_duration - self.max_phase_duration
+        ).clamp_min(0.0)
+        timeout_decay = torch.exp(
+            -(overtime / self.phase_duration_std).square()
         )
+        timeout_decay = torch.where(
+            torch.as_tensor(moving, device=self.context.device),
+            timeout_decay,
+            torch.ones_like(timeout_decay),
+        )
+
+        return timeout_decay * torch.tanh(
+            self.growth_rate * self.gait_loop_duration
+        ) - early_transition_penalty
 
 
     def reset(
@@ -163,14 +227,18 @@ class TrotLoopDurationTanh(BaseRewardTerm):
 
         if env_ids is None:
             self.gait_loop_duration.zero_()
+            self.phase_duration.zero_()
             self.gait_is_moving = [None] * len(self.gait_is_moving)
             self.gait_phases = [[] for _ in self.gait_phases]
+            self.foot_states = [None] * len(self.foot_states)
             return
 
         self.gait_loop_duration[env_ids] = 0.0
+        self.phase_duration[env_ids] = 0.0
         for env_id in env_ids.cpu().tolist():
             self.gait_is_moving[env_id] = None
             self.gait_phases[env_id] = []
+            self.foot_states[env_id] = None
 
 
 @register_reward

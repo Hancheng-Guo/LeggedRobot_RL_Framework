@@ -176,6 +176,8 @@ class FootLiftHeightVelocityWeightedExp(BaseRewardTerm):
         self,
         model_context: ModelContext,
         target_height: float,
+        height_std: float = 0.03,
+        speed_std: float = 0.5,
         *args, **kwargs,
     ) -> None:
         
@@ -183,6 +185,12 @@ class FootLiftHeightVelocityWeightedExp(BaseRewardTerm):
 
         self.foot_geom_ids = model_context.foot_geom_ids
         self.target_height = target_height
+        if height_std <= 0.0:
+            raise ValueError("'height_std' must be positive.")
+        if speed_std <= 0.0:
+            raise ValueError("'speed_std' must be positive.")
+        self.height_std = height_std
+        self.speed_std = speed_std
 
 
     def compute(
@@ -195,10 +203,13 @@ class FootLiftHeightVelocityWeightedExp(BaseRewardTerm):
             task_context.state["geom_xvel"][:, self.foot_geom_ids, 3:5],
             dim=-1,
         )
-        return torch.sum(
-            torch.exp(
-                -(foot_height - self.target_height).square() * foot_speed
-            ),
+        swinging = ~task_context.state["foot_ground_contact"].any(dim=1)
+        height_reward = torch.exp(
+            -((foot_height - self.target_height) / self.height_std).square()
+        )
+        speed_gate = 1.0 - torch.exp(-foot_speed / self.speed_std)
+        return torch.mean(
+            height_reward * speed_gate * swinging,
             dim=-1,
         )
 

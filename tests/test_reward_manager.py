@@ -5,11 +5,12 @@ import torch
 
 from envs.tasks.managers.reward.base import RewardManager
 from envs.tasks.managers.reward.terms.foot import (
+    FootLiftHeightVelocityWeightedExp,
     FootStateDurationCommandWeighedExp,
 )
 from envs.tasks.managers.reward.terms.gait import (
     QuadrupedalGaitPhaseL2Exp,
-    TrotLoopDurationTanh,
+    TrotLoopTanh,
 )
 from envs.tasks.managers.reward.terms.tracking import (
     TrackLinearVelocityXyErrorIntegralL2,
@@ -210,6 +211,30 @@ def test_new_reward_terms_compute_batched_tensors(
     )
 
 
+def test_base_height_l2_normalizes_and_clamps_error(
+    runtime_context,
+    model_context,
+):
+    manager = RewardManager(
+        num_envs=2,
+        context=runtime_context,
+        model_context=model_context,
+        terms={
+            "base_height_l2": {
+                "params": {
+                    "target_height": 0.45,
+                    "std": 0.05,
+                    "max_normalized_error": 2.0,
+                },
+            },
+        },
+    )
+
+    reward, _ = manager.compute(make_state_reward_context())
+
+    torch.testing.assert_close(reward, torch.tensor([4.0, 4.0]))
+
+
 def test_integral_reward_term_resets_internal_buffer(
     runtime_context,
     model_context,
@@ -348,6 +373,42 @@ def test_quadrupedal_foot_velocity_diff_matches_diagonal_feet(
     )
 
 
+def test_foot_lift_height_reward_uses_normalized_swing_height_and_speed(
+    runtime_context,
+    model_context,
+):
+    quadrupedal_model_context = replace(
+        model_context,
+        geom_names=("floor", "base", "thigh", "FL", "FR", "RL", "RR"),
+        geom_body_ids=torch.arange(7),
+        foot_geom_ids=torch.tensor([3, 4, 5, 6]),
+    )
+    term = FootLiftHeightVelocityWeightedExp(
+        context=runtime_context,
+        model_context=quadrupedal_model_context,
+        target_height=0.08,
+        height_std=0.03,
+        speed_std=0.5,
+    )
+    task_context = make_quadrupedal_foot_context()
+    task_context.state["geom_xpos"] = torch.zeros(2, 7, 3)
+    task_context.state["geom_xvel"] = torch.zeros(2, 7, 6)
+    task_context.state["geom_xpos"][:, 3:7, 2] = 0.08
+    task_context.state["geom_xvel"][:, 3:7, 3] = 0.5
+
+    reward = term.compute(task_context)
+
+    speed_gate = 1.0 - torch.exp(torch.tensor(-1.0))
+    torch.testing.assert_close(
+        reward,
+        torch.tensor([0.5, 0.75]) * speed_gate,
+    )
+
+    task_context.state["geom_xpos"][:, 3:7, 2] = 0.0
+    low_reward = term.compute(task_context)
+    assert torch.all(low_reward < reward * 0.01)
+
+
 def test_quadrupedal_phase_gait_updates_phase_steps(
     runtime_context,
     model_context,
@@ -417,7 +478,7 @@ def test_trot_loop_duration_tracks_valid_contact_sequence_and_resets(
         geom_body_ids=torch.arange(7),
         foot_geom_ids=torch.tensor([3, 4, 5, 6]),
     )
-    term = TrotLoopDurationTanh(
+    term = TrotLoopTanh(
         num_envs=2,
         context=runtime_context,
         model_context=gait_model_context,
@@ -452,6 +513,12 @@ def test_trot_loop_duration_tracks_valid_contact_sequence_and_resets(
         torch.tanh(torch.full((2,), 0.04)),
     )
 
+    held_reward = term.compute(task_context)
+    torch.testing.assert_close(
+        held_reward,
+        torch.tanh(torch.full((2,), 0.08)),
+    )
+
     task_context.state["contact_geom_ids"][0] = torch.tensor([
         [3, 0], [6, 0], [-1, -1], [-1, -1],
     ])
@@ -459,19 +526,77 @@ def test_trot_loop_duration_tracks_valid_contact_sequence_and_resets(
         [1, 0, 0, 0], [0, 0, 0, 1],
         [0, 0, 0, 0], [0, 0, 0, 0],
     ], dtype=torch.bool)
-    second_reward = term.compute(task_context)
+    transitioned_reward = term.compute(task_context)
     torch.testing.assert_close(
-        second_reward,
-        torch.tanh(torch.full((2,), 0.08)),
+        transitioned_reward,
+        torch.tanh(torch.full((2,), 0.12)),
     )
 
     term.reset(torch.tensor([1]))
     torch.testing.assert_close(
         term.gait_loop_duration,
-        torch.tensor([0.04, 0.0]),
+        torch.tensor([0.06, 0.0]),
     )
     assert term.gait_is_moving[0] is True
     assert term.gait_is_moving[1] is None
+
+
+def test_trot_loop_penalizes_early_transition_and_decays_on_timeout(
+    runtime_context,
+    model_context,
+):
+    gait_model_context = replace(
+        model_context,
+        geom_names=("floor", "base", "thigh", "FL", "FR", "RL", "RR"),
+        geom_body_ids=torch.arange(7),
+        foot_geom_ids=torch.tensor([3, 4, 5, 6]),
+    )
+    term = TrotLoopTanh(
+        num_envs=1,
+        context=runtime_context,
+        model_context=gait_model_context,
+        growth_rate=2.0,
+        min_phase_duration=0.04,
+        max_phase_duration=0.30,
+        phase_duration_std=0.10,
+        early_transition_penalty=1.0,
+    )
+    task_context = TaskContext(
+        state={
+            "foot_ground_contact": torch.ones(1, 1, 4, dtype=torch.bool),
+        },
+        command={
+            "lin_vel_x": torch.ones(1, 1),
+            "lin_vel_y": torch.zeros(1, 1),
+            "ang_vel_z": torch.zeros(1, 1),
+        },
+        action=torch.zeros(1, 2),
+        last_action=torch.zeros(1, 2),
+        episode_step=torch.ones(1, dtype=torch.long),
+        step_dt=0.02,
+    )
+
+    term.compute(task_context)
+    task_context.state["foot_ground_contact"] = torch.tensor(
+        [[[1, 0, 0, 1]]], dtype=torch.bool,
+    )
+    early_reward = term.compute(task_context)
+    assert early_reward.item() < 0.0
+
+    term.reset()
+    task_context.state["foot_ground_contact"].fill_(True)
+    reward_at_timeout = None
+    late_reward = None
+    for step in range(30):
+        reward = term.compute(task_context)
+        if step == 14:
+            reward_at_timeout = reward.clone()
+        if step == 29:
+            late_reward = reward.clone()
+
+    assert reward_at_timeout is not None
+    assert late_reward is not None
+    assert late_reward.item() < reward_at_timeout.item() * 0.01
 
 
 def test_quadrupedal_phase_gait_uses_base_plane_distance(

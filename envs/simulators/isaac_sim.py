@@ -473,6 +473,11 @@ class IsaacSimSimulator(BaseSimulator):
         return self._require_backend().render()
 
 
+    @property
+    def playback_env_index(self) -> int:
+        return self._require_backend().playback_env_index
+
+
     def close(self) -> None:
         if self._backend is not None:
             self._backend.close()

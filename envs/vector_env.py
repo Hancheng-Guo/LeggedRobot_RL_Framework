@@ -66,6 +66,11 @@ class VectorEnv(BaseEnv):
         return self.simulator.render_mode
 
 
+    @property
+    def playback_env_index(self) -> int:
+        return self.simulator.playback_env_index
+
+
     def _build_simulator(
         self,
         component: Component

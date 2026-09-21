@@ -537,7 +537,13 @@ class IsaacSimRuntime:
         self._default_root_positions = self._tensor(root_positions)
         self._default_root_orientations = self._tensor(root_orientations)
         if self._camera is not None:
-            self._camera_env_index = 0
+            self._camera_env_index = int(
+                self._default_root_positions[:, :2]
+                .square()
+                .sum(dim=-1)
+                .argmin()
+                .item()
+            )
         self._default_joint_positions = self._tensor(
             self._articulation.get_dof_positions()
         )
@@ -878,6 +884,11 @@ class IsaacSimRuntime:
         if frame_array.ndim != 3 or frame_array.shape[-1] < 3:
             return None
         return frame_array[..., :3]
+
+
+    @property
+    def playback_env_index(self) -> int:
+        return self._camera_env_index or 0
 
 
     def _update_camera_pose(self) -> None:

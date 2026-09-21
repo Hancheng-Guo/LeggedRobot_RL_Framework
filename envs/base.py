@@ -30,6 +30,12 @@ class BaseEnv(ABC):
         return None
 
 
+    @property
+    def playback_env_index(self) -> int:
+        """Environment whose episode bounds a playback recording."""
+        return 0
+
+
     @abstractmethod
     def config_update(
         self,

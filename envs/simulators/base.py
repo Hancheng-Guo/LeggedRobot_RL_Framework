@@ -54,6 +54,11 @@ class BaseSimulator(ABC):
         )
 
 
+    @property
+    def playback_env_index(self) -> int:
+        return 0
+
+
     def _tensor(
         self,
         values: Any

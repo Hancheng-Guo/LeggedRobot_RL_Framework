@@ -366,12 +366,16 @@ def test_play_stops_when_primary_environment_episode_ends(
 
         def step(self, action: torch.Tensor):
             self.steps += 1
-            done = torch.tensor([self.steps == 2, False])
+            done = torch.tensor([False, self.steps == 2])
             obs = torch.zeros(2, 1)
             return obs, obs, torch.zeros(2), done, torch.zeros(2, dtype=torch.bool), {}
 
         def render(self) -> np.ndarray:
             return np.zeros((2, 2, 3), dtype=np.uint8)
+
+        @property
+        def playback_env_index(self) -> int:
+            return 1
 
     environment = PlaybackEnvironment(runtime_context)
     runner = OnPolicyRunner(context=runtime_context)

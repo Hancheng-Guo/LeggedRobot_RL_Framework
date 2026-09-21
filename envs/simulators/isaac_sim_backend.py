@@ -35,6 +35,9 @@ class IsaacSimModelMetadata:
 class IsaacSimBackend(Protocol):
     metadata: IsaacSimModelMetadata
 
+    @property
+    def playback_env_index(self) -> int: ...
+
     def configure(
         self,
         *,

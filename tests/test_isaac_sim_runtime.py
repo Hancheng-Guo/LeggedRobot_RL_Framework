@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import logging
+import math
 import sys
 import threading
 from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pytest
+import numpy as np
 import torch
 
 from envs.simulators.isaac_sim_runtime import IsaacSimRuntime
@@ -178,6 +180,32 @@ def test_start_application_disables_native_kit_console(
     assert "native startup info" not in capsys.readouterr().out
 
 
+def test_rgb_application_disables_texture_streaming(
+    monkeypatch,
+) -> None:
+    launch_configs: list[dict[str, Any]] = []
+
+    class FakeSimulationApp:
+        def __init__(self, config: dict[str, Any]) -> None:
+            launch_configs.append(config)
+
+    simulation_app = ModuleType("isaacsim.simulation_app")
+    simulation_app.SimulationApp = FakeSimulationApp  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "isaacsim.simulation_app", simulation_app)
+    monkeypatch.setattr(isaac_sim_runtime.LOGGER, "info", lambda message: None)
+
+    runtime = IsaacSimRuntime.__new__(IsaacSimRuntime)
+    runtime.render_mode = "rgb_array"
+    runtime._start_log_bridge = lambda: None
+
+    runtime._start_application()
+
+    assert (
+        "--/rtx-transient/resourcemanager/"
+        "texturestreaming/enabled=false"
+    ) in launch_configs[0]["extra_args"]
+
+
 def test_start_application_stops_log_bridge_after_startup_failure(
     monkeypatch,
 ) -> None:
@@ -226,6 +254,71 @@ def test_rgb_camera_does_not_use_kit_run_loop_frequency() -> None:
         }
     ]
     assert "frequency" not in camera_arguments[0]
+
+
+@pytest.mark.parametrize(
+    "camera_frame",
+    (None, np.asarray(None), np.empty((0,))),
+)
+def test_render_skips_camera_warmup_frames(camera_frame: Any) -> None:
+    render_calls: list[str] = []
+    runtime = IsaacSimRuntime.__new__(IsaacSimRuntime)
+    runtime.render_mode = "rgb_array"
+    runtime._world = SimpleNamespace(
+        render=lambda: render_calls.append("render")
+    )
+    runtime._camera = SimpleNamespace(get_rgba=lambda: camera_frame)
+
+    assert runtime.render() is None
+    assert render_calls == ["render"]
+
+
+def test_render_returns_rgb_channels_after_camera_warmup() -> None:
+    rgba = np.zeros((4, 6, 4), dtype=np.uint8)
+    rgba[..., 3] = 255
+    runtime = IsaacSimRuntime.__new__(IsaacSimRuntime)
+    runtime.render_mode = "rgb_array"
+    runtime._world = SimpleNamespace(render=lambda: None)
+    runtime._camera = SimpleNamespace(get_rgba=lambda: rgba)
+
+    frame = runtime.render()
+
+    assert frame is not None
+    assert frame.shape == (4, 6, 3)
+    assert np.array_equal(frame, rgba[..., :3])
+
+
+def test_camera_follows_selected_environment_robot() -> None:
+    poses: list[dict[str, Any]] = []
+    runtime = IsaacSimRuntime.__new__(IsaacSimRuntime)
+    runtime.context = SimpleNamespace(
+        device=torch.device("cpu"),
+        dtype=torch.float32,
+    )
+    runtime._camera_env_index = 1
+    runtime._articulation = SimpleNamespace(
+        get_world_poses=lambda: (
+            torch.tensor(((10.0, 10.0, 0.3), (1.0, 2.0, 0.3))),
+            torch.zeros(2, 4),
+        )
+    )
+    runtime._camera = SimpleNamespace(
+        set_world_pose=lambda **kwargs: poses.append(kwargs)
+    )
+
+    runtime._update_camera_pose()
+
+    assert len(poses) == 1
+    np.testing.assert_allclose(
+        poses[0]["position"],
+        np.asarray((3.5, -0.5, 2.1)),
+    )
+    assert poses[0]["orientation"].shape == (4,)
+    np.testing.assert_allclose(
+        np.linalg.norm(poses[0]["orientation"]),
+        1.0,
+    )
+    assert poses[0]["camera_axes"] == "world"
 
 
 def test_close_releases_camera_before_world_and_application() -> None:

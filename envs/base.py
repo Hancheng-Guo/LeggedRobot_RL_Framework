@@ -24,6 +24,18 @@ class BaseEnv(ABC):
         return self.SUPPORTS_CONCURRENT_INSTANCES
 
 
+    @property
+    def render_mode(self) -> str | None:
+        """Rendering mode used by this environment, if any."""
+        return None
+
+
+    @property
+    def playback_env_index(self) -> int:
+        """Environment whose episode bounds a playback recording."""
+        return 0
+
+
     @abstractmethod
     def config_update(
         self,

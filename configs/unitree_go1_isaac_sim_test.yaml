@@ -3,7 +3,7 @@ runtime:
   dtype: float32
   num_threads: 4
   seed: null
-  deterministic_ops: false
+  deterministic_ops: true
 
 logging:
   file_name: training.log
@@ -12,16 +12,14 @@ logging:
 
 stage:
   - standing:
-      max_iterations: 100
+      max_iterations: 10
       transition:
-        - {metric: "rollout/mean_len", method: mean, operator: ">=", threshold: 900.0, window: 5}
+        - {metric: "rollout/mean_len", method: mean, operator: ">=", threshold: 2.0, window: 1}
 
   - velocity_tracking:
-      max_iterations: 1500
+      max_iterations: 10
       transition:
-        - {metric: "reward/track_linear_velocity_xy_l2_exp_and_logcosh", method: mean, operator: ">=", threshold: 9.0, window: 25}
-        - {metric: "reward/track_angular_velocity_z_l2_exp_and_logcosh", method: mean, operator: ">=", threshold: 4.5, window: 25}
-        - {metric: "rollout/mean_len", method: mean, operator: ">=", threshold: 900.0, window: 25}
+        - {metric: "rollout/mean_len", method: mean, operator: ">=", threshold: 2.0, window: 1}
 
 
 component:

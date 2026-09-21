@@ -20,11 +20,15 @@ from rl.algorithms.base import OnPolicyAlgorithm
 from rl.algorithms.registry import ALG_TYPE_MAP
 from utils.component import Component
 from utils.config import load_yaml
+from utils.logging import get_logger
 from utils.param import update_attributes
 
 
 if TYPE_CHECKING:
     from runners.utils.frames import VideoFormat, VideoFormats
+
+
+LOGGER = get_logger("on_policy")
 
 
 class OnPolicyRunner(BaseRunner):
@@ -667,6 +671,7 @@ class OnPolicyRunner(BaseRunner):
         
         self.algorithm.set_eval_mode()
         obs = self.environment.reset()
+        self._warm_up_playback_renderer()
 
         if not self._run_callbacks(
             "_on_play_start",
@@ -700,6 +705,11 @@ class OnPolicyRunner(BaseRunner):
             done_ids = (terminated | truncated).nonzero(
                 as_tuple=False,
             ).flatten()
+            playback_done = bool(
+                (terminated | truncated)[
+                    self.environment.playback_env_index
+                ].item()
+            )
             if done_ids.numel() > 0:
                 self.algorithm.reset_policy_state(done_ids)
 
@@ -712,6 +722,8 @@ class OnPolicyRunner(BaseRunner):
             if not self._run_callbacks("_on_step_end", info=info):
                 break
             step += 1
+            if playback_done:
+                break
 
         output_paths: list[Path] = []
         if frames:
@@ -727,6 +739,24 @@ class OnPolicyRunner(BaseRunner):
                 "frame_count": len(frames),
                 "output_paths": output_paths,
             },
+        )
+
+
+    def _warm_up_playback_renderer(self, max_frames: int = 120) -> None:
+        if self.environment.render_mode != "rgb_array":
+            return
+
+        LOGGER.info("Warming up playback renderer.")
+        for frame_index in range(1, max_frames + 1):
+            if self.environment.render() is not None:
+                LOGGER.info(
+                    "Playback renderer warmed up after %d frame(s).",
+                    frame_index,
+                )
+                return
+        raise RuntimeError(
+            "Playback renderer did not produce a valid RGB frame after "
+            f"{max_frames} warmup frames."
         )
 
 

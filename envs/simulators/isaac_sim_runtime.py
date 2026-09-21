@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import gc
 import logging
+import math
 import os
 import threading
 
@@ -41,6 +42,7 @@ class IsaacSimRuntime:
         self._articulation: Any = None
         self._body_view: Any = None
         self._camera: Any = None
+        self._camera_env_index: int | None = None
         self._simulation_manager: Any = None
         self._kit_logging: Any = None
         self._kit_logger_handle: Any = None
@@ -127,6 +129,19 @@ class IsaacSimRuntime:
         headless = self.render_mode != "human"
         LOGGER.info("Starting Isaac Sim runtime.")
         self._start_log_bridge()
+        extra_args = [
+            "--/app/enableStdoutOutput=false",
+            "--/app/python/logSysStdOutput=false",
+            "--/log/enableStandardStreamOutput=false",
+        ]
+        if self.render_mode == "rgb_array":
+            # A standalone camera does not benefit from deferred texture
+            # residency, and the streaming client can stall Kit teardown after
+            # its render product has been destroyed.
+            extra_args.append(
+                "--/rtx-transient/resourcemanager/"
+                "texturestreaming/enabled=false"
+            )
         try:
             with open(os.devnull, "w", encoding="utf-8") as output_sink:
                 with redirect_stdout(output_sink):
@@ -137,11 +152,7 @@ class IsaacSimRuntime:
                             # extensions after their native state is already gone.
                             # Use orderly extension teardown for this embedded app.
                             "fast_shutdown": False,
-                            "extra_args": [
-                                "--/app/enableStdoutOutput=false",
-                                "--/app/python/logSysStdOutput=false",
-                                "--/log/enableStandardStreamOutput=false",
-                            ],
+                            "extra_args": extra_args,
                         }
                     )
         except BaseException:
@@ -525,6 +536,14 @@ class IsaacSimRuntime:
         root_positions, root_orientations = self._articulation.get_world_poses()
         self._default_root_positions = self._tensor(root_positions)
         self._default_root_orientations = self._tensor(root_orientations)
+        if self._camera is not None:
+            self._camera_env_index = int(
+                self._default_root_positions[:, :2]
+                .square()
+                .sum(dim=-1)
+                .argmin()
+                .item()
+            )
         self._default_joint_positions = self._tensor(
             self._articulation.get_dof_positions()
         )
@@ -854,11 +873,60 @@ class IsaacSimRuntime:
             return None
         if self._camera is None:
             raise RuntimeError("The Isaac Sim RGB camera was not initialized.")
+        self._update_camera_pose()
         self._world.render()
         frame = self._camera.get_rgba()
+        if frame is None:
+            return None
         if isinstance(frame, torch.Tensor):
             frame = frame.detach().cpu().numpy()
-        return np.asarray(frame)[..., :3]
+        frame_array = np.asarray(frame)
+        if frame_array.ndim != 3 or frame_array.shape[-1] < 3:
+            return None
+        return frame_array[..., :3]
+
+
+    @property
+    def playback_env_index(self) -> int:
+        return self._camera_env_index or 0
+
+
+    def _update_camera_pose(self) -> None:
+        """Follow environment zero from an elevated front-right viewpoint."""
+
+        camera_env_index = getattr(self, "_camera_env_index", None)
+        if camera_env_index is None:
+            return
+        root_positions, _ = self._articulation.get_world_poses()
+        target = self._tensor(root_positions)[camera_env_index]
+        target_array = target.detach().cpu().numpy()
+
+        forward_offset = 2.5
+        right_offset = -2.5
+        follow_height = 1.8
+        horizontal_distance = math.hypot(forward_offset, right_offset)
+        yaw = math.atan2(-right_offset, -forward_offset)
+        pitch = math.atan2(follow_height, horizontal_distance)
+        camera_position = target_array + np.asarray(
+            (forward_offset, right_offset, follow_height),
+            dtype=target_array.dtype,
+        )
+        half_yaw = yaw / 2.0
+        half_pitch = pitch / 2.0
+        camera_orientation = np.asarray(
+            (
+                math.cos(half_yaw) * math.cos(half_pitch),
+                -math.sin(half_yaw) * math.sin(half_pitch),
+                math.cos(half_yaw) * math.sin(half_pitch),
+                math.sin(half_yaw) * math.cos(half_pitch),
+            ),
+            dtype=target_array.dtype,
+        )
+        self._camera.set_world_pose(
+            position=camera_position,
+            orientation=camera_orientation,
+            camera_axes="world",
+        )
 
 
     def close(self) -> None:

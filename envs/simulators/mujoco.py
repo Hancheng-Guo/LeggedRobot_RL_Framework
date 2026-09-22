@@ -10,6 +10,7 @@ import torch
 import numpy as np
 from mujoco import viewer
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 
 from envs.simulators.base import BaseSimulator
 from envs.simulators.utils.context import ModelContext
@@ -31,6 +32,7 @@ class MujocoSimulator(BaseSimulator):
         self.model_path: Path
         self.sim_dt: float
         self.frame_skip: int
+        self.step_workers: int = 1
         self.foot_geom_names: tuple[str, ...]
         self.floor_geom_names: tuple[str, ...]
         self.foot_contact_force_threshold: float = 15.0
@@ -42,6 +44,7 @@ class MujocoSimulator(BaseSimulator):
         self.datas: list[mujoco.MjData] = []    # pyright: ignore[reportAttributeAccessIssue]
         self.viewer = None
         self.renderer = None
+        self._step_executor: ThreadPoolExecutor | None = None
 
     def config_update(
         self,
@@ -50,6 +53,7 @@ class MujocoSimulator(BaseSimulator):
         model_path: Path | str | None = None,
         sim_dt: float | None = None,
         frame_skip: int | None = None,
+        step_workers: int | None = None,
         render_mode: str | None = None,
         foot_geom_names: list[str] | tuple[str, ...] | None = None,
         floor_geom_names: list[str] | tuple[str, ...] | None = None,
@@ -61,6 +65,8 @@ class MujocoSimulator(BaseSimulator):
             raise ValueError(
                 "'num_envs' should be a int greater than 0."
             )
+        if step_workers is not None and step_workers <= 0:
+            raise ValueError("'step_workers' must be greater than 0.")
         if (
             foot_contact_force_threshold is not None
             and foot_contact_force_threshold < 0.0
@@ -75,6 +81,7 @@ class MujocoSimulator(BaseSimulator):
             model_path=None if model_path is None else Path(model_path),
             sim_dt=sim_dt,
             frame_skip=frame_skip,
+            step_workers=step_workers,
             foot_contact_force_threshold=foot_contact_force_threshold,
             foot_geom_names=(
                 tuple(foot_geom_names)
@@ -87,6 +94,13 @@ class MujocoSimulator(BaseSimulator):
                 else None
             ),
         )
+
+        self._shutdown_step_executor()
+        if self.step_workers > 1:
+            self._step_executor = ThreadPoolExecutor(
+                max_workers=min(self.step_workers, self.num_envs),
+                thread_name_prefix="mujoco-step",
+            )
 
         # A simulator config that supplies a model path owns the complete reset
         # configuration. Incremental updates (for example, changing num_envs)
@@ -386,12 +400,24 @@ class MujocoSimulator(BaseSimulator):
         for env_id, data in enumerate(self.datas):
             data.ctrl[:] = action_np[env_id]
 
-        for model, data in zip(self.models, self.datas):
-            mujoco.mj_step(  # pyright: ignore[reportAttributeAccessIssue]
-                model,
-                data,
-                nstep=self.frame_skip,
-            )
+        if self._step_executor is None:
+            for model, data in zip(self.models, self.datas):
+                self._step_model(model, data)
+        else:
+            tuple(self._step_executor.map(
+                self._step_model,
+                self.models,
+                self.datas,
+            ))
+
+
+    def _step_model(self, model, data) -> None:
+
+        mujoco.mj_step(  # pyright: ignore[reportAttributeAccessIssue]
+            model,
+            data,
+            nstep=self.frame_skip,
+        )
 
     
     def render(self) -> np.ndarray | None:
@@ -428,6 +454,8 @@ class MujocoSimulator(BaseSimulator):
 
     def close(self) -> None:
 
+        self._shutdown_step_executor()
+
         if self.viewer is not None:
             self.viewer.close()
             self.viewer = None
@@ -435,6 +463,13 @@ class MujocoSimulator(BaseSimulator):
         if self.renderer is not None:
             self.renderer.close()
             self.renderer = None
+
+
+    def _shutdown_step_executor(self) -> None:
+
+        if self._step_executor is not None:
+            self._step_executor.shutdown(wait=True)
+            self._step_executor = None
 
 
     def get_state(

@@ -18,6 +18,7 @@ def _configure_go1_simulator(
     num_envs: int = 1,
     reset_keyframe: str | None = None,
     frame_skip: int = 1,
+    step_workers: int = 1,
 ) -> MujocoSimulator:
     model_path = (
         Path(__file__).parents[1]
@@ -33,6 +34,7 @@ def _configure_go1_simulator(
         model_path=model_path,
         sim_dt=0.002,
         frame_skip=frame_skip,
+        step_workers=step_workers,
         foot_geom_names=(),
         floor_geom_names=(),
         reset_keyframe=reset_keyframe,
@@ -322,3 +324,66 @@ def test_mujoco_step_uses_native_nstep(runtime_context, monkeypatch):
         (simulator.models[0], simulator.datas[0], 7),
         (simulator.models[1], simulator.datas[1], 7),
     ]
+
+
+def test_mujoco_step_reuses_persistent_executor(runtime_context):
+    simulator = _configure_go1_simulator(
+        runtime_context,
+        num_envs=2,
+        step_workers=2,
+    )
+    executor = simulator._step_executor
+
+    try:
+        action = torch.zeros(2, simulator.model_context.nu)
+        simulator.step(action)
+        simulator.step(action)
+        assert simulator._step_executor is executor
+    finally:
+        simulator.close()
+
+    assert executor is not None
+    assert simulator._step_executor is None
+
+
+def test_mujoco_rejects_invalid_step_workers(runtime_context):
+    simulator = MujocoSimulator(runtime_context)
+
+    with pytest.raises(ValueError, match="step_workers"):
+        simulator.config_update(
+            component=Component(None, None, None, None, None, None),
+            step_workers=0,
+        )
+
+
+def test_mujoco_parallel_step_matches_serial_trajectory(runtime_context):
+    serial = _configure_go1_simulator(
+        runtime_context,
+        num_envs=2,
+        frame_skip=10,
+    )
+    parallel = _configure_go1_simulator(
+        runtime_context,
+        num_envs=2,
+        frame_skip=10,
+        step_workers=2,
+    )
+
+    try:
+        serial.reset()
+        parallel.reset()
+        action = torch.linspace(
+            -0.2,
+            0.2,
+            steps=2 * serial.model_context.nu,
+        ).reshape(2, serial.model_context.nu)
+        for _ in range(20):
+            serial.step(action)
+            parallel.step(action)
+
+        for serial_data, parallel_data in zip(serial.datas, parallel.datas):
+            np.testing.assert_array_equal(serial_data.qpos, parallel_data.qpos)
+            np.testing.assert_array_equal(serial_data.qvel, parallel_data.qvel)
+    finally:
+        serial.close()
+        parallel.close()

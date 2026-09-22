@@ -26,7 +26,7 @@ class JointVelocityL2(BaseRewardTerm):
     ) -> torch.Tensor:
 
         return torch.mean(
-            task_context.state["qvel"][:, self.qvel_ids].square(),
+            task_context.state.qvel[:, self.qvel_ids].square(),
             dim=-1,
         )
 
@@ -51,7 +51,7 @@ class JointPositionL2(BaseRewardTerm):
         task_context: TaskContext
     ) -> torch.Tensor:
         
-        position = task_context.state["qpos"][:, self.qpos_ids]
+        position = task_context.state.qpos[:, self.qpos_ids]
         error = position - self.default_position
         return torch.sum(error.square(), dim=-1)
 
@@ -93,7 +93,7 @@ class JointLimitViolationL1(BaseRewardTerm):
         task_context: TaskContext
     ) -> torch.Tensor:
         
-        position = task_context.state["qpos"][:, self.qpos_ids]
+        position = task_context.state.qpos[:, self.qpos_ids]
         upper_excess = (position - self.upper_limits).clamp_min(0.0)
         lower_excess = (self.lower_limits - position).clamp_min(0.0)
         return torch.sum(upper_excess + lower_excess, dim=-1)
@@ -118,6 +118,6 @@ class JointPowerL1(BaseRewardTerm):
         task_context: TaskContext
     ) -> torch.Tensor:
         
-        joint_velocity = task_context.state["qvel"][:, self.qvel_ids]
-        actuator_force = task_context.state["actuator_force"]
+        joint_velocity = task_context.state.qvel[:, self.qvel_ids]
+        actuator_force = task_context.state.actuator_force
         return torch.sum((actuator_force * joint_velocity).abs(), dim=-1)

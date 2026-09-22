@@ -9,13 +9,39 @@ import mujoco
 import torch
 import numpy as np
 from mujoco import viewer
+from dataclasses import dataclass, fields
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
+from typing import Generic, TypeVar
 
 from envs.simulators.base import BaseSimulator
 from envs.simulators.utils.context import ModelContext
+from envs.simulators.utils.state import SimulatorState
 from utils.component import Component
 from app.utils.context import RuntimeContext
 from utils.param import update_attributes
+
+
+BufferType = TypeVar("BufferType", np.ndarray, torch.Tensor)
+
+
+@dataclass
+class MujocoFixedStateBuffers(Generic[BufferType]):
+    qpos: BufferType
+    qvel: BufferType
+    qacc: BufferType
+    ctrl: BufferType
+    geom_xpos: BufferType
+    actuator_force: BufferType
+    base_lin_vel_body: BufferType
+    base_ang_vel_body: BufferType
+    geom_xvel: BufferType
+
+    def iter_fields(self):
+        return (
+            (field.name, getattr(self, field.name))
+            for field in fields(self)
+        )
 
 
 class MujocoSimulator(BaseSimulator):
@@ -31,6 +57,7 @@ class MujocoSimulator(BaseSimulator):
         self.model_path: Path
         self.sim_dt: float
         self.frame_skip: int
+        self.step_workers: int = 1
         self.foot_geom_names: tuple[str, ...]
         self.floor_geom_names: tuple[str, ...]
         self.foot_contact_force_threshold: float = 15.0
@@ -42,6 +69,13 @@ class MujocoSimulator(BaseSimulator):
         self.datas: list[mujoco.MjData] = []    # pyright: ignore[reportAttributeAccessIssue]
         self.viewer = None
         self.renderer = None
+        self._step_executor: ThreadPoolExecutor | None = None
+        self._full_state_numpy_buffers: MujocoFixedStateBuffers[np.ndarray] | None = None
+        self._full_state_tensor_buffers: MujocoFixedStateBuffers[torch.Tensor] | None = None
+        self._reset_state_numpy_buffers: MujocoFixedStateBuffers[np.ndarray] | None = None
+        self._reset_state_tensor_buffers: MujocoFixedStateBuffers[torch.Tensor] | None = None
+        self._state_staging_tensors: dict[int, torch.Tensor] = {}
+
 
     def config_update(
         self,
@@ -50,6 +84,7 @@ class MujocoSimulator(BaseSimulator):
         model_path: Path | str | None = None,
         sim_dt: float | None = None,
         frame_skip: int | None = None,
+        step_workers: int | None = None,
         render_mode: str | None = None,
         foot_geom_names: list[str] | tuple[str, ...] | None = None,
         floor_geom_names: list[str] | tuple[str, ...] | None = None,
@@ -61,6 +96,8 @@ class MujocoSimulator(BaseSimulator):
             raise ValueError(
                 "'num_envs' should be a int greater than 0."
             )
+        if step_workers is not None and step_workers <= 0:
+            raise ValueError("'step_workers' must be greater than 0.")
         if (
             foot_contact_force_threshold is not None
             and foot_contact_force_threshold < 0.0
@@ -75,6 +112,7 @@ class MujocoSimulator(BaseSimulator):
             model_path=None if model_path is None else Path(model_path),
             sim_dt=sim_dt,
             frame_skip=frame_skip,
+            step_workers=step_workers,
             foot_contact_force_threshold=foot_contact_force_threshold,
             foot_geom_names=(
                 tuple(foot_geom_names)
@@ -87,6 +125,13 @@ class MujocoSimulator(BaseSimulator):
                 else None
             ),
         )
+
+        self._shutdown_step_executor()
+        if self.step_workers > 1:
+            self._step_executor = ThreadPoolExecutor(
+                max_workers=min(self.step_workers, self.num_envs),
+                thread_name_prefix="mujoco-step",
+            )
 
         # A simulator config that supplies a model path owns the complete reset
         # configuration. Incremental updates (for example, changing num_envs)
@@ -114,7 +159,6 @@ class MujocoSimulator(BaseSimulator):
             mujoco.MjData(model)    # pyright: ignore[reportAttributeAccessIssue]
             for model in self.models
         ]
-
         self.reset_keyframe_id = -1
         if self.reset_keyframe is not None:
             reset_keyframe_id = mujoco.mj_name2id(  # pyright: ignore[reportAttributeAccessIssue]
@@ -129,6 +173,7 @@ class MujocoSimulator(BaseSimulator):
             self.reset_keyframe_id = reset_keyframe_id
 
         self._build_model_context()
+        self._initialize_state_buffers()
 
 
     def _build_model_context(self) -> None:
@@ -386,12 +431,24 @@ class MujocoSimulator(BaseSimulator):
         for env_id, data in enumerate(self.datas):
             data.ctrl[:] = action_np[env_id]
 
-        for _ in range(self.frame_skip):
+        if self._step_executor is None:
             for model, data in zip(self.models, self.datas):
-                mujoco.mj_step(  # pyright: ignore[reportAttributeAccessIssue]
-                    model,
-                    data,
-                )
+                self._step_model(model, data)
+        else:
+            tuple(self._step_executor.map(
+                self._step_model,
+                self.models,
+                self.datas,
+            ))
+
+
+    def _step_model(self, model, data) -> None:
+
+        mujoco.mj_step(  # pyright: ignore[reportAttributeAccessIssue]
+            model,
+            data,
+            nstep=self.frame_skip,
+        )
 
     
     def render(self) -> np.ndarray | None:
@@ -428,6 +485,8 @@ class MujocoSimulator(BaseSimulator):
 
     def close(self) -> None:
 
+        self._shutdown_step_executor()
+
         if self.viewer is not None:
             self.viewer.close()
             self.viewer = None
@@ -437,14 +496,30 @@ class MujocoSimulator(BaseSimulator):
             self.renderer = None
 
 
+    def _shutdown_step_executor(self) -> None:
+
+        if self._step_executor is not None:
+            self._step_executor.shutdown(wait=True)
+            self._step_executor = None
+
+
     def get_state(
         self,
         env_ids: torch.Tensor | None = None,
-    ) -> dict[str, torch.Tensor]:
+    ) -> SimulatorState:
+        """Return views of the reusable full-state or reset-state buffers.
+
+        Full and selected-environment reads use separate storage, so an
+        auto-reset read does not overwrite the terminal full-state view from
+        the same environment step. A later read of the same kind reuses and
+        updates its buffer; clone any state that must be retained beyond it.
+        """
 
         if env_ids is None:
             datas = self.datas
             models = self.models
+            numpy_buffers = self._full_state_numpy_buffers
+            tensor_buffers = self._full_state_tensor_buffers
         else:
             indices = env_ids.detach().cpu().tolist()
             datas = [
@@ -455,10 +530,34 @@ class MujocoSimulator(BaseSimulator):
                 self.models[i]
                 for i in indices
             ]
+            numpy_buffers = self._reset_state_numpy_buffers
+            tensor_buffers = self._reset_state_tensor_buffers
 
-        basic_state = self._get_basic_state(datas)
-        base_velocity_state = self._get_base_velocity_state(datas)
-        geom_xvel = self._get_geom_xvel(models, datas)
+        if numpy_buffers is None or tensor_buffers is None:
+            self._initialize_state_buffers()
+            if env_ids is None:
+                numpy_buffers = self._full_state_numpy_buffers
+                tensor_buffers = self._full_state_tensor_buffers
+            else:
+                numpy_buffers = self._reset_state_numpy_buffers
+                tensor_buffers = self._reset_state_tensor_buffers
+
+        basic_state = self._get_basic_state(
+            datas,
+            numpy_buffers,
+            tensor_buffers,
+        )
+        base_velocity_state = self._get_base_velocity_state(
+            datas,
+            numpy_buffers,
+            tensor_buffers,
+        )
+        geom_xvel = self._get_geom_xvel(
+            models,
+            datas,
+            numpy_buffers,
+            tensor_buffers,
+        )
         (
             contact_geom_ids,
             contact_forces
@@ -468,17 +567,100 @@ class MujocoSimulator(BaseSimulator):
             contact_forces,
         )
 
-        return (
-            basic_state |
-            base_velocity_state |
-            {
-                "contact_geom_ids": contact_geom_ids,
-                "contact_forces": contact_forces,
-                "foot_ground_contact": foot_ground_contact,
-                "geom_xvel": geom_xvel,
-            }
+        return SimulatorState(
+            **basic_state,
+            **base_velocity_state,
+            contact_geom_ids=contact_geom_ids,
+            contact_forces=contact_forces,
+            foot_ground_contact=foot_ground_contact,
+            geom_xvel=geom_xvel,
         )
 
+
+    def _initialize_state_buffers(self) -> None:
+
+        self._state_staging_tensors.clear()
+        (
+            self._full_state_numpy_buffers,
+            self._full_state_tensor_buffers,
+        ) = self._create_state_buffers()
+        (
+            self._reset_state_numpy_buffers,
+            self._reset_state_tensor_buffers,
+        ) = self._create_state_buffers()
+
+
+    def _create_state_buffers(
+        self,
+    ) -> tuple[
+        MujocoFixedStateBuffers[np.ndarray],
+        MujocoFixedStateBuffers[torch.Tensor],
+    ]:
+
+        model = self.models[0]
+        buffer_capacity = len(self.models)
+        shapes = {
+            "qpos": (buffer_capacity, model.nq),
+            "qvel": (buffer_capacity, model.nv),
+            "qacc": (buffer_capacity, model.nv),
+            "ctrl": (buffer_capacity, model.nu),
+            "geom_xpos": (buffer_capacity, model.ngeom, 3),
+            "actuator_force": (buffer_capacity, model.nu),
+            "base_lin_vel_body": (buffer_capacity, 3),
+            "base_ang_vel_body": (buffer_capacity, 3),
+            "geom_xvel": (buffer_capacity, model.ngeom, 6),
+        }
+        numpy_buffers = MujocoFixedStateBuffers(**{
+            name: np.empty(shape, dtype=np.float64)
+            for name, shape in shapes.items()
+        })
+        staging_tensors = {
+            name: torch.from_numpy(values)
+            for name, values in numpy_buffers.iter_fields()
+        }
+        tensor_buffers = MujocoFixedStateBuffers(**{
+            name: (
+                staging_tensors[name]
+                if (
+                    self.context.device.type == "cpu"
+                    and self.context.dtype == torch.float64
+                )
+                else torch.empty(
+                    values.shape,
+                    dtype=self.context.dtype,
+                    device=self.context.device,
+                )
+            )
+            for name, values in numpy_buffers.iter_fields()
+        })
+        self._state_staging_tensors.update({
+            id(values): staging_tensors[name]
+            for name, values in numpy_buffers.iter_fields()
+        })
+        return numpy_buffers, tensor_buffers
+
+
+    def _publish_state_fields(
+        self,
+        names: tuple[str, ...],
+        numpy_buffers: MujocoFixedStateBuffers[np.ndarray],
+        tensor_buffers: MujocoFixedStateBuffers[torch.Tensor],
+        batch_size: int,
+    ) -> dict[str, torch.Tensor]:
+
+        for name in names:
+            numpy_buffer = getattr(numpy_buffers, name)
+            tensor_buffer = getattr(tensor_buffers, name)
+            if tensor_buffer.data_ptr() != numpy_buffer.ctypes.data:
+                tensor_buffer[:batch_size].copy_(
+                    self._state_staging_tensors[
+                        id(numpy_buffer)
+                    ][:batch_size]
+                )
+        return {
+            name: getattr(tensor_buffers, name)[:batch_size]
+            for name in names
+        }
 
     def _get_foot_ground_contact(
         self,
@@ -503,91 +685,125 @@ class MujocoSimulator(BaseSimulator):
     def _get_basic_state(
         self,
         datas,
+        numpy_buffers: MujocoFixedStateBuffers[np.ndarray] | None = None,
+        tensor_buffers: MujocoFixedStateBuffers[torch.Tensor] | None = None,
     ) -> dict[str, torch.Tensor]:
-        
-        qpos = []
-        qvel = []
-        qacc = []
-        ctrl = []
-        geom_xpos = []
-        actuator_force = []
 
-        for data in datas:
-            qpos.append(data.qpos)
-            qvel.append(data.qvel)
-            qacc.append(data.qacc)
-            ctrl.append(data.ctrl)
-            geom_xpos.append(data.geom_xpos)
-            actuator_force.append(data.actuator_force)
+        if numpy_buffers is None or tensor_buffers is None:
+            if (
+                self._reset_state_numpy_buffers is None
+                or self._reset_state_tensor_buffers is None
+            ):
+                self._initialize_state_buffers()
+            numpy_buffers = self._reset_state_numpy_buffers
+            tensor_buffers = self._reset_state_tensor_buffers
+        assert numpy_buffers is not None
+        assert tensor_buffers is not None
 
-        return {
-            "qpos": self._tensor(np.asarray(qpos)),
-            "qvel": self._tensor(np.asarray(qvel)),
-            "qacc": self._tensor(np.asarray(qacc)),
-            "ctrl": self._tensor(np.asarray(ctrl)),
-            "geom_xpos": self._tensor(np.asarray(geom_xpos)),
-            "actuator_force": self._tensor(np.asarray(actuator_force)),
-        }
+        names = (
+            "qpos",
+            "qvel",
+            "qacc",
+            "ctrl",
+            "geom_xpos",
+            "actuator_force",
+        )
+        for env_index, data in enumerate(datas):
+            for name in names:
+                np.copyto(
+                    getattr(numpy_buffers, name)[env_index],
+                    getattr(data, name),
+                )
+
+        return self._publish_state_fields(
+            names,
+            numpy_buffers,
+            tensor_buffers,
+            len(datas),
+        )
 
 
     def _get_base_velocity_state(
         self,
         datas,
+        numpy_buffers: MujocoFixedStateBuffers[np.ndarray] | None = None,
+        tensor_buffers: MujocoFixedStateBuffers[torch.Tensor] | None = None,
     ) -> dict[str, torch.Tensor]:
 
         base_id = self.model_context.base_id
         lin_vel_ids = self.model_context.base_lin_vel_qvel_ids.cpu().numpy()
         ang_vel_ids = self.model_context.base_ang_vel_qvel_ids.cpu().numpy()
 
-        base_lin_vel_body = []
-        base_ang_vel_body = []
-        for data in datas:
+        if numpy_buffers is None or tensor_buffers is None:
+            if (
+                self._reset_state_numpy_buffers is None
+                or self._reset_state_tensor_buffers is None
+            ):
+                self._initialize_state_buffers()
+            numpy_buffers = self._reset_state_numpy_buffers
+            tensor_buffers = self._reset_state_tensor_buffers
+        assert numpy_buffers is not None
+        assert tensor_buffers is not None
+
+        for env_index, data in enumerate(datas):
             rotation_body_to_world = data.xmat[base_id].reshape(3, 3)
             rotation_world_to_body = rotation_body_to_world.T
-            base_lin_vel_body.append(
-                rotation_world_to_body @ data.qvel[lin_vel_ids]
+            np.matmul(
+                rotation_world_to_body,
+                data.qvel[lin_vel_ids],
+                out=numpy_buffers.base_lin_vel_body[env_index],
             )
-            base_ang_vel_body.append(
-                rotation_world_to_body @ data.qvel[ang_vel_ids]
+            np.matmul(
+                rotation_world_to_body,
+                data.qvel[ang_vel_ids],
+                out=numpy_buffers.base_ang_vel_body[env_index],
             )
 
-        return {
-            "base_lin_vel_body": self._tensor(np.asarray(base_lin_vel_body)),
-            "base_ang_vel_body": self._tensor(np.asarray(base_ang_vel_body)),
-        }
+        return self._publish_state_fields(
+            ("base_lin_vel_body", "base_ang_vel_body"),
+            numpy_buffers,
+            tensor_buffers,
+            len(datas),
+        )
 
 
     def _get_geom_xvel(
         self,
         models,
         datas,
+        numpy_buffers: MujocoFixedStateBuffers[np.ndarray] | None = None,
+        tensor_buffers: MujocoFixedStateBuffers[torch.Tensor] | None = None,
     ) -> torch.Tensor:
+
+        if numpy_buffers is None or tensor_buffers is None:
+            if (
+                self._reset_state_numpy_buffers is None
+                or self._reset_state_tensor_buffers is None
+            ):
+                self._initialize_state_buffers()
+            numpy_buffers = self._reset_state_numpy_buffers
+            tensor_buffers = self._reset_state_tensor_buffers
+        assert numpy_buffers is not None
+        assert tensor_buffers is not None
         
-        geom_xvel = []
-        for model, data in zip(models, datas):
-
-            per_env = []
+        geom_xvel = numpy_buffers.geom_xvel
+        for env_index, (model, data) in enumerate(zip(models, datas)):
             for geom_id in range(model.ngeom):
-
-                velocity = np.zeros(6, dtype=np.float64)
                 mujoco.mj_objectVelocity(  # pyright: ignore[reportAttributeAccessIssue]
                     model,
                     data,
                     mujoco.mjtObj.mjOBJ_GEOM,  # pyright: ignore[reportAttributeAccessIssue]
                     geom_id,
-                    velocity,
+                    geom_xvel[env_index, geom_id],
                     0,
                 )
-                per_env.append(velocity)
 
-            geom_xvel.append(
-                torch.as_tensor(
-                    np.asarray(per_env),
-                    dtype=self.context.dtype,
-                )
-            )
-
-        return torch.stack(geom_xvel).to(self.context.device)
+        return self._publish_state_fields(
+            ("geom_xvel",),
+            numpy_buffers,
+            tensor_buffers,
+            len(datas),
+        )["geom_xvel"]
 
 
     def _get_contact_state(

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from typing import cast
 
 from envs.simulators.base import BaseSimulator
+from envs.simulators.utils.state import SimulatorState
 from envs.tasks.base import BaseTaskLogic
 from envs.tasks.utils.context import TaskContext, TaskStepResult
 from envs.vector_env import VectorEnv
@@ -32,9 +33,26 @@ class FakeSimulator:
     def get_state(
         self,
         env_ids: torch.Tensor | None = None,
-    ) -> dict[str, torch.Tensor]:
+    ) -> SimulatorState:
         state = self.state if env_ids is None else self.state[env_ids]
-        return {"state": state.clone()}
+        state = state.clone()
+        num_envs = state.shape[0]
+        return SimulatorState(
+            qpos=state,
+            qvel=torch.empty(num_envs, 0),
+            qacc=torch.empty(num_envs, 0),
+            ctrl=torch.empty(num_envs, 0),
+            geom_xpos=torch.empty(num_envs, 0, 3),
+            geom_xvel=torch.empty(num_envs, 0, 6),
+            actuator_force=torch.empty(num_envs, 0),
+            base_lin_vel_body=torch.empty(num_envs, 3),
+            base_ang_vel_body=torch.empty(num_envs, 3),
+            contact_geom_ids=torch.empty(num_envs, 0, 2, dtype=torch.long),
+            contact_forces=torch.empty(num_envs, 0, 6),
+            foot_ground_contact=torch.empty(
+                num_envs, 0, 0, dtype=torch.bool
+            ),
+        )
 
 
 class FakeTask:
@@ -59,7 +77,7 @@ class FakeTask:
 
     def build_task_context(
         self,
-        state: dict[str, torch.Tensor],
+        state: SimulatorState,
         episode_step: torch.Tensor,
         step_dt: float,
         env_ids: torch.Tensor | None = None,
@@ -128,7 +146,7 @@ class FakeTask:
     ) -> tuple[torch.Tensor, dict]:
         return torch.cat(
             (
-                task_context.state["state"],
+                task_context.state.qpos,
                 task_context.command["target"],
                 task_context.action,
             ),

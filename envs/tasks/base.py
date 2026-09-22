@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from app.utils.context import RuntimeContext
 from envs.simulators.utils.context import ModelContext
 from envs.tasks.utils.context import TaskContext, TaskStepResult
+from envs.simulators.utils.state import SimulatorState
 from envs.tasks.managers.action.base import ActionManager
 from envs.tasks.managers.command.base import CommandManager
 from envs.tasks.managers.observation.base import ObservationManager
@@ -144,7 +145,7 @@ class BaseTaskLogic(ABC):
 
     def build_task_context(
         self,
-        state: dict[str, torch.Tensor],
+        state: SimulatorState,
         episode_step: torch.Tensor,
         step_dt: float,
         env_ids: torch.Tensor | None = None,

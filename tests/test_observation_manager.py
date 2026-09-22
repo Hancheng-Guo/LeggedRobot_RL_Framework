@@ -2,12 +2,35 @@ import pytest
 import torch
 from dataclasses import replace
 
+from envs.simulators.utils.state import SimulatorState
 from envs.tasks.managers.observation.base import ObservationManager
 from envs.tasks.managers.observation.terms.base import BaseObservationTerm
 from envs.tasks.managers.observation.terms.registry import (
     OBSERVATION_CLASS_MAP,
 )
 from envs.tasks.utils.context import TaskContext
+
+
+def make_simulator_state(
+    num_envs: int,
+    **overrides: torch.Tensor,
+) -> SimulatorState:
+    values = {
+        "qpos": torch.empty(num_envs, 0),
+        "qvel": torch.empty(num_envs, 0),
+        "qacc": torch.empty(num_envs, 0),
+        "ctrl": torch.empty(num_envs, 0),
+        "geom_xpos": torch.empty(num_envs, 0, 3),
+        "geom_xvel": torch.empty(num_envs, 0, 6),
+        "actuator_force": torch.empty(num_envs, 0),
+        "base_lin_vel_body": torch.empty(num_envs, 3),
+        "base_ang_vel_body": torch.empty(num_envs, 3),
+        "contact_geom_ids": torch.empty(num_envs, 0, 2, dtype=torch.long),
+        "contact_forces": torch.empty(num_envs, 0, 6),
+        "foot_ground_contact": torch.empty(num_envs, 0, 0, dtype=torch.bool),
+    }
+    values.update(overrides)
+    return SimulatorState(**values)
 
 
 def make_task_context(num_envs: int = 2) -> TaskContext:
@@ -21,7 +44,7 @@ def make_task_context(num_envs: int = 2) -> TaskContext:
     qvel[:, [0, 7]] = torch.tensor([4.0, 5.0])
 
     return TaskContext(
-        state={
+        state=make_simulator_state(num_envs, **{
             "qpos": qpos,
             "qvel": qvel,
             "actuator_force": torch.tensor(
@@ -43,7 +66,7 @@ def make_task_context(num_envs: int = 2) -> TaskContext:
                 [[[12.0, 1.0, 2.0, 0.0, 0.0, 0.0],
                   [50.0, 0.0, 0.0, 0.0, 0.0, 0.0]]],
             ).repeat(num_envs, 1, 1),
-        },
+        }),
         command={
             "lin_vel_x": torch.full((num_envs, 1), 0.1),
             "lin_vel_y": torch.full((num_envs, 1), 0.2),

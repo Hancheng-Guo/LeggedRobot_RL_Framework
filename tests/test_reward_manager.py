@@ -16,11 +16,36 @@ from envs.tasks.managers.reward.terms.tracking import (
     TrackLinearVelocityXyErrorIntegralL2,
 )
 from envs.tasks.utils.context import TaskContext
+from envs.simulators.utils.state import SimulatorState
+
+
+def make_simulator_state(
+    num_envs: int = 2,
+    **overrides: torch.Tensor,
+) -> SimulatorState:
+    values = {
+        "qpos": torch.empty(num_envs, 0),
+        "qvel": torch.empty(num_envs, 0),
+        "qacc": torch.empty(num_envs, 0),
+        "ctrl": torch.empty(num_envs, 0),
+        "geom_xpos": torch.empty(num_envs, 0, 3),
+        "geom_xvel": torch.empty(num_envs, 0, 6),
+        "actuator_force": torch.empty(num_envs, 0),
+        "base_lin_vel_body": torch.empty(num_envs, 3),
+        "base_ang_vel_body": torch.empty(num_envs, 3),
+        "contact_geom_ids": torch.empty(num_envs, 0, 2, dtype=torch.long),
+        "contact_forces": torch.empty(num_envs, 0, 6),
+        "foot_ground_contact": torch.empty(
+            num_envs, 0, 0, dtype=torch.bool
+        ),
+    }
+    values.update(overrides)
+    return SimulatorState(**values)
 
 
 def make_reward_context() -> TaskContext:
     return TaskContext(
-        state={},
+        state=make_simulator_state(),
         command={},
         action=torch.tensor([[1.0, 3.0], [2.0, 2.0]]),
         last_action=torch.tensor([[0.0, 1.0], [1.0, 1.0]]),
@@ -31,35 +56,35 @@ def make_reward_context() -> TaskContext:
 
 def make_state_reward_context() -> TaskContext:
     return TaskContext(
-        state={
-            "qpos": torch.tensor([
+        state=make_simulator_state(
+            qpos=torch.tensor([
                 [1.5, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.55, 0.0],
                 [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.35, 2.5],
             ]),
-            "qvel": torch.tensor([
+            qvel=torch.tensor([
                 [0.2, 0.0, 0.0, 0.0, 1.0, 2.0, 0.5, 0.3],
                 [0.4, 0.0, 0.0, 0.0, 0.5, 0.0, -0.5, 0.6],
             ]),
-            "base_lin_vel_body": torch.tensor([
+            base_lin_vel_body=torch.tensor([
                 [1.0, 2.0, 0.5],
                 [0.5, 0.0, -0.5],
             ]),
-            "base_ang_vel_body": torch.tensor([
+            base_ang_vel_body=torch.tensor([
                 [0.0, 0.0, 0.5],
                 [0.0, 0.0, -0.5],
             ]),
-            "actuator_force": torch.tensor([
+            actuator_force=torch.tensor([
                 [2.0, 3.0],
                 [4.0, 5.0],
             ]),
-            "contact_geom_ids": torch.tensor([
+            contact_geom_ids=torch.tensor([
                 [[3, 0], [2, 0]],
                 [[1, 0], [-1, -1]],
             ]),
-            "contact_forces": torch.zeros(2, 2, 6),
-            "geom_xpos": torch.zeros(2, 4, 3),
-            "geom_xvel": torch.zeros(2, 4, 6),
-        },
+            contact_forces=torch.zeros(2, 2, 6),
+            geom_xpos=torch.zeros(2, 4, 3),
+            geom_xvel=torch.zeros(2, 4, 6),
+        ),
         command={
             "lin_vel_x": torch.tensor([[0.0], [0.0]]),
             "lin_vel_y": torch.tensor([[2.0], [0.0]]),
@@ -81,10 +106,10 @@ def make_phase_gait_context() -> TaskContext:
     geom_xpos[:, [4, 5], 2] = 0.55
 
     return TaskContext(
-        state={
-            "qpos": qpos,
-            "geom_xpos": geom_xpos,
-        },
+        state=make_simulator_state(
+            qpos=qpos,
+            geom_xpos=geom_xpos,
+        ),
         command={
             "foot_phase_real": torch.ones(2, 4),
             "foot_phase_imag": torch.zeros(2, 4),
@@ -104,17 +129,17 @@ def make_quadrupedal_foot_context() -> TaskContext:
     contact_forces[1, 0, 0] = 20.0
 
     return TaskContext(
-        state={
-            "contact_geom_ids": torch.tensor([
+        state=make_simulator_state(
+            contact_geom_ids=torch.tensor([
                 [[3, 0], [4, 0], [-1, -1], [-1, -1]],
                 [[5, 0], [-1, -1], [-1, -1], [-1, -1]],
             ]),
-            "foot_ground_contact": torch.tensor([
+            foot_ground_contact=torch.tensor([
                 [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
                 [[0, 0, 1, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
             ], dtype=torch.bool),
-            "contact_forces": contact_forces,
-        },
+            contact_forces=contact_forces,
+        ),
         command={
             "lin_vel_x": torch.zeros(2, 1),
             "lin_vel_y": torch.zeros(2, 1),
@@ -321,8 +346,8 @@ def test_foot_state_duration_ignores_low_force_contacts(
         },
     )
     task_context = make_quadrupedal_foot_context()
-    task_context.state["contact_forces"].zero_()
-    task_context.state["foot_ground_contact"].zero_()
+    task_context.state.contact_forces.zero_()
+    task_context.state.foot_ground_contact.zero_()
 
     manager.compute(task_context)
     term = cast(
@@ -353,15 +378,15 @@ def test_quadrupedal_foot_velocity_diff_matches_diagonal_feet(
         terms={"quadrupedal_foot_velocity_diff_l2": {}},
     )
     task_context = make_quadrupedal_foot_context()
-    task_context.state["geom_xvel"] = torch.zeros(2, 7, 6)
-    task_context.state["geom_xvel"][0, 3, 3:5] = torch.tensor([1.0, 2.0])
-    task_context.state["geom_xvel"][0, 6, 3:5] = torch.tensor([1.0, 4.0])
-    task_context.state["geom_xvel"][0, 4, 3:5] = torch.tensor([3.0, 0.0])
-    task_context.state["geom_xvel"][0, 5, 3:5] = torch.tensor([1.0, 0.0])
-    task_context.state["geom_xvel"][1, 3, 3:5] = torch.tensor([0.5, 0.5])
-    task_context.state["geom_xvel"][1, 6, 3:5] = torch.tensor([0.5, 0.5])
-    task_context.state["geom_xvel"][1, 4, 3:5] = torch.tensor([2.0, -1.0])
-    task_context.state["geom_xvel"][1, 5, 3:5] = torch.tensor([2.0, -1.0])
+    task_context.state.geom_xvel = torch.zeros(2, 7, 6)
+    task_context.state.geom_xvel[0, 3, 3:5] = torch.tensor([1.0, 2.0])
+    task_context.state.geom_xvel[0, 6, 3:5] = torch.tensor([1.0, 4.0])
+    task_context.state.geom_xvel[0, 4, 3:5] = torch.tensor([3.0, 0.0])
+    task_context.state.geom_xvel[0, 5, 3:5] = torch.tensor([1.0, 0.0])
+    task_context.state.geom_xvel[1, 3, 3:5] = torch.tensor([0.5, 0.5])
+    task_context.state.geom_xvel[1, 6, 3:5] = torch.tensor([0.5, 0.5])
+    task_context.state.geom_xvel[1, 4, 3:5] = torch.tensor([2.0, -1.0])
+    task_context.state.geom_xvel[1, 5, 3:5] = torch.tensor([2.0, -1.0])
 
     reward, info = manager.compute(task_context)
 
@@ -391,10 +416,10 @@ def test_foot_lift_height_reward_uses_normalized_swing_height_and_speed(
         speed_std=0.5,
     )
     task_context = make_quadrupedal_foot_context()
-    task_context.state["geom_xpos"] = torch.zeros(2, 7, 3)
-    task_context.state["geom_xvel"] = torch.zeros(2, 7, 6)
-    task_context.state["geom_xpos"][:, 3:7, 2] = 0.08
-    task_context.state["geom_xvel"][:, 3:7, 3] = 0.5
+    task_context.state.geom_xpos = torch.zeros(2, 7, 3)
+    task_context.state.geom_xvel = torch.zeros(2, 7, 6)
+    task_context.state.geom_xpos[:, 3:7, 2] = 0.08
+    task_context.state.geom_xvel[:, 3:7, 3] = 0.5
 
     reward = term.compute(task_context)
 
@@ -404,7 +429,7 @@ def test_foot_lift_height_reward_uses_normalized_swing_height_and_speed(
         torch.tensor([0.5, 0.75]) * speed_gate,
     )
 
-    task_context.state["geom_xpos"][:, 3:7, 2] = 0.0
+    task_context.state.geom_xpos[:, 3:7, 2] = 0.0
     low_reward = term.compute(task_context)
     assert torch.all(low_reward < reward * 0.01)
 
@@ -485,16 +510,16 @@ def test_trot_loop_duration_tracks_valid_contact_sequence_and_resets(
         growth_rate=2.0,
     )
     task_context = TaskContext(
-        state={
-            "contact_geom_ids": torch.tensor([
+        state=make_simulator_state(
+            contact_geom_ids=torch.tensor([
                 [[3, 0], [4, 0], [5, 0], [6, 0]],
                 [[0, 3], [0, 4], [0, 5], [0, 6]],
             ]),
-            "foot_ground_contact": torch.eye(
+            foot_ground_contact=torch.eye(
                 4, dtype=torch.bool,
             ).repeat(2, 1, 1),
-            "contact_forces": torch.zeros(2, 4, 6),
-        },
+            contact_forces=torch.zeros(2, 4, 6),
+        ),
         command={
             "lin_vel_x": torch.tensor([[1.0], [0.0]]),
             "lin_vel_y": torch.zeros(2, 1),
@@ -505,7 +530,7 @@ def test_trot_loop_duration_tracks_valid_contact_sequence_and_resets(
         episode_step=torch.ones(2, dtype=torch.long),
         step_dt=0.02,
     )
-    task_context.state["contact_forces"][..., 0] = 20.0
+    task_context.state.contact_forces[..., 0] = 20.0
 
     first_reward = term.compute(task_context)
     torch.testing.assert_close(
@@ -519,10 +544,10 @@ def test_trot_loop_duration_tracks_valid_contact_sequence_and_resets(
         torch.tanh(torch.full((2,), 0.08)),
     )
 
-    task_context.state["contact_geom_ids"][0] = torch.tensor([
+    task_context.state.contact_geom_ids[0] = torch.tensor([
         [3, 0], [6, 0], [-1, -1], [-1, -1],
     ])
-    task_context.state["foot_ground_contact"][0] = torch.tensor([
+    task_context.state.foot_ground_contact[0] = torch.tensor([
         [1, 0, 0, 0], [0, 0, 0, 1],
         [0, 0, 0, 0], [0, 0, 0, 0],
     ], dtype=torch.bool)
@@ -562,9 +587,10 @@ def test_trot_loop_penalizes_early_transition_and_decays_on_timeout(
         early_transition_penalty=1.0,
     )
     task_context = TaskContext(
-        state={
-            "foot_ground_contact": torch.ones(1, 1, 4, dtype=torch.bool),
-        },
+        state=make_simulator_state(
+            num_envs=1,
+            foot_ground_contact=torch.ones(1, 1, 4, dtype=torch.bool),
+        ),
         command={
             "lin_vel_x": torch.ones(1, 1),
             "lin_vel_y": torch.zeros(1, 1),
@@ -577,14 +603,14 @@ def test_trot_loop_penalizes_early_transition_and_decays_on_timeout(
     )
 
     term.compute(task_context)
-    task_context.state["foot_ground_contact"] = torch.tensor(
+    task_context.state.foot_ground_contact = torch.tensor(
         [[[1, 0, 0, 1]]], dtype=torch.bool,
     )
     early_reward = term.compute(task_context)
     assert early_reward.item() < 0.0
 
     term.reset()
-    task_context.state["foot_ground_contact"].fill_(True)
+    task_context.state.foot_ground_contact.fill_(True)
     reward_at_timeout = None
     late_reward = None
     for step in range(30):
@@ -616,11 +642,11 @@ def test_quadrupedal_phase_gait_uses_base_plane_distance(
         target_height=0.2,
     )
     task_context = make_phase_gait_context()
-    task_context.state["qpos"] = torch.zeros(1, 9)
-    task_context.state["qpos"][:, 1] = 2.0 ** -0.5
-    task_context.state["qpos"][:, 3] = 2.0 ** -0.5
-    task_context.state["geom_xpos"] = torch.zeros(1, 7, 3)
-    task_context.state["geom_xpos"][:, [3, 4, 5, 6], 0] = 0.2
+    task_context.state.qpos = torch.zeros(1, 9)
+    task_context.state.qpos[:, 1] = 2.0 ** -0.5
+    task_context.state.qpos[:, 3] = 2.0 ** -0.5
+    task_context.state.geom_xpos = torch.zeros(1, 7, 3)
+    task_context.state.geom_xpos[:, [3, 4, 5, 6], 0] = 0.2
     task_context.command["foot_phase_real"] = torch.ones(1, 4)
     task_context.command["foot_phase_imag"] = torch.zeros(1, 4)
     task_context.command["half_period_duration"] = torch.full((1,), 0.04)

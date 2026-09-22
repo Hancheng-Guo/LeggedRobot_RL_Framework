@@ -228,7 +228,7 @@ class VectorEnv(BaseEnv):
         state = self.simulator.get_state()
         state_info = {
             f"state/{name}": value
-            for name, value in state.items()
+            for name, value in state.as_dict().items()
         }
         task_context = self.task.build_task_context(
             state=state,

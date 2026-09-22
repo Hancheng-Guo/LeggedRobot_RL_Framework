@@ -29,6 +29,6 @@ class BaseHeight(BaseTerminationTerm):
     ) -> torch.Tensor:
         
         return (
-            task_context.state["qpos"][:, self.height_qpos_id]
+            task_context.state.qpos[:, self.height_qpos_id]
             < self.min_height
         )

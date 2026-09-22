@@ -1,9 +1,9 @@
 runtime:
-  device: cuda
+  device: cpu
   dtype: float32
   num_threads: 4
   seed: null
-  deterministic_ops: true
+  deterministic_ops: false
 
 logging:
   file_name: training.log
@@ -27,23 +27,23 @@ stage:
 component:
   runner:
     - type: on_policy
-      config: rl_unitree_go1
+      config: mujoco_rollout_256
 
   algorithm:
     - type: ppo
-      config: ppo_unitree_go1_stage1
+      config: ppo_num_batch_4
 
   policy:
     - type: actor_critic
-      config: actor_critic_unitree_go1_velocity
+      config: actor_critic_direct_actuation
 
   environment:
     - type: vector_env
-      config: vector_env_1_unitree_go1
+      config: vector_env_32
 
   simulator:
     - type: mujoco
-      config: mujoco_unitree_go1_velocity
+      config: mujoco_unitree_go1_rgb_array
 
   task:
     - type: locomotion

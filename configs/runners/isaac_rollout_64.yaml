@@ -1,4 +1,4 @@
-rollout_length: 32
+rollout_length: 64
 rollout_length_history_size: 50
 callbacks:
   - progress_bar

@@ -27,23 +27,23 @@ stage:
 component:
   runner:
     - type: on_policy
-      config: rl_isaac_sim_unitree_go1
+      config: isaac_rollout_64
 
   algorithm:
     - type: ppo
-      config: ppo_isaac_sim_unitree_go1_stage1
+      config: ppo_num_batch_32
 
   policy:
     - type: actor_critic
-      config: actor_critic_unitree_go1_velocity
+      config: actor_critic_direct_actuation
 
   environment:
     - type: vector_env
-      config: vector_env_isaac_sim_unitree_go1
+      config: vector_env_1024
 
   simulator:
     - type: isaac_sim
-      config: isaac_sim_unitree_go1_velocity
+      config: isaac_sim_unitree_go1_rgb_array
 
   task:
     - type: locomotion

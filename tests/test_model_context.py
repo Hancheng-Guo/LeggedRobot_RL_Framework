@@ -17,6 +17,7 @@ def _configure_go1_simulator(
     *,
     num_envs: int = 1,
     reset_keyframe: str | None = None,
+    frame_skip: int = 1,
 ) -> MujocoSimulator:
     model_path = (
         Path(__file__).parents[1]
@@ -31,7 +32,7 @@ def _configure_go1_simulator(
         num_envs=num_envs,
         model_path=model_path,
         sim_dt=0.002,
-        frame_skip=1,
+        frame_skip=frame_skip,
         foot_geom_names=(),
         floor_geom_names=(),
         reset_keyframe=reset_keyframe,
@@ -297,3 +298,27 @@ def test_mujoco_reconfiguration_does_not_reuse_stale_keyframe_id(
         simulator.datas[0].qpos,
         simulator.models[0].qpos0,
     )
+
+
+def test_mujoco_step_uses_native_nstep(runtime_context, monkeypatch):
+    simulator = _configure_go1_simulator(
+        runtime_context,
+        num_envs=2,
+        frame_skip=7,
+    )
+    calls = []
+
+    def record_step(model, data, *, nstep):
+        calls.append((model, data, nstep))
+
+    monkeypatch.setattr(mujoco, "mj_step", record_step)
+
+    try:
+        simulator.step(torch.zeros(2, simulator.model_context.nu))
+    finally:
+        simulator.close()
+
+    assert calls == [
+        (simulator.models[0], simulator.datas[0], 7),
+        (simulator.models[1], simulator.datas[1], 7),
+    ]

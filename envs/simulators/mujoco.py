@@ -386,12 +386,12 @@ class MujocoSimulator(BaseSimulator):
         for env_id, data in enumerate(self.datas):
             data.ctrl[:] = action_np[env_id]
 
-        for _ in range(self.frame_skip):
-            for model, data in zip(self.models, self.datas):
-                mujoco.mj_step(  # pyright: ignore[reportAttributeAccessIssue]
-                    model,
-                    data,
-                )
+        for model, data in zip(self.models, self.datas):
+            mujoco.mj_step(  # pyright: ignore[reportAttributeAccessIssue]
+                model,
+                data,
+                nstep=self.frame_skip,
+            )
 
     
     def render(self) -> np.ndarray | None:

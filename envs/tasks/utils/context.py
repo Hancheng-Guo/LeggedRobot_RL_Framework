@@ -1,11 +1,12 @@
 import torch
 from dataclasses import dataclass
-from typing import Any
+
+from envs.simulators.utils.state import SimulatorState
 
 
 @dataclass
 class TaskContext:
-    state: dict[str, torch.Tensor]
+    state: SimulatorState
     command: dict[str, torch.Tensor]
     action: torch.Tensor
     last_action: torch.Tensor

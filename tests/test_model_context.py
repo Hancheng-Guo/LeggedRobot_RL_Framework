@@ -6,6 +6,7 @@ import pytest
 import torch
 
 from envs.simulators.mujoco import MujocoSimulator
+from envs.simulators.utils.state import SimulatorState
 from utils.component import Component
 
 
@@ -170,11 +171,13 @@ def test_mujoco_state_exposes_base_velocity_in_body_frame(runtime_context):
 
     state = simulator.get_state()
 
-    assert state["base_lin_vel_body"].shape == (1, 3)
-    assert state["base_ang_vel_body"].shape == (1, 3)
-    assert state["foot_ground_contact"].shape == (
+    assert isinstance(state, SimulatorState)
+
+    assert state.base_lin_vel_body.shape == (1, 3)
+    assert state.base_ang_vel_body.shape == (1, 3)
+    assert state.foot_ground_contact.shape == (
         1,
-        state["contact_geom_ids"].shape[1],
+        state.contact_geom_ids.shape[1],
         simulator.model_context.foot_geom_ids.numel(),
     )
 
@@ -387,3 +390,59 @@ def test_mujoco_parallel_step_matches_serial_trajectory(runtime_context):
     finally:
         serial.close()
         parallel.close()
+
+
+def test_mujoco_reuses_fixed_state_buffers(runtime_context):
+    simulator = _configure_go1_simulator(runtime_context, num_envs=2)
+    fixed_fields = (
+        "qpos",
+        "qvel",
+        "qacc",
+        "ctrl",
+        "geom_xpos",
+        "actuator_force",
+        "base_lin_vel_body",
+        "base_ang_vel_body",
+        "geom_xvel",
+    )
+
+    try:
+        simulator.reset()
+        first = simulator.get_state()
+        pointers = {
+            name: getattr(first, name).data_ptr()
+            for name in fixed_fields
+        }
+        second = simulator.get_state()
+
+        assert {
+            name: getattr(second, name).data_ptr()
+            for name in fixed_fields
+        } == pointers
+
+        subset = simulator.get_state(torch.tensor([0]))
+        assert all(
+            getattr(subset, name).data_ptr() != pointers[name]
+            for name in fixed_fields
+        )
+        assert all(
+            getattr(subset, name).shape[0] == 1
+            for name in fixed_fields
+        )
+        assert all(
+            getattr(simulator._reset_state_numpy_buffers, name).shape[0] == 2
+            for name in fixed_fields
+        )
+
+        larger_subset = simulator.get_state(torch.tensor([0, 1]))
+        assert all(
+            getattr(larger_subset, name).data_ptr()
+            == getattr(subset, name).data_ptr()
+            for name in fixed_fields
+        )
+        assert all(
+            getattr(larger_subset, name).shape[0] == 2
+            for name in fixed_fields
+        )
+    finally:
+        simulator.close()

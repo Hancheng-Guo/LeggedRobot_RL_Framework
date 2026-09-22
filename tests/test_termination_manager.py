@@ -1,6 +1,7 @@
 import pytest
 import torch
 
+from envs.simulators.utils.state import SimulatorState
 from envs.tasks.managers.termination.base import TerminationManager
 from envs.tasks.managers.termination.terms.base import BaseTerminationTerm
 from envs.tasks.managers.termination.terms.registry import (
@@ -9,11 +10,31 @@ from envs.tasks.managers.termination.terms.registry import (
 from envs.tasks.utils.context import TaskContext
 
 
+def make_simulator_state(**overrides: torch.Tensor) -> SimulatorState:
+    num_envs = 2
+    values = {
+        "qpos": torch.empty(num_envs, 0),
+        "qvel": torch.empty(num_envs, 0),
+        "qacc": torch.empty(num_envs, 0),
+        "ctrl": torch.empty(num_envs, 0),
+        "geom_xpos": torch.empty(num_envs, 0, 3),
+        "geom_xvel": torch.empty(num_envs, 0, 6),
+        "actuator_force": torch.empty(num_envs, 0),
+        "base_lin_vel_body": torch.empty(num_envs, 3),
+        "base_ang_vel_body": torch.empty(num_envs, 3),
+        "contact_geom_ids": torch.empty(num_envs, 0, 2, dtype=torch.long),
+        "contact_forces": torch.empty(num_envs, 0, 6),
+        "foot_ground_contact": torch.empty(num_envs, 0, 0, dtype=torch.bool),
+    }
+    values.update(overrides)
+    return SimulatorState(**values)
+
+
 def make_task_context() -> TaskContext:
     qpos = torch.zeros(2, 9)
     qpos[:, 7] = torch.tensor([0.1, 0.3])
     return TaskContext(
-        state={"qpos": qpos},
+        state=make_simulator_state(qpos=qpos),
         command={},
         action=torch.zeros(2, 2),
         last_action=torch.zeros(2, 2),
@@ -94,7 +115,7 @@ def test_body_contact_terminates_for_either_contact_order(
         },
     )
     task_context = make_task_context()
-    task_context.state["contact_geom_ids"] = torch.tensor([
+    task_context.state.contact_geom_ids = torch.tensor([
         [[1, 0], [-1, -1]],
         [[0, 2], [-1, -1]],
     ])
@@ -123,7 +144,7 @@ def test_body_contact_ignores_other_contacts(
         },
     )
     task_context = make_task_context()
-    task_context.state["contact_geom_ids"] = torch.tensor([
+    task_context.state.contact_geom_ids = torch.tensor([
         [[3, 0]],
         [[1, 3]],
     ])

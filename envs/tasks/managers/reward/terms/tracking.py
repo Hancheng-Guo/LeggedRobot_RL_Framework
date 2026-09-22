@@ -69,7 +69,7 @@ class TrackLinearVelocityXyL2Exp(_BaseCommandTracking):
     ) -> torch.Tensor:
         
         command = self.command_vector(task_context)
-        velocity = task_context.state["base_lin_vel_body"][:, :2]
+        velocity = task_context.state.base_lin_vel_body[:, :2]
         target = _command_target_check(command, velocity)
         error = velocity - target
         normalized_error = error / self.std
@@ -104,7 +104,7 @@ class TrackLinearVelocityXyL2ExpAndLogcosh(_BaseCommandTracking):
     ) -> torch.Tensor:
         
         command = self.command_vector(task_context)
-        velocity = task_context.state["base_lin_vel_body"][:, :2]
+        velocity = task_context.state.base_lin_vel_body[:, :2]
         target = _command_target_check(command, velocity)
         error = velocity - target
         normalized_error = error / self.std
@@ -147,7 +147,7 @@ class TrackLinearVelocityXyErrorIntegralL2(_BaseCommandTracking):
     ) -> torch.Tensor:
         
         command = self.command_vector(task_context)
-        velocity = task_context.state["base_lin_vel_body"][:, :2]
+        velocity = task_context.state.base_lin_vel_body[:, :2]
         target = _command_target_check(command, velocity)
         error = torch.linalg.norm(target - velocity, dim=-1)
         self.error_history = torch.roll(self.error_history, shifts=-1, dims=-1)
@@ -195,7 +195,7 @@ class TrackAngularVelocityZL2Exp(_BaseCommandTracking):
     ) -> torch.Tensor:
         
         command = self.command_vector(task_context)
-        velocity = task_context.state["base_ang_vel_body"][:, 2:3]
+        velocity = task_context.state.base_ang_vel_body[:, 2:3]
         target = _command_target_check(command, velocity)
         error = velocity - target
         normalized_error = error / self.std
@@ -222,7 +222,7 @@ class TrackAngularVelocityZL2ExpAndLogcosh(TrackAngularVelocityZL2Exp):
     ) -> torch.Tensor:
         
         command = self.command_vector(task_context)
-        velocity = task_context.state["base_ang_vel_body"][:, 2:3]
+        velocity = task_context.state.base_ang_vel_body[:, 2:3]
         target = _command_target_check(command, velocity)
         error = velocity - target
         normalized_error = error / self.std
@@ -265,7 +265,7 @@ class TrackAngularVelocityZErrorIntegralL2(_BaseCommandTracking):
     ) -> torch.Tensor:
         
         command = self.command_vector(task_context)
-        velocity = task_context.state["base_ang_vel_body"][:, 2:3]
+        velocity = task_context.state.base_ang_vel_body[:, 2:3]
         target = _command_target_check(command, velocity)
         error = (target - velocity).abs()
         self.error_history = torch.roll(self.error_history, shifts=-1, dims=-1)

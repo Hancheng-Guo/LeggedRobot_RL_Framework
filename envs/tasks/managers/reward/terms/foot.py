@@ -43,7 +43,7 @@ class FootStateDurationCommandWeighedExp(BaseRewardTerm):
         task_context: TaskContext
     ) -> torch.Tensor:
         
-        landed = task_context.state["foot_ground_contact"].any(dim=1)
+        landed = task_context.state.foot_ground_contact.any(dim=1)
         unchanged = landed == self.last_foot_state
         self.duration = torch.where(
             unchanged,
@@ -109,7 +109,7 @@ class FootStateDurationCubicCommandWeighedExp(BaseRewardTerm):
         task_context: TaskContext
     ) -> torch.Tensor:
         
-        landed = task_context.state["foot_ground_contact"].any(dim=1)
+        landed = task_context.state.foot_ground_contact.any(dim=1)
         unchanged = landed == self.last_foot_state
         self.duration = torch.where(
             unchanged,
@@ -160,8 +160,8 @@ class FootSlidingVelocityL2(BaseRewardTerm):
         task_context: TaskContext
     ) -> torch.Tensor:
         
-        landed = task_context.state["foot_ground_contact"].any(dim=1)
-        foot_xvel = task_context.state["geom_xvel"][:, self.foot_geom_ids, :]
+        landed = task_context.state.foot_ground_contact.any(dim=1)
+        foot_xvel = task_context.state.geom_xvel[:, self.foot_geom_ids, :]
         foot_velocity = foot_xvel[..., 3:5]
         return torch.sum(
             (foot_velocity * landed.unsqueeze(-1)).square(),
@@ -198,12 +198,12 @@ class FootLiftHeightVelocityWeightedExp(BaseRewardTerm):
         task_context: TaskContext
     ) -> torch.Tensor:
         
-        foot_height = task_context.state["geom_xpos"][:, self.foot_geom_ids, 2]
+        foot_height = task_context.state.geom_xpos[:, self.foot_geom_ids, 2]
         foot_speed = torch.linalg.norm(
-            task_context.state["geom_xvel"][:, self.foot_geom_ids, 3:5],
+            task_context.state.geom_xvel[:, self.foot_geom_ids, 3:5],
             dim=-1,
         )
-        swinging = ~task_context.state["foot_ground_contact"].any(dim=1)
+        swinging = ~task_context.state.foot_ground_contact.any(dim=1)
         height_reward = torch.exp(
             -((foot_height - self.target_height) / self.height_std).square()
         )
@@ -235,7 +235,7 @@ class QuadrupedalFootVelocityDiffL2(BaseRewardTerm):
         task_context: TaskContext
     ) -> torch.Tensor:
 
-        foot_xvel = task_context.state["geom_xvel"][:, self.foot_geom_ids, :]
+        foot_xvel = task_context.state.geom_xvel[:, self.foot_geom_ids, :]
         foot_velocity = foot_xvel[..., 3:6]
         diagonal_diff = foot_velocity[:, [0, 1]] - foot_velocity[:, [3, 2]]
         return diagonal_diff.square().sum(dim=(-1, -2))
@@ -262,7 +262,7 @@ class FootContactWithoutCommand(BaseRewardTerm):
         task_context: TaskContext
     ) -> torch.Tensor:
         
-        landed = task_context.state["foot_ground_contact"].any(dim=1)
+        landed = task_context.state.foot_ground_contact.any(dim=1)
         command_norm = torch.linalg.norm(
             command_vector(task_context, self.command_names),
             dim=-1,

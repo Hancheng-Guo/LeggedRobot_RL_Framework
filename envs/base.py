@@ -62,7 +62,13 @@ class BaseEnv(ABC):
         torch.Tensor,
         dict[str, Any]
     ]:
-        """
+        """Advance the vectorized environment by one control step.
+
+        Tensor values in ``info`` may be views of reusable internal buffers.
+        They are valid for synchronous consumption during the current step,
+        but callers that retain them across another call to ``step`` must
+        clone them first.
+
         Returns:
             next_obs,
             transition_next_obs,

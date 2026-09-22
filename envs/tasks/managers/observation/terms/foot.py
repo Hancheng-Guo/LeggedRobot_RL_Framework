@@ -43,7 +43,7 @@ class FootHeight(BaseObservationTerm):
         task_context: TaskContext,
     ) -> torch.Tensor:
         
-        return task_context.state["geom_xpos"][:, self.foot_geom_ids, 2]
+        return task_context.state.geom_xpos[:, self.foot_geom_ids, 2]
 
 
 
@@ -66,8 +66,8 @@ class FootContactNormalForce(BaseObservationTerm):
         task_context: TaskContext,
     ) -> torch.Tensor:
         
-        contact_forces = task_context.state["contact_forces"]
-        foot_ground_contact = task_context.state["foot_ground_contact"]
+        contact_forces = task_context.state.contact_forces
+        foot_ground_contact = task_context.state.foot_ground_contact
 
         if (
             contact_forces.ndim != 3
@@ -111,6 +111,6 @@ class FootContactState(BaseObservationTerm):
         self,
         task_context: TaskContext,
     ) -> torch.Tensor:
-        return task_context.state["foot_ground_contact"].any(
+        return task_context.state.foot_ground_contact.any(
             dim=1,
         ).to(self.context.dtype)

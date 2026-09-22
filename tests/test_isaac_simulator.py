@@ -207,7 +207,7 @@ def test_isaac_sim_forwards_reset_step_state_render_and_close(
     assert backend.reset_ids is env_ids
     assert backend.step_action is action
     assert backend.step_frame_skip == 10
-    assert state["qpos"].shape == (1, 9)
+    assert state.qpos.shape == (1, 9)
     assert frame is not None
     assert frame.shape == (4, 6, 3)
     assert backend.closed

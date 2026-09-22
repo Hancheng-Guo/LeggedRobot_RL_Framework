@@ -10,6 +10,7 @@ from app.utils.context import RuntimeContext
 from envs.simulators.base import BaseSimulator
 from envs.simulators.isaac_sim_backend import IsaacSimBackend, IsaacSimResetState
 from envs.simulators.utils.context import ModelContext
+from envs.simulators.utils.state import SimulatorState
 from utils.component import Component
 from utils.param import update_attributes
 
@@ -444,29 +445,9 @@ class IsaacSimSimulator(BaseSimulator):
     def get_state(
         self,
         env_ids: torch.Tensor | None = None,
-    ) -> dict[str, torch.Tensor]:
+    ) -> SimulatorState:
         
-        state = dict(self._require_backend().get_state(env_ids))
-        required = {
-            "qpos",
-            "qvel",
-            "qacc",
-            "ctrl",
-            "geom_xpos",
-            "geom_xvel",
-            "actuator_force",
-            "base_lin_vel_body",
-            "base_ang_vel_body",
-            "contact_geom_ids",
-            "contact_forces",
-            "foot_ground_contact",
-        }
-        missing = required - state.keys()
-        if missing:
-            raise RuntimeError(
-                f"Isaac Sim backend omitted state field(s): {sorted(missing)}."
-            )
-        return state
+        return SimulatorState(**self._require_backend().get_state(env_ids))
 
 
     def render(self) -> np.ndarray | None:

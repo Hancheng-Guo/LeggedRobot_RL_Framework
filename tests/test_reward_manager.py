@@ -1,6 +1,7 @@
 from dataclasses import replace
 from typing import cast
 
+import pytest
 import torch
 
 from envs.tasks.managers.reward.base import RewardManager
@@ -13,6 +14,10 @@ from envs.tasks.managers.reward.terms.gait import (
     TrotLoopTanh,
 )
 from envs.tasks.managers.reward.terms.tracking import (
+    TrackLinearVelocityXL2Exp,
+    TrackLinearVelocityXL2ExpAndLogcosh,
+    TrackLinearVelocityYL2Exp,
+    TrackLinearVelocityYL2ExpAndLogcosh,
     TrackLinearVelocityXyErrorIntegralL2,
 )
 from envs.tasks.utils.context import TaskContext
@@ -234,6 +239,95 @@ def test_new_reward_terms_compute_batched_tensors(
         info["reward/illegal_contact_l1"],
         torch.tensor([1.0, 1.0]),
     )
+
+
+def test_axis_specific_linear_velocity_rewards(
+    runtime_context,
+    model_context,
+):
+    task_context = make_state_reward_context()
+    terms = (
+        TrackLinearVelocityXL2Exp(
+            context=runtime_context,
+            model_context=model_context,
+        ),
+        TrackLinearVelocityYL2Exp(
+            context=runtime_context,
+            model_context=model_context,
+        ),
+        TrackLinearVelocityXL2ExpAndLogcosh(
+            context=runtime_context,
+            model_context=model_context,
+            logcosh_weight=0.25,
+        ),
+        TrackLinearVelocityYL2ExpAndLogcosh(
+            context=runtime_context,
+            model_context=model_context,
+            logcosh_weight=0.25,
+        ),
+    )
+
+    x_error = torch.tensor([1.0, 0.5])
+    y_error = torch.zeros(2)
+    expected_x_exp = torch.exp(-x_error.square())
+    expected_y_exp = torch.exp(-y_error.square())
+    expected_x_logcosh = (
+        0.75 * expected_x_exp
+        + 0.25 * (1.0 - torch.log(torch.cosh(2.0 * x_error)))
+    )
+    expected_y_logcosh = torch.ones(2)
+
+    expected = (
+        expected_x_exp,
+        expected_y_exp,
+        expected_x_logcosh,
+        expected_y_logcosh,
+    )
+    for term, term_expected in zip(terms, expected):
+        reward = term.compute(task_context)
+        assert reward.shape == (2,)
+        torch.testing.assert_close(reward, term_expected)
+
+
+@pytest.mark.parametrize("std", [0.0, -1.0, float("nan"), float("inf")])
+def test_axis_specific_linear_velocity_rewards_reject_invalid_std(
+    runtime_context,
+    model_context,
+    std,
+):
+    for term_class in (
+        TrackLinearVelocityXL2Exp,
+        TrackLinearVelocityYL2Exp,
+        TrackLinearVelocityXL2ExpAndLogcosh,
+        TrackLinearVelocityYL2ExpAndLogcosh,
+    ):
+        with pytest.raises(ValueError, match="positive and finite"):
+            term_class(
+                context=runtime_context,
+                model_context=model_context,
+                std=std,
+            )
+
+
+@pytest.mark.parametrize(
+    "logcosh_weight",
+    [-0.1, 1.1, float("nan"), float("inf")],
+)
+def test_axis_specific_linear_velocity_rewards_reject_invalid_logcosh_weight(
+    runtime_context,
+    model_context,
+    logcosh_weight,
+):
+    for term_class in (
+        TrackLinearVelocityXL2ExpAndLogcosh,
+        TrackLinearVelocityYL2ExpAndLogcosh,
+    ):
+        with pytest.raises(ValueError, match=r"within \[0, 1\]"):
+            term_class(
+                context=runtime_context,
+                model_context=model_context,
+                logcosh_weight=logcosh_weight,
+            )
 
 
 def test_base_height_l2_normalizes_and_clamps_error(

@@ -1,3 +1,5 @@
+import math
+
 import torch
 from collections.abc import Sequence
 
@@ -29,7 +31,7 @@ class _BaseCommandTracking(BaseRewardTerm):
         command_names: Sequence[str] | None = None,
         *args, **kwargs,
     ) -> None:
-        
+
         super().__init__(*args, **kwargs)
 
         self.command_names = None if command_names is None else tuple(command_names)
@@ -56,6 +58,11 @@ class TrackLinearVelocityXyL2Exp(_BaseCommandTracking):
         
         super().__init__(command_names=command_names, *args, **kwargs)
 
+        if not math.isfinite(x_std) or x_std <= 0.0:
+            raise ValueError("'x_std' must be positive and finite.")
+        if not math.isfinite(y_std) or y_std <= 0.0:
+            raise ValueError("'y_std' must be positive and finite.")
+
         self.std = torch.tensor(
             [x_std, y_std],
             dtype=self.context.dtype,
@@ -67,9 +74,79 @@ class TrackLinearVelocityXyL2Exp(_BaseCommandTracking):
         self,
         task_context: TaskContext
     ) -> torch.Tensor:
-        
+
         command = self.command_vector(task_context)
         velocity = task_context.state.base_lin_vel_body[:, :2]
+        target = _command_target_check(command, velocity)
+        error = velocity - target
+        normalized_error = error / self.std
+        return torch.exp(-torch.sum(normalized_error.square(), dim=-1))
+
+
+@register_reward
+class TrackLinearVelocityXL2Exp(_BaseCommandTracking):
+
+    def __init__(
+        self,
+        std: float = 1.0,
+        command_names: Sequence[str] = ("lin_vel_x",),
+        *args, **kwargs,
+    ) -> None:
+
+        super().__init__(command_names=command_names, *args, **kwargs)
+
+        if not math.isfinite(std) or std <= 0.0:
+            raise ValueError("'std' must be positive and finite.")
+
+        self.std = torch.tensor(
+            [std],
+            dtype=self.context.dtype,
+            device=self.context.device,
+        )
+
+
+    def compute(
+        self,
+        task_context: TaskContext
+    ) -> torch.Tensor:
+
+        command = self.command_vector(task_context)
+        velocity = task_context.state.base_lin_vel_body[:, :1]
+        target = _command_target_check(command, velocity)
+        error = velocity - target
+        normalized_error = error / self.std
+        return torch.exp(-torch.sum(normalized_error.square(), dim=-1))
+
+
+@register_reward
+class TrackLinearVelocityYL2Exp(_BaseCommandTracking):
+
+    def __init__(
+        self,
+        std: float = 1.0,
+        command_names: Sequence[str] = ("lin_vel_y",),
+        *args, **kwargs,
+    ) -> None:
+
+        super().__init__(command_names=command_names, *args, **kwargs)
+
+        if not math.isfinite(std) or std <= 0.0:
+            raise ValueError("'std' must be positive and finite.")
+
+        self.std = torch.tensor(
+            [std],
+            dtype=self.context.dtype,
+            device=self.context.device,
+        )
+
+
+    def compute(
+        self,
+        task_context: TaskContext
+    ) -> torch.Tensor:
+
+        command = self.command_vector(task_context)
+        velocity = task_context.state.base_lin_vel_body[:, 1:2]
         target = _command_target_check(command, velocity)
         error = velocity - target
         normalized_error = error / self.std
@@ -87,8 +164,20 @@ class TrackLinearVelocityXyL2ExpAndLogcosh(_BaseCommandTracking):
         command_names: Sequence[str] = ("lin_vel_x", "lin_vel_y"),
         *args, **kwargs,
     ) -> None:
-        
+
         super().__init__(command_names=command_names, *args, **kwargs)
+
+        if not math.isfinite(x_std) or x_std <= 0.0:
+            raise ValueError("'x_std' must be positive and finite.")
+        if not math.isfinite(y_std) or y_std <= 0.0:
+            raise ValueError("'y_std' must be positive and finite.")
+        if (
+            not math.isfinite(logcosh_weight)
+            or not 0.0 <= logcosh_weight <= 1.0
+        ):
+            raise ValueError(
+                "'logcosh_weight' must be finite and within [0, 1]."
+            )
 
         self.std = torch.tensor(
             [x_std, y_std],
@@ -102,9 +191,105 @@ class TrackLinearVelocityXyL2ExpAndLogcosh(_BaseCommandTracking):
         self,
         task_context: TaskContext
     ) -> torch.Tensor:
-        
+
         command = self.command_vector(task_context)
         velocity = task_context.state.base_lin_vel_body[:, :2]
+        target = _command_target_check(command, velocity)
+        error = velocity - target
+        normalized_error = error / self.std
+        l2_exp = torch.exp(-torch.sum(normalized_error.square(), dim=-1))
+        error_norm = torch.linalg.norm(normalized_error, dim=-1)
+        logcosh = 1.0 - torch.log(torch.cosh(2.0 * error_norm))
+
+        return (1.0 - self.logcosh_weight) * l2_exp + self.logcosh_weight * logcosh
+
+
+@register_reward
+class TrackLinearVelocityXL2ExpAndLogcosh(_BaseCommandTracking):
+
+    def __init__(
+        self,
+        std: float = 1.0,
+        logcosh_weight: float = 0.5,
+        command_names: Sequence[str] = ("lin_vel_x",),
+        *args, **kwargs,
+    ) -> None:
+
+        super().__init__(command_names=command_names, *args, **kwargs)
+
+        if not math.isfinite(std) or std <= 0.0:
+            raise ValueError("'std' must be positive and finite.")
+        if (
+            not math.isfinite(logcosh_weight)
+            or not 0.0 <= logcosh_weight <= 1.0
+        ):
+            raise ValueError(
+                "'logcosh_weight' must be finite and within [0, 1]."
+            )
+
+        self.std = torch.tensor(
+            [std],
+            dtype=self.context.dtype,
+            device=self.context.device,
+        )
+        self.logcosh_weight = logcosh_weight
+
+
+    def compute(
+        self,
+        task_context: TaskContext
+    ) -> torch.Tensor:
+
+        command = self.command_vector(task_context)
+        velocity = task_context.state.base_lin_vel_body[:, :1]
+        target = _command_target_check(command, velocity)
+        error = velocity - target
+        normalized_error = error / self.std
+        l2_exp = torch.exp(-torch.sum(normalized_error.square(), dim=-1))
+        error_norm = torch.linalg.norm(normalized_error, dim=-1)
+        logcosh = 1.0 - torch.log(torch.cosh(2.0 * error_norm))
+
+        return (1.0 - self.logcosh_weight) * l2_exp + self.logcosh_weight * logcosh
+
+
+@register_reward
+class TrackLinearVelocityYL2ExpAndLogcosh(_BaseCommandTracking):
+
+    def __init__(
+        self,
+        std: float = 1.0,
+        logcosh_weight: float = 0.5,
+        command_names: Sequence[str] = ("lin_vel_y",),
+        *args, **kwargs,
+    ) -> None:
+
+        super().__init__(command_names=command_names, *args, **kwargs)
+
+        if not math.isfinite(std) or std <= 0.0:
+            raise ValueError("'std' must be positive and finite.")
+        if (
+            not math.isfinite(logcosh_weight)
+            or not 0.0 <= logcosh_weight <= 1.0
+        ):
+            raise ValueError(
+                "'logcosh_weight' must be finite and within [0, 1]."
+            )
+
+        self.std = torch.tensor(
+            [std],
+            dtype=self.context.dtype,
+            device=self.context.device,
+        )
+        self.logcosh_weight = logcosh_weight
+
+
+    def compute(
+        self,
+        task_context: TaskContext
+    ) -> torch.Tensor:
+
+        command = self.command_vector(task_context)
+        velocity = task_context.state.base_lin_vel_body[:, 1:2]
         target = _command_target_check(command, velocity)
         error = velocity - target
         normalized_error = error / self.std
@@ -125,7 +310,7 @@ class TrackLinearVelocityXyErrorIntegralL2(_BaseCommandTracking):
         command_names: Sequence[str] = ("lin_vel_x", "lin_vel_y"),
         *args, **kwargs,
     ) -> None:
-        
+
         super().__init__(command_names=command_names, *args, **kwargs)
 
         self.integral_length = integral_length
@@ -145,7 +330,7 @@ class TrackLinearVelocityXyErrorIntegralL2(_BaseCommandTracking):
         self,
         task_context: TaskContext
     ) -> torch.Tensor:
-        
+
         command = self.command_vector(task_context)
         velocity = task_context.state.base_lin_vel_body[:, :2]
         target = _command_target_check(command, velocity)
@@ -165,7 +350,7 @@ class TrackLinearVelocityXyErrorIntegralL2(_BaseCommandTracking):
         self,
         env_ids: torch.Tensor | None = None
     ) -> None:
-        
+
         if env_ids is None:
             self.error_history.zero_()
             self.error_history_length.zero_()
@@ -183,17 +368,24 @@ class TrackAngularVelocityZL2Exp(_BaseCommandTracking):
         command_names: Sequence[str] = ("ang_vel_z",),
         *args, **kwargs,
     ) -> None:
-        
+
         super().__init__(command_names=command_names, *args, **kwargs)
 
-        self.std = std
+        if not math.isfinite(std) or std <= 0.0:
+            raise ValueError("'std' must be positive and finite.")
+
+        self.std = torch.tensor(
+            [std],
+            dtype=self.context.dtype,
+            device=self.context.device,
+        )
 
 
     def compute(
         self,
         task_context: TaskContext
     ) -> torch.Tensor:
-        
+
         command = self.command_vector(task_context)
         velocity = task_context.state.base_ang_vel_body[:, 2:3]
         target = _command_target_check(command, velocity)
@@ -203,16 +395,33 @@ class TrackAngularVelocityZL2Exp(_BaseCommandTracking):
 
 
 @register_reward
-class TrackAngularVelocityZL2ExpAndLogcosh(TrackAngularVelocityZL2Exp):
+class TrackAngularVelocityZL2ExpAndLogcosh(_BaseCommandTracking):
 
     def __init__(
         self,
+        std: float = 1.0,
         logcosh_weight: float = 0.5,
+        command_names: Sequence[str] = ("ang_vel_z",),
         *args, **kwargs,
     ) -> None:
-        
-        super().__init__(*args, **kwargs)
 
+        super().__init__(command_names=command_names, *args, **kwargs)
+
+        if not math.isfinite(std) or std <= 0.0:
+            raise ValueError("'std' must be positive and finite.")
+        if (
+            not math.isfinite(logcosh_weight)
+            or not 0.0 <= logcosh_weight <= 1.0
+        ):
+            raise ValueError(
+                "'logcosh_weight' must be finite and within [0, 1]."
+            )
+
+        self.std = torch.tensor(
+            [std],
+            dtype=self.context.dtype,
+            device=self.context.device,
+        )
         self.logcosh_weight = logcosh_weight
 
 
@@ -220,7 +429,7 @@ class TrackAngularVelocityZL2ExpAndLogcosh(TrackAngularVelocityZL2Exp):
         self,
         task_context: TaskContext
     ) -> torch.Tensor:
-        
+
         command = self.command_vector(task_context)
         velocity = task_context.state.base_ang_vel_body[:, 2:3]
         target = _command_target_check(command, velocity)
@@ -263,7 +472,7 @@ class TrackAngularVelocityZErrorIntegralL2(_BaseCommandTracking):
         self,
         task_context: TaskContext
     ) -> torch.Tensor:
-        
+
         command = self.command_vector(task_context)
         velocity = task_context.state.base_ang_vel_body[:, 2:3]
         target = _command_target_check(command, velocity)
@@ -283,7 +492,7 @@ class TrackAngularVelocityZErrorIntegralL2(_BaseCommandTracking):
         self,
         env_ids: torch.Tensor | None = None
     ) -> None:
-        
+
         if env_ids is None:
             self.error_history.zero_()
             self.error_history_length.zero_()

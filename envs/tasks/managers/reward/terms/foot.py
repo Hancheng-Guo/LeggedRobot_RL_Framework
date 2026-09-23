@@ -170,46 +170,50 @@ class FootSlidingVelocityL2(BaseRewardTerm):
 
 
 @register_reward
-class FootLiftHeightVelocityWeightedExp(BaseRewardTerm):
+class FootLiftHeightCommandWeightedExp(BaseRewardTerm):
 
     def __init__(
         self,
         model_context: ModelContext,
         target_height: float,
         height_std: float = 0.03,
-        speed_std: float = 0.5,
+        command_std: float = 0.5,
+        command_names: Sequence[str] = ("lin_vel_x", "lin_vel_y", "ang_vel_z"),
         *args, **kwargs,
     ) -> None:
         
         super().__init__(*args, **kwargs)
 
-        self.foot_geom_ids = model_context.foot_geom_ids
-        self.target_height = target_height
         if height_std <= 0.0:
             raise ValueError("'height_std' must be positive.")
-        if speed_std <= 0.0:
-            raise ValueError("'speed_std' must be positive.")
+        if command_std <= 0.0:
+            raise ValueError("'command_std' must be positive.")
+
+        self.foot_geom_ids = model_context.foot_geom_ids
+        self.target_height = target_height
         self.height_std = height_std
-        self.speed_std = speed_std
+        self.command_std = command_std
+        self.command_names = command_names
 
 
     def compute(
         self,
         task_context: TaskContext
     ) -> torch.Tensor:
-        
-        foot_height = task_context.state.geom_xpos[:, self.foot_geom_ids, 2]
-        foot_speed = torch.linalg.norm(
-            task_context.state.geom_xvel[:, self.foot_geom_ids, 3:5],
+
+        command_norm = torch.linalg.norm(
+            command_vector(task_context, self.command_names),
             dim=-1,
         )
+        
+        foot_height = task_context.state.geom_xpos[:, self.foot_geom_ids, 2]
         swinging = ~task_context.state.foot_ground_contact.any(dim=1)
         height_reward = torch.exp(
             -((foot_height - self.target_height) / self.height_std).square()
         )
-        speed_gate = 1.0 - torch.exp(-foot_speed / self.speed_std)
+        command_gate = 1.0 - torch.exp(-command_norm / self.command_std)
         return torch.mean(
-            height_reward * speed_gate * swinging,
+            height_reward * command_gate.unsqueeze(-1) * swinging,
             dim=-1,
         )
 
@@ -253,7 +257,6 @@ class FootContactWithoutCommand(BaseRewardTerm):
         
         super().__init__(*args, **kwargs)
 
-        self.foot_geom_ids = model_context.foot_geom_ids
         self.command_names = command_names
 
 

@@ -610,7 +610,7 @@ reward_manager_config:
 | `action_diff_l2` | — |
 | `illegal_contact_l1` | `geom_legal_names=null` |
 | `joint_velocity_l2` | — |
-| `joint_position_l2` | — |
+| `joint_position_diff_l2` | — |
 | `joint_limit_violation_l1` | `lower_limits=null`、`upper_limits=null` |
 | `joint_power_l1` | — |
 | `base_linear_velocity_z_l2` | — |
@@ -625,12 +625,12 @@ reward_manager_config:
 | `track_angular_velocity_z_l2_exp` | `std=1.0`、`command_names=[ang_vel_z]` |
 | `track_angular_velocity_z_l2_exp_and_logcosh` | `std=1.0`、`command_names=[ang_vel_z]`、`logcosh_weight=0.5` |
 | `track_angular_velocity_z_error_integral_l2` | `integral_length=100`、`command_names=[ang_vel_z]` |
-| `trot_loop_duration_tanh` | `command_names=[lin_vel_x, lin_vel_y, ang_vel_z]`、`growth_rate=1.0` |
+| `trot_loop_duration_tanh` | `command_names=[lin_vel_x, lin_vel_y, ang_vel_z]`、`growth_rate=1.0`；指令范数低于 `0.1` 时要求四足着地 |
 | `quadrupedal_gait_phase_l2_exp` | 必填 `target_height`；`sigma=1.0` |
 | `foot_state_duration_command_weighed_exp` | `command_names=[lin_vel_x, lin_vel_y, ang_vel_z]`、`sigma=1.0` |
 | `foot_state_duration_cubic_command_weighed_exp` | 同上 |
 | `foot_sliding_velocity_l2` | — |
-| `foot_lift_height_velocity_weighted_exp` | 必填 `target_height`；`height_std=0.03`、`speed_std=0.5` |
+| `foot_lift_height_command_weighted_exp` | 必填 `target_height`；`height_std=0.03`、`command_std=0.5`、`command_names=[lin_vel_x, lin_vel_y, ang_vel_z]`；零指令时奖励为零 |
 | `quadrupedal_foot_velocity_diff_l2` | — |
 | `foot_contact_without_command` | `command_names=[lin_vel_x, lin_vel_y, ang_vel_z]` |
 

@@ -6,7 +6,7 @@ import torch
 
 from envs.tasks.managers.reward.base import RewardManager
 from envs.tasks.managers.reward.terms.foot import (
-    FootLiftHeightVelocityWeightedExp,
+    FootLiftHeightCommandWeightedExp,
     FootStateDurationCommandWeighedExp,
 )
 from envs.tasks.managers.reward.terms.gait import (
@@ -216,6 +216,7 @@ def test_new_reward_terms_compute_batched_tensors(
             "base_height_l2": {
                 "params": {"target_height": 0.45},
             },
+            "joint_position_diff_l2": {},
             "joint_limit_violation_l1": {},
             "illegal_contact_l1": {},
             "track_linear_velocity_xy_l2_exp": {},
@@ -239,6 +240,7 @@ def test_new_reward_terms_compute_batched_tensors(
         info["reward/illegal_contact_l1"],
         torch.tensor([1.0, 1.0]),
     )
+    assert info["reward/joint_position_diff_l2"].shape == (2,)
 
 
 def test_axis_specific_linear_velocity_rewards(
@@ -492,7 +494,7 @@ def test_quadrupedal_foot_velocity_diff_matches_diagonal_feet(
     )
 
 
-def test_foot_lift_height_reward_uses_normalized_swing_height_and_speed(
+def test_foot_lift_height_reward_is_gated_by_command(
     runtime_context,
     model_context,
 ):
@@ -502,30 +504,45 @@ def test_foot_lift_height_reward_uses_normalized_swing_height_and_speed(
         geom_body_ids=torch.arange(7),
         foot_geom_ids=torch.tensor([3, 4, 5, 6]),
     )
-    term = FootLiftHeightVelocityWeightedExp(
+    term = FootLiftHeightCommandWeightedExp(
         context=runtime_context,
         model_context=quadrupedal_model_context,
         target_height=0.08,
         height_std=0.03,
-        speed_std=0.5,
+        command_std=0.5,
     )
     task_context = make_quadrupedal_foot_context()
     task_context.state.geom_xpos = torch.zeros(2, 7, 3)
-    task_context.state.geom_xvel = torch.zeros(2, 7, 6)
     task_context.state.geom_xpos[:, 3:7, 2] = 0.08
-    task_context.state.geom_xvel[:, 3:7, 3] = 0.5
+    task_context.command["lin_vel_x"][0] = 0.5
 
     reward = term.compute(task_context)
 
-    speed_gate = 1.0 - torch.exp(torch.tensor(-1.0))
+    command_gate = 1.0 - torch.exp(torch.tensor(-1.0))
     torch.testing.assert_close(
         reward,
-        torch.tensor([0.5, 0.75]) * speed_gate,
+        torch.tensor([0.5, 0.0]) * command_gate,
     )
 
     task_context.state.geom_xpos[:, 3:7, 2] = 0.0
     low_reward = term.compute(task_context)
-    assert torch.all(low_reward < reward * 0.01)
+    assert low_reward[0] < reward[0] * 0.01
+    assert reward[1] == 0.0
+
+
+@pytest.mark.parametrize("command_std", [0.0, -1.0])
+def test_foot_lift_height_reward_rejects_invalid_command_std(
+    runtime_context,
+    model_context,
+    command_std,
+):
+    with pytest.raises(ValueError, match="'command_std' must be positive"):
+        FootLiftHeightCommandWeightedExp(
+            context=runtime_context,
+            model_context=model_context,
+            target_height=0.08,
+            command_std=command_std,
+        )
 
 
 def test_quadrupedal_phase_gait_updates_phase_steps(
@@ -710,6 +727,48 @@ def test_trot_loop_duration_resets_on_invalid_contact_sequence(
     torch.testing.assert_close(
         resumed_reward,
         torch.tanh(torch.tensor([0.04])),
+    )
+
+
+def test_trot_loop_duration_treats_small_commands_as_idle(
+    runtime_context,
+    model_context,
+):
+    gait_model_context = replace(
+        model_context,
+        foot_geom_ids=torch.tensor([3, 4, 5, 6]),
+    )
+    term = TrotLoopDurationTanh(
+        num_envs=1,
+        context=runtime_context,
+        model_context=gait_model_context,
+    )
+    task_context = TaskContext(
+        state=make_simulator_state(
+            num_envs=1,
+            foot_ground_contact=torch.tensor(
+                [[[True, False, False, True]]],
+            ),
+        ),
+        command={
+            "lin_vel_x": torch.tensor([[0.05]]),
+            "lin_vel_y": torch.zeros(1, 1),
+            "ang_vel_z": torch.zeros(1, 1),
+        },
+        action=torch.zeros(1, 2),
+        last_action=torch.zeros(1, 2),
+        episode_step=torch.ones(1, dtype=torch.long),
+        step_dt=0.02,
+    )
+
+    idle_reward = term.compute(task_context)
+    torch.testing.assert_close(idle_reward, torch.zeros(1))
+
+    task_context.command["lin_vel_x"].fill_(0.1)
+    moving_reward = term.compute(task_context)
+    torch.testing.assert_close(
+        moving_reward,
+        torch.tanh(torch.tensor([0.02])),
     )
 
 

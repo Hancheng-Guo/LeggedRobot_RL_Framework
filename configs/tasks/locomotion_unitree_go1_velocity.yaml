@@ -47,14 +47,15 @@ reward_manager_config:
     base_height_l2: {weight: -0.2, params: {target_height: *base_target_height, std: 0.05, max_normalized_error: 2.0}}
     action_diff_l2: {weight: -0.05}
     joint_velocity_l2: {weight: -0.001}
-    joint_position_l2: {weight: -0.1}
+    joint_position_diff_l2: {weight: -0.2}
     joint_limit_violation_l1: {weight: -5.0}
     joint_power_l1: {weight: -2.0e-5}
     illegal_contact_l1: {weight: -5.0}
     quadrupedal_foot_velocity_diff_l2: {weight: -0.01}
     foot_state_duration_cubic_command_weighed_exp: {weight: 0.2, params: {sigma: 0.5}}
     foot_sliding_velocity_l2: {weight: -0.5}
-    foot_lift_height_velocity_weighted_exp: {weight: 0.2, params: {target_height: *foot_lifted_height, height_std: 0.02, speed_std: 0.5}}
+    foot_contact_without_command: {weight: 0.5}
+    foot_lift_height_command_weighted_exp: {weight: 0.2, params: {target_height: *foot_lifted_height, height_std: 0.02, command_std: 0.5}}
 
 
 termination_manager_config:

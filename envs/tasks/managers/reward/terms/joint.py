@@ -32,7 +32,7 @@ class JointVelocityL2(BaseRewardTerm):
 
 
 @register_reward
-class JointPositionL2(BaseRewardTerm):
+class JointPositionDiffL2(BaseRewardTerm):
 
     def __init__(
         self,

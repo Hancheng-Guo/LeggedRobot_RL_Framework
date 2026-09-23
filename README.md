@@ -625,7 +625,7 @@ reward_manager_config:
 | `track_angular_velocity_z_l2_exp` | `std=1.0`、`command_names=[ang_vel_z]` |
 | `track_angular_velocity_z_l2_exp_and_logcosh` | `std=1.0`、`command_names=[ang_vel_z]`、`logcosh_weight=0.5` |
 | `track_angular_velocity_z_error_integral_l2` | `integral_length=100`、`command_names=[ang_vel_z]` |
-| `trot_loop_tanh` | `command_names=[lin_vel_x, lin_vel_y, ang_vel_z]`、`growth_rate=1.0`、`min_phase_duration=0.04`、`max_phase_duration=0.3`、`phase_duration_std=0.1`、`early_transition_penalty=1.0` |
+| `trot_loop_duration_tanh` | `command_names=[lin_vel_x, lin_vel_y, ang_vel_z]`、`growth_rate=1.0` |
 | `quadrupedal_gait_phase_l2_exp` | 必填 `target_height`；`sigma=1.0` |
 | `foot_state_duration_command_weighed_exp` | `command_names=[lin_vel_x, lin_vel_y, ang_vel_z]`、`sigma=1.0` |
 | `foot_state_duration_cubic_command_weighed_exp` | 同上 |

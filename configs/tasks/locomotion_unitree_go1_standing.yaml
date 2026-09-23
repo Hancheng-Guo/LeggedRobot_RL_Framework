@@ -39,7 +39,7 @@ reward_manager_config:
     track_angular_velocity_z_l2_exp_and_logcosh: {weight: 1.0, params: {logcosh_weight: 0.1, std: 2.5}}
     track_linear_velocity_xy_error_integral_l2: {weight: -1.0e-3, params: {integral_length: 25}}
     track_angular_velocity_z_error_integral_l2: {weight: -1.0e-3, params: {integral_length: 25}}
-    trot_loop_tanh: {weight: 5.0, params: {growth_rate: 1.0, min_phase_duration: 0.04, max_phase_duration: 0.30, phase_duration_std: 0.10, early_transition_penalty: 2.0}}
+    trot_loop_duration_tanh: {weight: 2.0, params: {growth_rate: 1.0}}
     base_linear_velocity_z_l2: {weight: -1.0}
     base_angular_velocity_xy_l2: {weight: -0.05}
     projected_gravity_xy_l2: {weight: -10.0}

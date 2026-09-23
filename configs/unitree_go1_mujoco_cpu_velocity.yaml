@@ -19,7 +19,8 @@ stage:
   - velocity_tracking:
       max_iterations: 5000
       transition:
-        - {metric: "reward/track_linear_velocity_xy_l2_exp_and_logcosh", method: mean, operator: ">=", threshold: 1.8, window: 100}
+        - {metric: "reward/track_linear_velocity_x_l2_exp_and_logcosh", method: mean, operator: ">=", threshold: 1.8, window: 25}
+        - {metric: "reward/track_linear_velocity_y_l2_exp_and_logcosh", method: mean, operator: ">=", threshold: 1.8, window: 25}
         - {metric: "reward/track_angular_velocity_z_l2_exp_and_logcosh", method: mean, operator: ">=", threshold: 0.9, window: 100}
         - {metric: "rollout/mean_len", method: mean, operator: ">=", threshold: 900.0, window: 100}
 

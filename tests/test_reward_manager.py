@@ -11,7 +11,7 @@ from envs.tasks.managers.reward.terms.foot import (
 )
 from envs.tasks.managers.reward.terms.gait import (
     QuadrupedalGaitPhaseL2Exp,
-    TrotLoopTanh,
+    TrotLoopDurationTanh,
 )
 from envs.tasks.managers.reward.terms.tracking import (
     TrackLinearVelocityXL2Exp,
@@ -597,7 +597,7 @@ def test_trot_loop_duration_tracks_valid_contact_sequence_and_resets(
         geom_body_ids=torch.arange(7),
         foot_geom_ids=torch.tensor([3, 4, 5, 6]),
     )
-    term = TrotLoopTanh(
+    term = TrotLoopDurationTanh(
         num_envs=2,
         context=runtime_context,
         model_context=gait_model_context,
@@ -660,7 +660,7 @@ def test_trot_loop_duration_tracks_valid_contact_sequence_and_resets(
     assert term.gait_is_moving[1] is None
 
 
-def test_trot_loop_penalizes_early_transition_and_decays_on_timeout(
+def test_trot_loop_duration_resets_on_invalid_contact_sequence(
     runtime_context,
     model_context,
 ):
@@ -670,15 +670,11 @@ def test_trot_loop_penalizes_early_transition_and_decays_on_timeout(
         geom_body_ids=torch.arange(7),
         foot_geom_ids=torch.tensor([3, 4, 5, 6]),
     )
-    term = TrotLoopTanh(
+    term = TrotLoopDurationTanh(
         num_envs=1,
         context=runtime_context,
         model_context=gait_model_context,
         growth_rate=2.0,
-        min_phase_duration=0.04,
-        max_phase_duration=0.30,
-        phase_duration_std=0.10,
-        early_transition_penalty=1.0,
     )
     task_context = TaskContext(
         state=make_simulator_state(
@@ -696,27 +692,25 @@ def test_trot_loop_penalizes_early_transition_and_decays_on_timeout(
         step_dt=0.02,
     )
 
-    term.compute(task_context)
-    task_context.state.foot_ground_contact = torch.tensor(
-        [[[1, 0, 0, 1]]], dtype=torch.bool,
+    valid_reward = term.compute(task_context)
+    torch.testing.assert_close(
+        valid_reward,
+        torch.tanh(torch.tensor([0.04])),
     )
-    early_reward = term.compute(task_context)
-    assert early_reward.item() < 0.0
 
-    term.reset()
+    task_context.state.foot_ground_contact = torch.tensor(
+        [[[1, 0, 0, 0]]], dtype=torch.bool,
+    )
+    invalid_reward = term.compute(task_context)
+    torch.testing.assert_close(invalid_reward, torch.zeros(1))
+    torch.testing.assert_close(term.gait_loop_duration, torch.zeros(1))
+
     task_context.state.foot_ground_contact.fill_(True)
-    reward_at_timeout = None
-    late_reward = None
-    for step in range(30):
-        reward = term.compute(task_context)
-        if step == 14:
-            reward_at_timeout = reward.clone()
-        if step == 29:
-            late_reward = reward.clone()
-
-    assert reward_at_timeout is not None
-    assert late_reward is not None
-    assert late_reward.item() < reward_at_timeout.item() * 0.01
+    resumed_reward = term.compute(task_context)
+    torch.testing.assert_close(
+        resumed_reward,
+        torch.tanh(torch.tensor([0.04])),
+    )
 
 
 def test_quadrupedal_phase_gait_uses_base_plane_distance(

@@ -66,6 +66,7 @@ class ObservationManager:
                 model_context=self.model_context,
                 command_dim=self.command_dim,
                 action_dim=self.action_dim,
+                num_envs=self.num_envs,
                 **config,
             )
 

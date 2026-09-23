@@ -5,6 +5,7 @@ from dataclasses import replace
 from envs.simulators.utils.state import SimulatorState
 from envs.tasks.managers.observation.base import ObservationManager
 from envs.tasks.managers.observation.terms.base import BaseObservationTerm
+from envs.tasks.managers.observation.terms.foot import FootDurationTanh
 from envs.tasks.managers.observation.terms.registry import (
     OBSERVATION_CLASS_MAP,
 )
@@ -279,6 +280,110 @@ def test_foot_contact_observation_terms(
         observation,
         torch.tensor([[12.0, 1.0]]).repeat(2, 1),
     )
+
+
+def test_foot_duration_tanh_uses_signed_contact_duration(
+    runtime_context,
+    model_context,
+):
+    manager = ObservationManager(
+        num_envs=2,
+        context=runtime_context,
+        model_context=model_context,
+        command_dim=3,
+        action_dim=2,
+        terms={"foot_duration_tanh": {"alpha": 2.0}},
+    )
+    term = manager.terms["foot_duration_tanh"]
+    assert isinstance(term, FootDurationTanh)
+    task_context = make_task_context()
+
+    first_observation, _ = manager.compute(task_context)
+    torch.testing.assert_close(first_observation, torch.zeros(2, 1))
+
+    second_observation, _ = manager.compute(task_context)
+    torch.testing.assert_close(
+        second_observation,
+        torch.tanh(torch.full((2, 1), 0.04)),
+    )
+
+    task_context.state.foot_ground_contact.zero_()
+    switched_observation, _ = manager.compute(task_context)
+    torch.testing.assert_close(switched_observation, torch.zeros(2, 1))
+
+    airborne_observation, _ = manager.compute(task_context)
+    torch.testing.assert_close(
+        airborne_observation,
+        -torch.tanh(torch.full((2, 1), 0.04)),
+    )
+
+    manager.reset(torch.tensor([1]))
+    assert (
+        term.duration[0].item()
+        == pytest.approx(0.02)
+    )
+    assert (
+        term.duration[1].item()
+        == pytest.approx(0.0)
+    )
+    reset_context = make_task_context(num_envs=1)
+    reset_context.state.foot_ground_contact.zero_()
+    reset_context.env_ids = torch.tensor([1])
+    reset_observation, _ = manager.compute(
+        reset_context,
+        env_ids=reset_context.env_ids,
+    )
+    torch.testing.assert_close(reset_observation, torch.zeros(1, 1))
+
+
+def test_foot_duration_tanh_updates_only_selected_envs(
+    runtime_context,
+    model_context,
+):
+    manager = ObservationManager(
+        num_envs=3,
+        context=runtime_context,
+        model_context=model_context,
+        command_dim=3,
+        action_dim=2,
+        terms={"foot_duration_tanh": {}},
+    )
+    term = manager.terms["foot_duration_tanh"]
+    assert isinstance(term, FootDurationTanh)
+    term.duration[:] = torch.tensor([[0.1], [0.2], [0.3]])
+    term.last_foot_state.fill_(True)
+    term.initialized.fill_(True)
+    env_ids = torch.tensor([2, 0])
+    task_context = make_task_context(num_envs=2)
+    task_context.env_ids = env_ids
+
+    observation, _ = manager.compute(task_context, env_ids=env_ids)
+
+    torch.testing.assert_close(
+        observation,
+        torch.tanh(torch.tensor([[0.32], [0.12]])),
+    )
+    torch.testing.assert_close(
+        term.duration,
+        torch.tensor([[0.12], [0.2], [0.32]]),
+    )
+
+
+@pytest.mark.parametrize("alpha", [0.0, -1.0, float("nan"), float("inf")])
+def test_foot_duration_tanh_rejects_invalid_alpha(
+    runtime_context,
+    model_context,
+    alpha,
+):
+    with pytest.raises(ValueError, match="finite positive"):
+        ObservationManager(
+            num_envs=2,
+            context=runtime_context,
+            model_context=model_context,
+            command_dim=3,
+            action_dim=2,
+            terms={"foot_duration_tanh": {"alpha": alpha}},
+        )
 
 
 def test_foot_height_observation_term(

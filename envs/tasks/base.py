@@ -173,6 +173,7 @@ class BaseTaskLogic(ABC):
             last_action=last_action,
             episode_step=episode_step,
             step_dt=step_dt,
+            env_ids=env_ids,
         )
 
     

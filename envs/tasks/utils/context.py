@@ -12,6 +12,7 @@ class TaskContext:
     last_action: torch.Tensor
     episode_step: torch.Tensor
     step_dt: float
+    env_ids: torch.Tensor | None = None
 
 
 @dataclass

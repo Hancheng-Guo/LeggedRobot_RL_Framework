@@ -23,7 +23,8 @@ class SimulatorState:
     base_ang_vel_body: torch.Tensor
     contact_geom_ids: torch.Tensor
     contact_forces: torch.Tensor
-    foot_ground_contact: torch.Tensor
+    foot_ground_contact: torch.Tensor  # [num_envs, num_feet]
+    foot_contact_normal_force: torch.Tensor  # [num_envs, num_feet]
 
     def as_dict(self) -> dict[str, torch.Tensor]:
         return {

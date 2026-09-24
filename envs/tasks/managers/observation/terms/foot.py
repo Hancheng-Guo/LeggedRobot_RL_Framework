@@ -68,31 +68,7 @@ class FootContactNormalForce(BaseObservationTerm):
         task_context: TaskContext,
     ) -> torch.Tensor:
         
-        contact_forces = task_context.state.contact_forces
-        foot_ground_contact = task_context.state.foot_ground_contact
-
-        if (
-            contact_forces.ndim != 3
-            or contact_forces.shape[-1] < 1
-        ):
-            raise ValueError(
-                "'contact_forces' must have shape "
-                "[num_envs, num_contacts, at_least_1]."
-            )
-        if (
-            foot_ground_contact.ndim != 3
-            or foot_ground_contact.shape[:2] != contact_forces.shape[:2]
-            or foot_ground_contact.shape[-1] != self.output_dim
-        ):
-            raise ValueError(
-                "'foot_ground_contact' must have shape "
-                "[num_envs, num_contacts, num_feet]."
-            )
-
-        normal_force = contact_forces[..., 0].abs()
-        return (
-            normal_force.unsqueeze(-1) * foot_ground_contact
-        ).sum(dim=1)
+        return task_context.state.foot_contact_normal_force
 
 
 @register_observation
@@ -113,9 +89,7 @@ class FootContactState(BaseObservationTerm):
         self,
         task_context: TaskContext,
     ) -> torch.Tensor:
-        return task_context.state.foot_ground_contact.any(
-            dim=1,
-        ).to(self.context.dtype)
+        return task_context.state.foot_ground_contact.to(self.context.dtype)
 
 
 @register_observation
@@ -161,7 +135,7 @@ class FootDurationTanh(BaseObservationTerm):
         task_context: TaskContext,
     ) -> torch.Tensor:
         
-        landed = task_context.state.foot_ground_contact.any(dim=1)
+        landed = task_context.state.foot_ground_contact
         env_ids = (
             slice(None)
             if task_context.env_ids is None

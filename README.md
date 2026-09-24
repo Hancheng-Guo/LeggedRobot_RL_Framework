@@ -626,8 +626,8 @@ reward_manager_config:
 | `track_angular_velocity_z_error_integral_l2` | `integral_length=100`、`command_names=[ang_vel_z]` |
 | `trot_loop_duration_tanh` | `command_names=[lin_vel_x, lin_vel_y, ang_vel_z]`、`growth_rate=1.0`；指令范数低于 `0.1` 时要求四足着地 |
 | `quadrupedal_gait_phase_l2_exp` | 必填 `target_height`；`sigma=1.0` |
-| `foot_state_duration_command_weighed_exp` | `command_names=[lin_vel_x, lin_vel_y, ang_vel_z]`、`sigma=1.0` |
-| `foot_state_duration_cubic_command_weighed_exp` | 同上 |
+| `foot_state_duration_command_weighed_exp` | 整组足端触地状态保持时间；`command_names=[lin_vel_x, lin_vel_y, ang_vel_z]`、`sigma=1.0` |
+| `foot_state_duration_cubic_command_weighed_exp` | 整组足端触地状态保持时间的三次方版本；参数同上 |
 | `foot_sliding_velocity_l2` | — |
 | `foot_lift_height_command_weighted_exp` | 必填 `target_height`；`height_std=0.03`、`command_std=0.5`、`command_names=[lin_vel_x, lin_vel_y, ang_vel_z]`；零指令时奖励为零 |
 | `foot_lift_height_diff_command_gated_l2` | 必填 `target_height`；`height_std=null` 时使用 `target_height`；命令范数 `<=0.1` 时所有足端目标高度为 0，运动时支撑脚目标为 0、摆动脚目标为 `target_height`；使用负权重作为高度误差惩罚 |

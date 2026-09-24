@@ -29,7 +29,8 @@ def make_simulator_state(
         "base_ang_vel_body": torch.empty(num_envs, 3),
         "contact_geom_ids": torch.empty(num_envs, 0, 2, dtype=torch.long),
         "contact_forces": torch.empty(num_envs, 0, 6),
-        "foot_ground_contact": torch.empty(num_envs, 0, 0, dtype=torch.bool),
+        "foot_ground_contact": torch.empty(num_envs, 0, dtype=torch.bool),
+        "foot_contact_normal_force": torch.empty(num_envs, 0),
     }
     values.update(overrides)
     return SimulatorState(**values)
@@ -62,8 +63,9 @@ def make_task_context(num_envs: int = 2) -> TaskContext:
                 [[[3, 0], [1, 2]]],
             ).repeat(num_envs, 1, 1),
             "foot_ground_contact": torch.tensor(
-                [[[True], [False]]],
-            ).repeat(num_envs, 1, 1),
+                [[True]],
+            ).repeat(num_envs, 1),
+            "foot_contact_normal_force": torch.full((num_envs, 1), 12.0),
             "contact_forces": torch.tensor(
                 [[[12.0, 1.0, 2.0, 0.0, 0.0, 0.0],
                   [50.0, 0.0, 0.0, 0.0, 0.0, 0.0]]],
@@ -342,6 +344,29 @@ def test_foot_contact_observation_terms(
         observation,
         torch.tensor([[12.0, 1.0]]).repeat(2, 1),
     )
+
+
+def test_foot_contact_normal_force_reads_simulator_summary(
+    runtime_context,
+    model_context,
+):
+    manager = ObservationManager(
+        num_envs=2,
+        context=runtime_context,
+        model_context=model_context,
+        command_dim=3,
+        action_dim=2,
+        terms={"foot_contact_normal_force": {}},
+    )
+    task_context = make_task_context()
+    task_context.state.foot_ground_contact[1] = False
+    task_context.state.foot_contact_normal_force = torch.tensor([
+        [15.0], [0.0],
+    ])
+
+    observation, _ = manager.compute(task_context)
+
+    torch.testing.assert_close(observation, torch.tensor([[15.0], [0.0]]))
 
 
 def test_foot_duration_tanh_uses_signed_contact_duration(

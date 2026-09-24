@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import cast
 
 from app.utils.context import RuntimeContext
-from envs.simulators.base import BaseSimulator
+from envs.simulators.base import BaseSimulator, _FOOT_CONTACT_FORCE_THRESHOLD
 from envs.simulators.isaac_sim_backend import IsaacSimBackend, IsaacSimResetState
 from envs.simulators.utils.context import ModelContext
 from envs.simulators.utils.state import SimulatorState
@@ -62,7 +62,7 @@ class IsaacSimSimulator(BaseSimulator):
         self.base_body_prim_path: str | None = None
         self.foot_body_prim_paths: tuple[str, ...] = ()
         self.floor_prim_paths: tuple[str, ...] = ()
-        self.foot_contact_force_threshold: float = 15.0
+        self.foot_contact_force_threshold: float = _FOOT_CONTACT_FORCE_THRESHOLD
         self.camera_prim_path: str | None = None
         self.camera_resolution: tuple[int, int] = (640, 480)
         self.reset_state = IsaacSimResetState()

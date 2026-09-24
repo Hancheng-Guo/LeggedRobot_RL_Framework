@@ -177,7 +177,6 @@ def test_mujoco_state_exposes_base_velocity_in_body_frame(runtime_context):
     assert state.base_ang_vel_body.shape == (1, 3)
     assert state.foot_ground_contact.shape == (
         1,
-        state.contact_geom_ids.shape[1],
         simulator.model_context.foot_geom_ids.numel(),
     )
 
@@ -198,14 +197,43 @@ def test_mujoco_foot_ground_contact_applies_force_threshold(
     contact_forces = torch.zeros(1, 4, 6)
     contact_forces[0, :, 0] = torch.tensor([14.9, 15.0, -20.0, 30.0])
 
-    foot_ground_contact = simulator._get_foot_ground_contact(
+    foot_contact_state = simulator._get_foot_contact_state(
         contact_geom_ids,
         contact_forces,
     )
 
-    assert foot_ground_contact.squeeze(-1).tolist() == [
-        [False, True, True, False],
+    assert foot_contact_state["foot_ground_contact"].tolist() == [[True]]
+    torch.testing.assert_close(
+        foot_contact_state["foot_contact_normal_force"],
+        torch.tensor([[35.0]]),
+    )
+
+
+def test_mujoco_foot_ground_contact_excludes_zero_force_at_zero_threshold(
+    runtime_context,
+    model_context,
+):
+    simulator = MujocoSimulator(runtime_context)
+    simulator.model_context = model_context
+    simulator.foot_contact_force_threshold = 0.0
+    contact_geom_ids = torch.tensor([
+        [[3, 0], [0, 3]],
+        [[3, 0], [0, 3]],
+    ])
+    contact_forces = torch.zeros(2, 2, 6)
+    contact_forces[0, 1, 0] = 2.0
+
+    foot_contact_state = simulator._get_foot_contact_state(
+        contact_geom_ids, contact_forces,
+    )
+
+    assert foot_contact_state["foot_ground_contact"].tolist() == [
+        [True], [False],
     ]
+    torch.testing.assert_close(
+        foot_contact_state["foot_contact_normal_force"],
+        torch.tensor([[2.0], [0.0]]),
+    )
 
 
 def test_mujoco_reset_uses_configured_keyframe(runtime_context):

@@ -74,10 +74,10 @@ class FakeIsaacBackend:
             "contact_forces": torch.zeros(count, 3, 6),
             "foot_ground_contact": torch.zeros(
                 count,
-                3,
                 2,
                 dtype=torch.bool,
             ),
+            "foot_contact_normal_force": torch.zeros(count, 2),
         }
 
     def render(self) -> np.ndarray:

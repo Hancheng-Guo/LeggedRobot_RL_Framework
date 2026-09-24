@@ -68,7 +68,7 @@ def main() -> None:
         "base_velocity": lambda: simulator._get_base_velocity_state(datas),
         "geom_xvel": lambda: simulator._get_geom_xvel(models, datas),
         "contact_state": lambda: simulator._get_contact_state(models, datas),
-        "foot_contact": lambda: simulator._get_foot_ground_contact(*contact_state),
+        "foot_contact": lambda: simulator._get_foot_contact_state(*contact_state),
         "get_state_total": simulator.get_state,
     }
 

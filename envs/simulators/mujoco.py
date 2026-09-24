@@ -14,7 +14,7 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from typing import Generic, TypeVar
 
-from envs.simulators.base import BaseSimulator
+from envs.simulators.base import BaseSimulator, _FOOT_CONTACT_FORCE_THRESHOLD
 from envs.simulators.utils.context import ModelContext
 from envs.simulators.utils.state import SimulatorState
 from utils.component import Component
@@ -60,7 +60,7 @@ class MujocoSimulator(BaseSimulator):
         self.step_workers: int = 1
         self.foot_geom_names: tuple[str, ...]
         self.floor_geom_names: tuple[str, ...]
-        self.foot_contact_force_threshold: float = 15.0
+        self.foot_contact_force_threshold: float = _FOOT_CONTACT_FORCE_THRESHOLD
         self.render_mode: str | None = None
         self.reset_keyframe: str | None = None
         self.reset_keyframe_id: int = -1
@@ -562,7 +562,7 @@ class MujocoSimulator(BaseSimulator):
             contact_geom_ids,
             contact_forces
         ) = self._get_contact_state(models, datas)
-        foot_ground_contact = self._get_foot_ground_contact(
+        foot_contact_state = self._get_foot_contact_state(
             contact_geom_ids,
             contact_forces,
         )
@@ -570,9 +570,9 @@ class MujocoSimulator(BaseSimulator):
         return SimulatorState(
             **basic_state,
             **base_velocity_state,
+            **foot_contact_state,
             contact_geom_ids=contact_geom_ids,
             contact_forces=contact_forces,
-            foot_ground_contact=foot_ground_contact,
             geom_xvel=geom_xvel,
         )
 
@@ -662,11 +662,12 @@ class MujocoSimulator(BaseSimulator):
             for name in names
         }
 
-    def _get_foot_ground_contact(
+    def _get_foot_contact_state(
         self,
         contact_geom_ids: torch.Tensor,
         contact_forces: torch.Tensor,
-    ) -> torch.Tensor:
+    ) -> dict[str, torch.Tensor]:
+        
         geom1 = contact_geom_ids[..., 0].unsqueeze(-1)
         geom2 = contact_geom_ids[..., 1].unsqueeze(-1)
         foot_ids = self.model_context.foot_geom_ids.view(1, 1, -1)
@@ -675,11 +676,21 @@ class MujocoSimulator(BaseSimulator):
             ((geom1 == foot_ids) & torch.isin(geom2, floor_ids))
             | ((geom2 == foot_ids) & torch.isin(geom1, floor_ids))
         )
+        normal_force = contact_forces[..., 0].abs()
         forceful_contact = (
-            contact_forces[..., 0].abs()
-            >= self.foot_contact_force_threshold
+            (normal_force > 0.0)
+            & (normal_force >= self.foot_contact_force_threshold)
         )
-        return foot_ground_pair & forceful_contact.unsqueeze(-1)
+        valid_contact = foot_ground_pair & forceful_contact.unsqueeze(-1)
+        foot_ground_contact = valid_contact.any(dim=1)
+        foot_contact_normal_force = (
+            normal_force.unsqueeze(-1) * valid_contact
+        ).sum(dim=1)
+
+        return {
+            "foot_ground_contact": foot_ground_contact,
+            "foot_contact_normal_force": foot_contact_normal_force,
+        }
 
 
     def _get_basic_state(

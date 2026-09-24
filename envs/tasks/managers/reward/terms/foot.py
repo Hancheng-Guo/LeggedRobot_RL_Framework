@@ -33,7 +33,7 @@ class FootStateDurationCommandWeighedExp(BaseRewardTerm):
             device=self.context.device,
         )
         self.duration = torch.zeros(
-            (num_envs, self.foot_geom_ids.numel()),
+            (num_envs,),
             dtype=self.context.dtype,
             device=self.context.device,
         )
@@ -44,8 +44,8 @@ class FootStateDurationCommandWeighedExp(BaseRewardTerm):
         task_context: TaskContext
     ) -> torch.Tensor:
         
-        landed = task_context.state.foot_ground_contact.any(dim=1)
-        unchanged = landed == self.last_foot_state
+        landed = task_context.state.foot_ground_contact
+        unchanged = (landed == self.last_foot_state).all(dim=-1)
         self.duration = torch.where(
             unchanged,
             self.duration + task_context.step_dt,
@@ -58,7 +58,7 @@ class FootStateDurationCommandWeighedExp(BaseRewardTerm):
             dim=-1,
         )
         scaled_duration = self.duration / self.sigma
-        return torch.exp(-command_norm.unsqueeze(-1) * scaled_duration).mean(dim=-1)
+        return torch.exp(-command_norm * scaled_duration)
 
 
     def reset(
@@ -99,7 +99,7 @@ class FootStateDurationCubicCommandWeighedExp(BaseRewardTerm):
             device=self.context.device,
         )
         self.duration = torch.zeros(
-            (num_envs, self.foot_geom_ids.numel()),
+            (num_envs,),
             dtype=self.context.dtype,
             device=self.context.device,
         )
@@ -110,8 +110,8 @@ class FootStateDurationCubicCommandWeighedExp(BaseRewardTerm):
         task_context: TaskContext
     ) -> torch.Tensor:
         
-        landed = task_context.state.foot_ground_contact.any(dim=1)
-        unchanged = landed == self.last_foot_state
+        landed = task_context.state.foot_ground_contact
+        unchanged = (landed == self.last_foot_state).all(dim=-1)
         self.duration = torch.where(
             unchanged,
             self.duration + task_context.step_dt,
@@ -125,8 +125,8 @@ class FootStateDurationCubicCommandWeighedExp(BaseRewardTerm):
         )
         scaled_duration = self.duration / self.sigma
         return torch.exp(
-            -command_norm.unsqueeze(-1) * scaled_duration ** 3
-        ).mean(dim=-1)
+            -command_norm * scaled_duration ** 3
+        )
     
 
     def reset(
@@ -183,7 +183,7 @@ class FootStateSwitch(BaseRewardTerm):
         task_context: TaskContext
     ) -> torch.Tensor:
         
-        landed = task_context.state.foot_ground_contact.any(dim=1)
+        landed = task_context.state.foot_ground_contact
         changed = (landed != self.last_foot_state).any(dim=-1)
         within_time_limit = self.duration < self.hold_time
         illegal_switch = changed * within_time_limit * self.initialized
@@ -237,7 +237,7 @@ class FootSlidingVelocityL2(BaseRewardTerm):
         task_context: TaskContext
     ) -> torch.Tensor:
         
-        landed = task_context.state.foot_ground_contact.any(dim=1)
+        landed = task_context.state.foot_ground_contact
         foot_xvel = task_context.state.geom_xvel[:, self.foot_geom_ids, :]
         foot_velocity = foot_xvel[..., 3:5]
         return ((foot_velocity * landed.unsqueeze(-1)).square()).mean(dim=(-1, -2))
@@ -281,7 +281,7 @@ class FootLiftHeightDiffCommandWeightedExp(BaseRewardTerm):
         )
         
         foot_height = task_context.state.geom_xpos[:, self.foot_geom_ids, 2]
-        swinging = ~task_context.state.foot_ground_contact.any(dim=1)
+        swinging = ~task_context.state.foot_ground_contact
         height_reward = torch.exp(
             -((foot_height - self.target_height) / self.height_std).square()
         )
@@ -344,7 +344,7 @@ class FootLiftHeightDiffCommandGatedL2(BaseRewardTerm):
             torch.zeros_like(command_norm),
             torch.ones_like(command_norm)
         )
-        swinging = ~task_context.state.foot_ground_contact.any(dim=1)
+        swinging = ~task_context.state.foot_ground_contact
         target_height = self.target_height * command_gate * swinging
         height_diff = foot_height - target_height
         height_diff_norm = height_diff / self.height_std
@@ -398,13 +398,11 @@ class FootContactWithoutCommand(BaseRewardTerm):
         task_context: TaskContext
     ) -> torch.Tensor:
         
-        landed = task_context.state.foot_ground_contact.any(
-            dim=1
-        ).to(dtype=self.context.dtype)
+        landed = task_context.state.foot_ground_contact
         command_norm = torch.linalg.norm(
             command_vector(task_context, self.command_names),
             dim=-1,
         )
         idle = command_norm <= 0.1
 
-        return landed.mean(dim=-1) * idle
+        return landed.to(dtype=self.context.dtype).mean(dim=-1) * idle

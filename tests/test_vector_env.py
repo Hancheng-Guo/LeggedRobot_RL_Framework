@@ -50,8 +50,9 @@ class FakeSimulator:
             contact_geom_ids=torch.empty(num_envs, 0, 2, dtype=torch.long),
             contact_forces=torch.empty(num_envs, 0, 6),
             foot_ground_contact=torch.empty(
-                num_envs, 0, 0, dtype=torch.bool
+                num_envs, 0, dtype=torch.bool
             ),
+            foot_contact_normal_force=torch.empty(num_envs, 0),
         )
 
 

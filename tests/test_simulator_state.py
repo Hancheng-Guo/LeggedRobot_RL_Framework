@@ -16,7 +16,8 @@ def make_state() -> SimulatorState:
         "base_ang_vel_body": torch.arange(6).reshape(2, 3),
         "contact_geom_ids": torch.arange(4).reshape(2, 1, 2),
         "contact_forces": torch.arange(12).reshape(2, 1, 6),
-        "foot_ground_contact": torch.tensor([[[True]], [[False]]]),
+        "foot_ground_contact": torch.tensor([[True], [False]]),
+        "foot_contact_normal_force": torch.tensor([[12.0], [0.0]]),
     }
     return SimulatorState(**values)
 

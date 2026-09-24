@@ -460,11 +460,11 @@ class IsaacSimRuntime:
         usd_physics: Any,
     ) -> str:
         floor_prim = stage.GetPrimAtPath(floor_path)
-        collision_paths = tuple(
+        collision_paths = [
             str(prim.GetPath())
             for prim in usd.PrimRange(floor_prim)
             if prim.HasAPI(usd_physics.CollisionAPI)
-        )
+        ]
         if not collision_paths:
             raise ValueError(
                 f"Floor Prim {floor_path!r} contains no collision Prim."
@@ -772,7 +772,9 @@ class IsaacSimRuntime:
             ),
             dim=1,
         )
-        contact_ids, contact_forces, foot_contact = self._contact_state()
+        contact_ids, contact_forces, foot_contact, foot_contact_force = (
+            self._contact_state()
+        )
         actuator_force = self._tensor(
             self._articulation.get_dof_projected_joint_forces()
         )
@@ -799,12 +801,13 @@ class IsaacSimRuntime:
             "contact_geom_ids": contact_ids,
             "contact_forces": contact_forces,
             "foot_ground_contact": foot_contact,
+            "foot_contact_normal_force": foot_contact_force,
         }
 
 
     def _contact_state(
         self,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
 
         matrix = self._body_view.get_contact_force_matrix(
             dt=self.sim_dt,
@@ -831,14 +834,21 @@ class IsaacSimRuntime:
             device=self.context.device,
         )
         contact_forces[..., 0] = normal_force.reshape(self.num_envs, -1)
-        foot_contact = (
+        valid_foot_contact = (
             self._foot_contact_mask
             & (
-                normal_force.reshape(self.num_envs, -1)
-                >= self.foot_contact_force_threshold
+                (normal_force.reshape(self.num_envs, -1) > 0.0)
+                & (
+                    normal_force.reshape(self.num_envs, -1)
+                    >= self.foot_contact_force_threshold
+                )
             ).unsqueeze(-1)
         )
-        return contact_ids, contact_forces, foot_contact
+        foot_contact = valid_foot_contact.any(dim=1)
+        foot_contact_force = (
+            normal_force.reshape(self.num_envs, -1, 1) * valid_foot_contact
+        ).sum(dim=1)
+        return contact_ids, contact_forces, foot_contact, foot_contact_force
 
 
     @staticmethod

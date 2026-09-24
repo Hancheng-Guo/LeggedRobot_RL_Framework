@@ -121,7 +121,7 @@ class TrotLoopDurationTanh(BaseRewardTerm):
         task_context: TaskContext,
     ) -> torch.Tensor:
         
-        foot_contact = task_context.state.foot_ground_contact.any(dim=1)
+        foot_contact = task_context.state.foot_ground_contact
         foot_states = (
             foot_contact[:, 0].long() * 0b1000
             + foot_contact[:, 1].long() * 0b0100

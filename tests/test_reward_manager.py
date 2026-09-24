@@ -42,8 +42,9 @@ def make_simulator_state(
         "contact_geom_ids": torch.empty(num_envs, 0, 2, dtype=torch.long),
         "contact_forces": torch.empty(num_envs, 0, 6),
         "foot_ground_contact": torch.empty(
-            num_envs, 0, 0, dtype=torch.bool
+            num_envs, 0, dtype=torch.bool
         ),
+        "foot_contact_normal_force": torch.empty(num_envs, 0),
     }
     values.update(overrides)
     return SimulatorState(**values)
@@ -141,8 +142,8 @@ def make_quadrupedal_foot_context() -> TaskContext:
                 [[5, 0], [-1, -1], [-1, -1], [-1, -1]],
             ]),
             foot_ground_contact=torch.tensor([
-                [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
-                [[0, 0, 1, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+                [1, 1, 0, 0],
+                [0, 0, 1, 0],
             ], dtype=torch.bool),
             contact_forces=contact_forces,
         ),
@@ -385,7 +386,7 @@ def test_integral_reward_term_resets_internal_buffer(
     assert not term.error_history[1].any()
 
 
-def test_foot_state_duration_terms_use_new_names_and_update_each_foot(
+def test_foot_state_duration_terms_track_joint_contact_state(
     runtime_context,
     model_context,
 ):
@@ -417,11 +418,31 @@ def test_foot_state_duration_terms_use_new_names_and_update_each_foot(
     assert info["reward/foot_state_duration_cubic_command_weighed_exp"].shape == (2,)
     torch.testing.assert_close(
         term.duration,
-        torch.tensor([
-            [0.00, 0.00, 0.02, 0.02],
-            [0.02, 0.02, 0.00, 0.02],
-        ]),
+        torch.zeros(2),
     )
+
+    task_context.command["lin_vel_x"].fill_(1.0)
+    _, second_info = manager.compute(task_context)
+    torch.testing.assert_close(term.duration, torch.full((2,), 0.02))
+    torch.testing.assert_close(
+        second_info["reward/foot_state_duration_command_weighed_exp"],
+        torch.exp(torch.full((2,), -0.02)),
+    )
+    torch.testing.assert_close(
+        second_info["reward/foot_state_duration_cubic_command_weighed_exp"],
+        torch.exp(torch.full((2,), -(0.02 ** 3))),
+    )
+
+    # Changing one foot changes the joint state and resets only that env.
+    task_context.state.foot_ground_contact[0, 0] = False
+    manager.compute(task_context)
+    torch.testing.assert_close(term.duration, torch.tensor([0.0, 0.04]))
+
+    manager.compute(task_context)
+    torch.testing.assert_close(term.duration, torch.tensor([0.02, 0.06]))
+
+    manager.reset(torch.tensor([0]))
+    torch.testing.assert_close(term.duration, torch.tensor([0.0, 0.06]))
 
 
 def test_foot_state_duration_ignores_low_force_contacts(
@@ -454,7 +475,7 @@ def test_foot_state_duration_ignores_low_force_contacts(
 
     torch.testing.assert_close(
         term.duration,
-        torch.full((2, 4), 0.02),
+        torch.full((2,), 0.02),
     )
 
 
@@ -673,9 +694,7 @@ def test_trot_loop_duration_tracks_valid_contact_sequence_and_resets(
                 [[3, 0], [4, 0], [5, 0], [6, 0]],
                 [[0, 3], [0, 4], [0, 5], [0, 6]],
             ]),
-            foot_ground_contact=torch.eye(
-                4, dtype=torch.bool,
-            ).repeat(2, 1, 1),
+            foot_ground_contact=torch.ones(2, 4, dtype=torch.bool),
             contact_forces=torch.zeros(2, 4, 6),
         ),
         command={
@@ -706,8 +725,7 @@ def test_trot_loop_duration_tracks_valid_contact_sequence_and_resets(
         [3, 0], [6, 0], [-1, -1], [-1, -1],
     ])
     task_context.state.foot_ground_contact[0] = torch.tensor([
-        [1, 0, 0, 0], [0, 0, 0, 1],
-        [0, 0, 0, 0], [0, 0, 0, 0],
+        1, 0, 0, 1,
     ], dtype=torch.bool)
     transitioned_reward = term.compute(task_context)
     torch.testing.assert_close(
@@ -743,7 +761,7 @@ def test_trot_loop_duration_resets_on_invalid_contact_sequence(
     task_context = TaskContext(
         state=make_simulator_state(
             num_envs=1,
-            foot_ground_contact=torch.ones(1, 1, 4, dtype=torch.bool),
+            foot_ground_contact=torch.ones(1, 4, dtype=torch.bool),
         ),
         command={
             "lin_vel_x": torch.ones(1, 1),
@@ -763,7 +781,7 @@ def test_trot_loop_duration_resets_on_invalid_contact_sequence(
     )
 
     task_context.state.foot_ground_contact = torch.tensor(
-        [[[1, 0, 0, 0]]], dtype=torch.bool,
+        [[1, 0, 0, 0]], dtype=torch.bool,
     )
     invalid_reward = term.compute(task_context)
     torch.testing.assert_close(invalid_reward, torch.zeros(1))
@@ -794,7 +812,7 @@ def test_trot_loop_duration_treats_small_commands_as_idle(
         state=make_simulator_state(
             num_envs=1,
             foot_ground_contact=torch.tensor(
-                [[[True, False, False, True]]],
+                [[True, False, False, True]],
             ),
         ),
         command={

@@ -15,6 +15,7 @@ from envs.tasks.managers.reward.terms.gait import (
     TrotLoopDurationTanh,
 )
 from envs.tasks.managers.reward.terms.tracking import (
+    TrackAngularVelocityZErrorIntegralL2,
     TrackLinearVelocityXL2Exp,
     TrackLinearVelocityXL2ExpAndLogcosh,
     TrackLinearVelocityYL2Exp,
@@ -384,6 +385,96 @@ def test_integral_reward_term_resets_internal_buffer(
 
     assert term.error_history[0].any()
     assert not term.error_history[1].any()
+
+
+def test_integral_tracking_terms_use_signed_error_and_step_dt(
+    runtime_context,
+    model_context,
+):
+    manager = RewardManager(
+        num_envs=2,
+        context=runtime_context,
+        model_context=model_context,
+        terms={
+            "track_linear_velocity_xy_error_integral_l2": {
+                "params": {"integral_length": 2},
+            },
+            "track_angular_velocity_z_error_integral_l2": {
+                "params": {"integral_length": 2},
+            },
+        },
+    )
+    context = make_state_reward_context()
+    context.step_dt = 0.1
+    for command in context.command.values():
+        command.zero_()
+    context.state.base_lin_vel_body[:, :2] = torch.tensor([-1.0, -2.0])
+    context.state.base_ang_vel_body[:, 2] = -1.0
+
+    _, first = manager.compute(context)
+    torch.testing.assert_close(
+        first["reward/track_linear_velocity_xy_error_integral_l2"],
+        torch.full((2,), 0.05),
+    )
+    torch.testing.assert_close(
+        first["reward/track_angular_velocity_z_error_integral_l2"],
+        torch.full((2,), 0.01),
+    )
+
+    context.state.base_lin_vel_body[0, :2] = torch.tensor([1.0, 2.0])
+    context.state.base_ang_vel_body[0, 2] = 1.0
+    _, second = manager.compute(context)
+    torch.testing.assert_close(
+        second["reward/track_linear_velocity_xy_error_integral_l2"],
+        torch.tensor([0.0, 0.2]),
+    )
+    torch.testing.assert_close(
+        second["reward/track_angular_velocity_z_error_integral_l2"],
+        torch.tensor([0.0, 0.04]),
+    )
+
+    _, third = manager.compute(context)
+    torch.testing.assert_close(
+        third["reward/track_linear_velocity_xy_error_integral_l2"],
+        torch.full((2,), 0.2),
+    )
+    torch.testing.assert_close(
+        third["reward/track_angular_velocity_z_error_integral_l2"],
+        torch.full((2,), 0.04),
+    )
+
+    manager.reset(torch.tensor([0]))
+    xy_term = cast(
+        TrackLinearVelocityXyErrorIntegralL2,
+        manager.terms["track_linear_velocity_xy_error_integral_l2"],
+    )
+    z_term = cast(
+        TrackAngularVelocityZErrorIntegralL2,
+        manager.terms["track_angular_velocity_z_error_integral_l2"],
+    )
+    assert not xy_term.error_history[0].any()
+    assert xy_term.error_history[1].any()
+    assert not z_term.error_history[0].any()
+    assert z_term.error_history[1].any()
+
+
+@pytest.mark.parametrize("integral_length", [0, -1, 1.5, True])
+def test_integral_tracking_terms_reject_invalid_length(
+    runtime_context,
+    model_context,
+    integral_length,
+):
+    for term_class in (
+        TrackLinearVelocityXyErrorIntegralL2,
+        TrackAngularVelocityZErrorIntegralL2,
+    ):
+        with pytest.raises(ValueError, match="positive integer"):
+            term_class(
+                context=runtime_context,
+                model_context=model_context,
+                num_envs=2,
+                integral_length=integral_length,
+            )
 
 
 def test_foot_state_duration_terms_track_joint_contact_state(

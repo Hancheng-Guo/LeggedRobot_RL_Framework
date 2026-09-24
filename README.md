@@ -620,10 +620,10 @@ reward_manager_config:
 | `projected_gravity_xy_l2` | — |
 | `track_linear_velocity_xy_l2_exp` | `x_std=1.0`、`y_std=1.0`、`command_names=[lin_vel_x, lin_vel_y]` |
 | `track_linear_velocity_xy_l2_exp_and_logcosh` | 上述参数 + `logcosh_weight=0.5` |
-| `track_linear_velocity_xy_error_integral_l2` | `integral_length=100`、`command_names=[lin_vel_x, lin_vel_y]` |
+| `track_linear_velocity_xy_error_integral_l2` | 最近 `integral_length` 步的 XY 有符号误差乘 `step_dt` 后分别积分，再取 L2 平方；默认 `integral_length=100`、`command_names=[lin_vel_x, lin_vel_y]` |
 | `track_angular_velocity_z_l2_exp` | `std=1.0`、`command_names=[ang_vel_z]` |
 | `track_angular_velocity_z_l2_exp_and_logcosh` | `std=1.0`、`command_names=[ang_vel_z]`、`logcosh_weight=0.5` |
-| `track_angular_velocity_z_error_integral_l2` | `integral_length=100`、`command_names=[ang_vel_z]` |
+| `track_angular_velocity_z_error_integral_l2` | 最近 `integral_length` 步的 Z 有符号误差乘 `step_dt` 后积分，再取平方；默认 `integral_length=100`、`command_names=[ang_vel_z]` |
 | `trot_loop_duration_tanh` | `command_names=[lin_vel_x, lin_vel_y, ang_vel_z]`、`growth_rate=1.0`；指令范数低于 `0.1` 时要求四足着地 |
 | `quadrupedal_gait_phase_l2_exp` | 必填 `target_height`；`sigma=1.0` |
 | `foot_state_duration_command_weighed_exp` | 整组足端触地状态保持时间；`command_names=[lin_vel_x, lin_vel_y, ang_vel_z]`、`sigma=1.0` |

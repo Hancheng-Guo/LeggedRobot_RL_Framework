@@ -313,14 +313,16 @@ class TrackLinearVelocityXyErrorIntegralL2(_BaseCommandTracking):
 
         super().__init__(command_names=command_names, *args, **kwargs)
 
+        if (
+            not isinstance(integral_length, int)
+            or isinstance(integral_length, bool)
+            or integral_length < 1
+        ):
+            raise ValueError("'integral_length' must be a positive integer.")
+
         self.integral_length = integral_length
         self.error_history = torch.zeros(
-            (num_envs, integral_length),
-            dtype=self.context.dtype,
-            device=self.context.device,
-        )
-        self.error_history_length = torch.zeros(
-            num_envs,
+            (num_envs, integral_length, 2),
             dtype=self.context.dtype,
             device=self.context.device,
         )
@@ -334,16 +336,11 @@ class TrackLinearVelocityXyErrorIntegralL2(_BaseCommandTracking):
         command = self.command_vector(task_context)
         velocity = task_context.state.base_lin_vel_body[:, :2]
         target = _command_target_check(command, velocity)
-        error = torch.linalg.norm(target - velocity, dim=-1)
-        self.error_history = torch.roll(self.error_history, shifts=-1, dims=-1)
-        self.error_history[:, -1] = error
-        self.error_history_length = torch.clamp(
-            self.error_history_length + 1.0,
-            max=float(self.integral_length),
-        )
-        return (
-            torch.sum(self.error_history, dim=-1) / self.error_history_length
-        ).square()
+        error = target - velocity
+        self.error_history = torch.roll(self.error_history, shifts=-1, dims=1)
+        self.error_history[:, -1] = error * task_context.step_dt
+        integral_error = self.error_history.sum(dim=1)
+        return integral_error.square().sum(dim=-1)
 
 
     def reset(
@@ -353,10 +350,8 @@ class TrackLinearVelocityXyErrorIntegralL2(_BaseCommandTracking):
 
         if env_ids is None:
             self.error_history.zero_()
-            self.error_history_length.zero_()
         else:
             self.error_history[env_ids] = 0.0
-            self.error_history_length[env_ids] = 0.0
 
 
 @register_reward
@@ -455,14 +450,16 @@ class TrackAngularVelocityZErrorIntegralL2(_BaseCommandTracking):
         
         super().__init__(command_names=command_names, *args, **kwargs)
 
+        if (
+            not isinstance(integral_length, int)
+            or isinstance(integral_length, bool)
+            or integral_length < 1
+        ):
+            raise ValueError("'integral_length' must be a positive integer.")
+
         self.integral_length = integral_length
         self.error_history = torch.zeros(
             (num_envs, integral_length),
-            dtype=self.context.dtype,
-            device=self.context.device,
-        )
-        self.error_history_length = torch.zeros(
-            num_envs,
             dtype=self.context.dtype,
             device=self.context.device,
         )
@@ -476,16 +473,10 @@ class TrackAngularVelocityZErrorIntegralL2(_BaseCommandTracking):
         command = self.command_vector(task_context)
         velocity = task_context.state.base_ang_vel_body[:, 2:3]
         target = _command_target_check(command, velocity)
-        error = (target - velocity).abs()
+        error = target - velocity
         self.error_history = torch.roll(self.error_history, shifts=-1, dims=-1)
-        self.error_history[:, -1] = error.squeeze(-1)
-        self.error_history_length = torch.clamp(
-            self.error_history_length + 1.0,
-            max=float(self.integral_length),
-        )
-        return (
-            torch.sum(self.error_history, dim=-1) / self.error_history_length
-        ).square()
+        self.error_history[:, -1] = error.squeeze(-1) * task_context.step_dt
+        return self.error_history.sum(dim=-1).square()
 
 
     def reset(
@@ -495,7 +486,5 @@ class TrackAngularVelocityZErrorIntegralL2(_BaseCommandTracking):
 
         if env_ids is None:
             self.error_history.zero_()
-            self.error_history_length.zero_()
         else:
             self.error_history[env_ids] = 0.0
-            self.error_history_length[env_ids] = 0.0

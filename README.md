@@ -631,6 +631,7 @@ reward_manager_config:
 | `foot_state_duration_cubic_command_weighed_exp` | 同上 |
 | `foot_sliding_velocity_l2` | — |
 | `foot_lift_height_command_weighted_exp` | 必填 `target_height`；`height_std=0.03`、`command_std=0.5`、`command_names=[lin_vel_x, lin_vel_y, ang_vel_z]`；零指令时奖励为零 |
+| `foot_lift_height_diff_command_gated_l2` | 必填 `target_height`；`height_std=null` 时使用 `target_height`；命令范数 `<=0.1` 时所有足端目标高度为 0，运动时支撑脚目标为 0、摆动脚目标为 `target_height`；使用负权重作为高度误差惩罚 |
 | `quadrupedal_foot_velocity_diff_l2` | — |
 | `foot_contact_without_command` | `command_names=[lin_vel_x, lin_vel_y, ang_vel_z]` |
 

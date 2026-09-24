@@ -28,6 +28,7 @@ observation_manager_config:
     joint_position_diff: {scale: 0.5}
     joint_velocity: {scale: 0.05}
     foot_duration_tanh: {scale: 1.0}
+    foot_contact_state: {scale: 1.0}
     foot_height: {scale: 3.0}
     last_action: {scale: 0.1}
     second_last_action: {scale: 0.1}
@@ -45,7 +46,7 @@ reward_manager_config:
     base_angular_velocity_xy_l2: {weight: -0.05}
     projected_gravity_xy_l2: {weight: -5.0}
     base_height_l2: {weight: -0.2, params: {target_height: *base_target_height, std: 0.05, max_normalized_error: 2.0}}
-    action_diff_l2: {weight: -0.05}
+    action_diff_l2: {weight: -0.1}
     joint_velocity_l2: {weight: -0.001}
     joint_position_diff_l2: {weight: -0.2}
     joint_limit_violation_l1: {weight: -5.0}
@@ -55,7 +56,7 @@ reward_manager_config:
     foot_state_duration_cubic_command_weighed_exp: {weight: 0.2, params: {sigma: 0.5}}
     foot_sliding_velocity_l2: {weight: -0.5}
     foot_contact_without_command: {weight: 0.5}
-    foot_lift_height_command_weighted_exp: {weight: 0.2, params: {target_height: *foot_lifted_height, height_std: 0.02, command_std: 0.5}}
+    foot_lift_height_diff_command_gated_l2: {weight: -0.5, params: {target_height: *foot_lifted_height}}
 
 
 termination_manager_config:

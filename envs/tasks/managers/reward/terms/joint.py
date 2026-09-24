@@ -37,11 +37,16 @@ class JointPositionDiffL2(BaseRewardTerm):
     def __init__(
         self,
         model_context: ModelContext,
+        std: float = 1.0,
         *args, **kwargs,
     ) -> None:
         
         super().__init__(*args, **kwargs)
 
+        if std <= 0:
+            raise ValueError("'std' must be a positive float.")
+
+        self.std = std
         self.qpos_ids = model_context.joint_qpos_ids
         self.default_position = model_context.joint_default_pos
 
@@ -53,7 +58,8 @@ class JointPositionDiffL2(BaseRewardTerm):
         
         position = task_context.state.qpos[:, self.qpos_ids]
         error = position - self.default_position
-        return torch.sum(error.square(), dim=-1)
+        error_norm = error / self.std
+        return torch.mean(error_norm.square(), dim=-1)
 
 
 @register_reward
@@ -120,4 +126,4 @@ class JointPowerL1(BaseRewardTerm):
         
         joint_velocity = task_context.state.qvel[:, self.qvel_ids]
         actuator_force = task_context.state.actuator_force
-        return torch.sum((actuator_force * joint_velocity).abs(), dim=-1)
+        return torch.mean((actuator_force * joint_velocity).abs(), dim=-1)

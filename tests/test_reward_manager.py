@@ -6,7 +6,8 @@ import torch
 
 from envs.tasks.managers.reward.base import RewardManager
 from envs.tasks.managers.reward.terms.foot import (
-    FootLiftHeightCommandWeightedExp,
+    FootLiftHeightDiffCommandGatedL2,
+    FootLiftHeightDiffCommandWeightedExp,
     FootStateDurationCommandWeighedExp,
 )
 from envs.tasks.managers.reward.terms.gait import (
@@ -504,7 +505,7 @@ def test_foot_lift_height_reward_is_gated_by_command(
         geom_body_ids=torch.arange(7),
         foot_geom_ids=torch.tensor([3, 4, 5, 6]),
     )
-    term = FootLiftHeightCommandWeightedExp(
+    term = FootLiftHeightDiffCommandWeightedExp(
         context=runtime_context,
         model_context=quadrupedal_model_context,
         target_height=0.08,
@@ -537,11 +538,57 @@ def test_foot_lift_height_reward_rejects_invalid_command_std(
     command_std,
 ):
     with pytest.raises(ValueError, match="'command_std' must be positive"):
-        FootLiftHeightCommandWeightedExp(
+        FootLiftHeightDiffCommandWeightedExp(
             context=runtime_context,
             model_context=model_context,
             target_height=0.08,
             command_std=command_std,
+        )
+
+
+def test_foot_lift_height_diff_command_gated_l2_tracks_height_only_when_moving(
+    runtime_context,
+    model_context,
+):
+    quadrupedal_model_context = replace(
+        model_context,
+        geom_names=("floor", "base", "thigh", "FL", "FR", "RL", "RR"),
+        geom_body_ids=torch.arange(7),
+        foot_geom_ids=torch.tensor([3, 4, 5, 6]),
+    )
+    term = FootLiftHeightDiffCommandGatedL2(
+        context=runtime_context,
+        model_context=quadrupedal_model_context,
+        target_height=0.1,
+        height_std=0.1,
+    )
+    task_context = make_quadrupedal_foot_context()
+    task_context.state.geom_xpos = torch.zeros(2, 7, 3)
+    task_context.state.geom_xpos[:, 3:7, 2] = torch.tensor([
+        [0.0, 0.0, 0.1, 0.2],
+        [0.0, 0.0, 0.1, 0.0],
+    ])
+    task_context.command["lin_vel_x"][0] = 0.2
+
+    reward = term.compute(task_context)
+
+    # Moving env: stance feet target 0 and swing feet target 0.1 m.
+    # Idle env: all feet target 0, including a raised foot.
+    torch.testing.assert_close(reward, torch.tensor([0.25, 0.25]))
+
+
+@pytest.mark.parametrize("height_std", [0, -0.1, float("inf"), float("nan")])
+def test_foot_lift_height_diff_command_gated_l2_rejects_invalid_height_std(
+    runtime_context,
+    model_context,
+    height_std,
+):
+    with pytest.raises(ValueError, match="'height_std' must be positive and finite"):
+        FootLiftHeightDiffCommandGatedL2(
+            context=runtime_context,
+            model_context=model_context,
+            target_height=0.1,
+            height_std=height_std,
         )
 
 

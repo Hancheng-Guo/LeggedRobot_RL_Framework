@@ -5,6 +5,7 @@ from dataclasses import replace
 from envs.simulators.utils.state import SimulatorState
 from envs.tasks.managers.observation.base import ObservationManager
 from envs.tasks.managers.observation.terms.base import BaseObservationTerm
+from envs.tasks.managers.observation.terms.action import LastAction
 from envs.tasks.managers.observation.terms.foot import FootDurationTanh
 from envs.tasks.managers.observation.terms.registry import (
     OBSERVATION_CLASS_MAP,
@@ -136,19 +137,80 @@ def test_observation_manager_clips_final_observation(
     assert torch.all(observation >= -0.25)
 
 
+def test_last_action_history_tracks_steps_and_partial_reset(
+    runtime_context,
+    model_context,
+):
+    manager = ObservationManager(
+        num_envs=2,
+        context=runtime_context,
+        model_context=model_context,
+        command_dim=3,
+        action_dim=2,
+        terms={"last_action": {"lags": 3}},
+    )
+    context = make_task_context()
+    context.episode_step[:] = 0
+    context.action.zero_()
+    manager.compute(context)
+
+    context.episode_step[:] = 1
+    context.action[:] = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+    first, _ = manager.compute(context)
+    torch.testing.assert_close(first, torch.tensor([
+        [1.0, 2.0, 0.0, 0.0, 0.0, 0.0],
+        [3.0, 4.0, 0.0, 0.0, 0.0, 0.0],
+    ]))
+    repeated, _ = manager.compute(context)
+    torch.testing.assert_close(repeated, first)
+
+    context.episode_step[:] = 2
+    context.action[:] = torch.tensor([[5.0, 6.0], [7.0, 8.0]])
+    second, _ = manager.compute(context)
+    torch.testing.assert_close(second, torch.tensor([
+        [5.0, 6.0, 1.0, 2.0, 0.0, 0.0],
+        [7.0, 8.0, 3.0, 4.0, 0.0, 0.0],
+    ]))
+
+    manager.reset(torch.tensor([1]))
+    reset_context = make_task_context(num_envs=1)
+    reset_context.env_ids = torch.tensor([1])
+    reset_context.episode_step[:] = 0
+    reset_context.action.zero_()
+    reset_observation, _ = manager.compute(
+        reset_context, env_ids=reset_context.env_ids,
+    )
+    torch.testing.assert_close(reset_observation, torch.zeros(1, 6))
+    term = manager.terms["last_action"]
+    assert isinstance(term, LastAction)
+    torch.testing.assert_close(
+        term.history[0],
+        torch.tensor([[5.0, 6.0], [1.0, 2.0], [0.0, 0.0]]),
+    )
+
+    reset_context.episode_step[:] = 1
+    reset_context.action[:] = torch.tensor([[9.0, 10.0]])
+    resumed, _ = manager.compute(reset_context, env_ids=reset_context.env_ids)
+    torch.testing.assert_close(
+        resumed, torch.tensor([[9.0, 10.0, 0.0, 0.0, 0.0, 0.0]]),
+    )
+
+
 def test_observation_manager_validates_selected_env_count(
     runtime_context,
     model_context,
 ):
     manager = make_manager(runtime_context, model_context)
     context = make_task_context(num_envs=1)
+    context.env_ids = torch.tensor([1])
 
     observation, _ = manager.compute(
         context,
-        env_ids=torch.tensor([1]),
+        env_ids=context.env_ids,
     )
     assert observation.shape == (1, 15)
 
+    context.env_ids = None
     with pytest.raises(ValueError, match="expected 2"):
         manager.compute(context)
 

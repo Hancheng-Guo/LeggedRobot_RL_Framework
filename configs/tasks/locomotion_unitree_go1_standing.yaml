@@ -30,8 +30,7 @@ observation_manager_config:
     foot_duration_tanh: {scale: 1.0}
     foot_contact_state: {scale: 1.0}
     foot_height: {scale: 3.0}
-    last_action: {scale: 0.1}
-    second_last_action: {scale: 0.1}
+    last_action: {scale: 0.1, lags: 2}
 
 
 reward_manager_config:

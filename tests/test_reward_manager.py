@@ -172,7 +172,7 @@ def test_reward_manager_computes_weighted_reward_and_reuses_buffer(
 
     reward, info = manager.compute(make_reward_context())
 
-    expected = torch.tensor([5.0, 2.0])
+    expected = torch.tensor([10.0, 8.0])
     torch.testing.assert_close(reward, expected)
     torch.testing.assert_close(buffer, expected)
     assert manager.get_term_reward("action_diff_l2") is buffer
@@ -487,7 +487,7 @@ def test_quadrupedal_foot_velocity_diff_matches_diagonal_feet(
 
     reward, info = manager.compute(task_context)
 
-    expected = torch.tensor([8.0, 0.0])
+    expected = torch.tensor([8.0 / 6.0, 0.0])
     torch.testing.assert_close(reward, expected)
     torch.testing.assert_close(
         info["reward/quadrupedal_foot_velocity_diff_l2"],

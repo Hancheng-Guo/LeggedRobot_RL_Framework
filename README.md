@@ -588,8 +588,7 @@ term 顺序决定最终 observation 的拼接顺序。所有 observation term �
 | `foot_contact_normal_force` | 足端法向接触力 |
 | `foot_contact_state` | 足端接触状态 |
 | `command` | 所有命令拼接结果 |
-| `last_action` | 上一步策略动作 |
-| `second_last_action` | 上上步策略动作 |
+| `last_action` | 最近 `lags` 步策略动作，按从新到旧排列（默认 `lags: 1`） |
 
 ### 9.4 Reward Manager
 
@@ -607,7 +606,7 @@ reward_manager_config:
 
 | 名称 | 参数（未注明即无参数） |
 |---|---|
-| `action_diff_l2` | — |
+| `action_diff_l2` | `max_lag=1`、`decay=0.5`。在最大 lag 范围内惩罚当前动作与历史动作的均方差，权重按 `decay**(lag-1)` 衰减；历史按环境独立维护，并在 reset 时清空。 |
 | `illegal_contact_l1` | `geom_legal_names=null` |
 | `joint_velocity_l2` | — |
 | `joint_position_diff_l2` | — |

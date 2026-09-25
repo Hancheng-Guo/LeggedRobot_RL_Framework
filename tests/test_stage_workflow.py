@@ -24,20 +24,58 @@ def test_application_train_archives_configs_before_training(
     config_dir = load_dir / "configs"
     config_dir.mkdir(parents=True)
     (config_dir / "app.yaml").write_text("runtime: {}", encoding="utf-8")
+    (config_dir / "unused.yaml").write_text("unused: true", encoding="utf-8")
+    (config_dir / "runners").mkdir()
+    (config_dir / "runners" / "runner.yaml").write_text(
+        "rollout_length: 64", encoding="utf-8"
+    )
+    (config_dir / "tasks").mkdir()
+    (config_dir / "tasks" / "first.yaml").write_text(
+        "stage: first", encoding="utf-8"
+    )
+    (config_dir / "tasks" / "second.yaml").write_text(
+        "stage: second", encoding="utf-8"
+    )
     trained: list[bool] = []
 
     application = ApplicationEntry.__new__(ApplicationEntry)
     application.load_dir = load_dir
     application.save_dir = save_dir
+    application.app_name = "app"
+    application.config = {
+        "component": {
+            "runner": [{"type": "on_policy", "config": "runner"}],
+            "task": [
+                {"type": "locomotion", "config": "first"},
+                {"type": "locomotion", "config": "second"},
+            ],
+        },
+    }
     application.stage_manager = cast(
         Any,
-        SimpleNamespace(train=lambda: trained.append(True)),
+        SimpleNamespace(
+            train=lambda: trained.append(True),
+            save=lambda: save_dir / "latest.pt",
+        ),
     )
     application._closed = False
+    application._configs_saved = False
 
+    assert application.save() == save_dir / "latest.pt"
+    assert not (save_dir / "configs").exists()
     application.train()
 
     assert trained == [True]
+    assert (save_dir / "configs" / "app.yaml").read_text(
+        encoding="utf-8",
+    ) == "runtime: {}"
+    assert (save_dir / "configs" / "runners" / "runner.yaml").is_file()
+    assert (save_dir / "configs" / "tasks" / "first.yaml").is_file()
+    assert (save_dir / "configs" / "tasks" / "second.yaml").is_file()
+    assert not (save_dir / "configs" / "unused.yaml").exists()
+
+    (config_dir / "app.yaml").write_text("runtime: {changed: true}", encoding="utf-8")
+    application.train()
     assert (save_dir / "configs" / "app.yaml").read_text(
         encoding="utf-8",
     ) == "runtime: {}"
@@ -335,6 +373,7 @@ def test_application_entry_can_test_and_play_after_training(
     application.stage_manager = manager
     application.load_dir = tmp_path
     application.save_dir = tmp_path
+    application._configs_saved = False
 
     application.train()
     application.test(num_episodes=7)

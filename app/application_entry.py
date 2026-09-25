@@ -6,6 +6,7 @@ from types import TracebackType
 
 from app.stage_manager import StageManager
 from app.utils.context import create_runtime_context, RuntimeContext
+from utils.component import create_component_info
 from utils.config import load_yaml
 from utils.logging import configure_logging, get_logger, LoggingSession
 
@@ -30,6 +31,7 @@ class ApplicationEntry:
         self.stage_manager: StageManager
         self.logging_session: LoggingSession
         self._closed = False
+        self._configs_saved = False
 
         self._setup(app_name, train_time, device)
 
@@ -164,8 +166,8 @@ class ApplicationEntry:
 
     def train(self) -> None:
         self._ensure_open()
-        self._save_configs()
-        logger.info("Training configuration saved to %s.", (self.save_dir / "configs").as_posix())
+        if self._save_configs():
+            logger.info("Training configuration saved to %s.", (self.save_dir / "configs").as_posix())
         self.stage_manager.train()
 
 
@@ -181,22 +183,50 @@ class ApplicationEntry:
 
     def save(self) -> Path:
         self._ensure_open()
-        self._save_configs()
         return self.stage_manager.save()
 
 
-    def _save_configs(self) -> None:
+    def _save_configs(self) -> bool:
+
+        if self._configs_saved:
+            return False
         config_source = self.load_dir / "configs"
         config_destination = self.save_dir / "configs"
+
         if (
             config_source.is_dir()
             and config_source.resolve() != config_destination.resolve()
         ):
-            shutil.copytree(
-                config_source,
-                config_destination,
-                dirs_exist_ok=True,
-            )
+            source_root = config_source.resolve()
+            config_paths = {config_source / f"{self.app_name}.yaml"}
+            component_config = self.config["component"]
+            for name, entries in component_config.items():
+                for entry in entries:
+                    component_info = create_component_info(
+                        {name: entry}, name, self.load_dir
+                    )
+                    if component_info is not None:
+                        config_paths.add(component_info.config)
+
+            for config_path in config_paths:
+                source_path = config_path.resolve()
+                try:
+                    relative_path = source_path.relative_to(source_root)
+                except ValueError:
+                    logger.warning(
+                        "External component config is not archived: %s.",
+                        source_path.as_posix(),
+                    )
+                    continue
+
+                destination_path = config_destination / relative_path
+                destination_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source_path, destination_path)
+
+            self._configs_saved = True
+            return True
+        
+        return False
 
 
     def close(self) -> None:

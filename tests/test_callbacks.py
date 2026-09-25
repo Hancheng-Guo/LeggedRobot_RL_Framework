@@ -9,6 +9,7 @@ import torch
 from runners.callbacks.checkpoint import CheckpointCallback
 from runners.callbacks.early_stopping import EarlystoppingCallback
 from runners.callbacks.logging import LoggingCallback
+from runners.callbacks.keyboard_interrupt import KeyboardInterruptCallback
 from runners.callbacks.progress_bar import ProgressBarCallback
 from runners.callbacks import tensorboard as tensorboard_module
 from runners.callbacks.tensorboard import TensorboardCallback
@@ -61,6 +62,21 @@ def make_runner() -> BaseRunner:
         rollout_length=1,
         algorithm=DummyAlgorithm(),
     ))
+
+
+def test_keyboard_interrupt_stops_and_saves_after_update(tmp_path: Path) -> None:
+    checkpoint_path = tmp_path / "latest.pt"
+    saved: list[bool] = []
+    runner = cast(BaseRunner, SimpleNamespace(
+        save=lambda: (saved.append(True), checkpoint_path)[1],
+    ))
+    callback = KeyboardInterruptCallback(runner)
+    callback._stop_requested = True
+
+    assert callback._on_step_end() is False
+    assert callback._on_iteration_end() is False
+    assert callback._on_train_end() is True
+    assert saved == [True]
 
 
 def make_context(save_dir: Path) -> RuntimeContext:

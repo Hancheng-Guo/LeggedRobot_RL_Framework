@@ -3,6 +3,7 @@
     "tasks": [
         {
             "label": "Test: Core + MuJoCo",
+            "icon": { "id": "beaker" },
             "type": "process",
             "command": "'${command:python.interpreterPath}'",
             "args": [
@@ -42,6 +43,7 @@
         },
         {
             "label": "Test: Core + Isaac Sim",
+            "icon": { "id": "beaker" },
             "type": "process",
             "command": "'${command:python.interpreterPath}'",
             "args": [
@@ -81,6 +83,7 @@
         },
         {
             "label": "Type Check: Core + MuJoCo",
+            "icon": { "id": "inspect" },
             "type": "process",
             "command": "${command:python.interpreterPath}",
             "args": [
@@ -111,6 +114,7 @@
         },
         {
             "label": "Type Check: Core + Isaac Sim",
+            "icon": { "id": "inspect" },
             "type": "process",
             "command": "${command:python.interpreterPath}",
             "args": [
@@ -141,6 +145,7 @@
         },
         {
             "label": "Run: Main",
+            "icon": { "id": "play" },
             "type": "process",
             "command": "${command:python.interpreterPath}",
             "args": [

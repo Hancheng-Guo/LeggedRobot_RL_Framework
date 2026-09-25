@@ -91,9 +91,9 @@ class ApplicationEntry:
         )
         logger.info(
             "Application %s initialized.\n"
-            "  Config: %s\n"
-            "  Output: %s\n"
-            "  Log: %s",
+            "    Config : %s\n"
+            "    Output : %s\n"
+            "    Log    : %s",
             self.app_name,
             (self.load_dir / "configs" / f"{self.app_name}.yaml").as_posix(),
             self.save_dir.as_posix(),

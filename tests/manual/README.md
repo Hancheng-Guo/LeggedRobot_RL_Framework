@@ -7,6 +7,7 @@
 | `profile_mujoco_state.py` | MuJoCo | 分析 `MujocoSimulator.get_state()` 及各状态字段的耗时占比。 |
 | `benchmark_mujoco_step_threads.py` | MuJoCo | 比较不同环境数和工作线程数的仿真步进吞吐量。 |
 | `isaac_shutdown_diagnostic.py` | Isaac Sim | 分阶段复现 Isaac Sim 启动、场景构建与关闭时的问题。 |
+| `profile_isaac_sim_runtime.py` | Isaac Sim | 测量项目运行时的初始化、物理步进、状态读取与可选的相机渲染。 |
 
 ## MuJoCo 性能分析
 
@@ -26,3 +27,14 @@ python tests/manual/isaac_shutdown_diagnostic.py --mode model --num-envs 16 --st
 ```
 
 建议从 `baseline` 开始，再依次尝试 `bridge-before`、`bridge-after`、`world` 和场景相关模式，以定位触发问题的步骤。场景模式会使用默认的 Unitree Go1 USD 模型；可通过 `--model-path` 指定其他模型。脚本正常完成时输出 `DIAGNOSTIC COMPLETED SUCCESSFULLY`。运行 `--help` 可查看所有模式和参数。
+
+## Isaac Sim 性能分析
+
+在安装 Isaac Sim 的设备上，从项目根目录运行：
+
+```powershell
+python tests/manual/profile_isaac_sim_runtime.py --num-envs 128 --steps 20
+python tests/manual/profile_isaac_sim_runtime.py --num-envs 1024 --steps 20
+```
+
+脚本默认不创建相机。需要单独量化相机成本时，为相同环境数加上 `--with-camera`。每组输出 `step`（包含配置中的 10 个物理子步）、`get_state` 和可选的 `render` 耗时；请比较预热后的汇总数据。脚本不执行 PPO 更新，因此吞吐量仅代表仿真与状态读取。

@@ -1,4 +1,4 @@
 -c constraints/dev.txt
 
-pyright==1.1.411
+pyright[nodejs]==1.1.411
 pytest==9.1.1

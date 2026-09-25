@@ -111,8 +111,9 @@ class LoggingCallback(BaseCallback):
         output_paths = () if info is None else info.get("output_paths", ())
         if output_paths:
             self.logger.info(
-                "Playback ended. Saved output to: %s",
-                ", ".join(str(path) for path in output_paths),
+                "Playback ended. Saved output (%d frames per file) to: %s",
+                info.get("frame_count", 0) if info is not None else 0,
+                ", ".join(path.as_posix() for path in output_paths),
             )
         else:
             self.logger.warning(

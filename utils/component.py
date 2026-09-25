@@ -31,7 +31,7 @@ class Component:
     task: ComponentInfo | None
 
 
-def _create_component_info(
+def create_component_info(
         component_dict: dict[str, Any],
         component_name: str,
         load_dir: Path,
@@ -75,10 +75,10 @@ def create_component(
 ) -> Component:
 
     return Component(
-        runner=_create_component_info(component_dict, "runner", load_dir),
-        algorithm=_create_component_info(component_dict, "algorithm", load_dir),
-        policy=_create_component_info(component_dict, "policy", load_dir),
-        environment=_create_component_info(component_dict, "environment", load_dir),
-        simulator=_create_component_info(component_dict, "simulator", load_dir),
-        task=_create_component_info(component_dict, "task", load_dir),
+        runner=create_component_info(component_dict, "runner", load_dir),
+        algorithm=create_component_info(component_dict, "algorithm", load_dir),
+        policy=create_component_info(component_dict, "policy", load_dir),
+        environment=create_component_info(component_dict, "environment", load_dir),
+        simulator=create_component_info(component_dict, "simulator", load_dir),
+        task=create_component_info(component_dict, "task", load_dir),
     )

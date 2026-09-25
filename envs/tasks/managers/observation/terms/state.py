@@ -25,7 +25,7 @@ class BaseLinearVelocity(BaseObservationTerm):
         self,
         task_context: TaskContext,
     ) -> torch.Tensor:
-        return task_context.state["qvel"][:, self.qvel_ids]
+        return task_context.state.qvel[:, self.qvel_ids]
 
 
 @register_observation
@@ -47,7 +47,7 @@ class BasePosition(BaseObservationTerm):
         self,
         task_context: TaskContext,
     ) -> torch.Tensor:
-        return task_context.state["qpos"][:, self.qpos_ids]
+        return task_context.state.qpos[:, self.qpos_ids]
 
 
 @register_observation
@@ -69,7 +69,7 @@ class BaseHeight(BaseObservationTerm):
         self,
         task_context: TaskContext,
     ) -> torch.Tensor:
-        return task_context.state["qpos"][:, self.qpos_id:self.qpos_id + 1]
+        return task_context.state.qpos[:, self.qpos_id:self.qpos_id + 1]
 
 
 @register_observation
@@ -91,7 +91,7 @@ class BaseAngularVelocity(BaseObservationTerm):
         self,
         task_context: TaskContext
     ) -> torch.Tensor:
-        return task_context.state["qvel"][:, self.qvel_ids]
+        return task_context.state.qvel[:, self.qvel_ids]
 
 
 @register_observation
@@ -122,7 +122,7 @@ class ProjectedGravity(BaseObservationTerm):
         task_context: TaskContext
     ) -> torch.Tensor:
         
-        quaternion = task_context.state["qpos"][:, self.qpos_ids]
+        quaternion = task_context.state.qpos[:, self.qpos_ids]
         quaternion = quaternion / quaternion.norm(
             dim=-1,
             keepdim=True,
@@ -158,7 +158,7 @@ class JointPosition(BaseObservationTerm):
         self,
         task_context: TaskContext
     ) -> torch.Tensor:
-        return task_context.state["qpos"][:, self.qpos_ids]
+        return task_context.state.qpos[:, self.qpos_ids]
 
 
 @register_observation
@@ -178,7 +178,7 @@ class JointVelocity(BaseObservationTerm):
         self,
         task_context: TaskContext
     ) -> torch.Tensor:
-        return task_context.state["qvel"][:, self.qvel_ids]
+        return task_context.state.qvel[:, self.qvel_ids]
 
 
 @register_observation
@@ -202,7 +202,7 @@ class JointPositionDiff(BaseObservationTerm):
         task_context: TaskContext,
     ) -> torch.Tensor:
         return (
-            task_context.state["qpos"][:, self.qpos_ids]
+            task_context.state.qpos[:, self.qpos_ids]
             - self.default_position
         )
 
@@ -225,4 +225,4 @@ class ActuatorForce(BaseObservationTerm):
         self,
         task_context: TaskContext,
     ) -> torch.Tensor:
-        return task_context.state["actuator_force"]
+        return task_context.state.actuator_force

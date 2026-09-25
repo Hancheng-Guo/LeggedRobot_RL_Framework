@@ -1,7 +1,8 @@
-rollout_length: 32
+rollout_length: 64
 rollout_length_history_size: 50
 callbacks:
   - progress_bar
+  - keyboard_interrupt
   - adaptive_learning_rate:
       monitor: "*/approx_kl"
       allowed_range: [0.005, 0.1]

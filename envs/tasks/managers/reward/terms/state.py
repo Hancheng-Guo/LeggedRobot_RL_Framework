@@ -24,7 +24,7 @@ class BaseLinearVelocityZL2(BaseRewardTerm):
         task_context: TaskContext
     ) -> torch.Tensor:
         
-        return task_context.state["qvel"][:, self.qvel_id].square()
+        return task_context.state.qvel[:, self.qvel_id].square()
 
 
 @register_reward
@@ -49,9 +49,9 @@ class BaseLinearVelocityZL2XySpeedWeighted(BaseRewardTerm):
         task_context: TaskContext
     ) -> torch.Tensor:
         
-        z_velocity_l2 = task_context.state["qvel"][:, self.z_qvel_id].square()
+        z_velocity_l2 = task_context.state.qvel[:, self.z_qvel_id].square()
         xy_speed = torch.linalg.norm(
-            task_context.state["qvel"][:, self.xy_qvel_ids],
+            task_context.state.qvel[:, self.xy_qvel_ids],
             dim=-1,
         ).clamp_min(self.min_speed)
         return z_velocity_l2 / xy_speed
@@ -64,6 +64,8 @@ class BaseHeightL2(BaseRewardTerm):
         self,
         model_context: ModelContext,
         target_height: float,
+        std: float = 1.0,
+        max_normalized_error: float | None = None,
         *args, **kwargs,
     ) -> None:
         
@@ -71,6 +73,12 @@ class BaseHeightL2(BaseRewardTerm):
 
         self.height_qpos_id = int(model_context.base_pos_qpos_ids[2].item())
         self.target_height = target_height
+        if std <= 0.0:
+            raise ValueError("'std' must be positive.")
+        if max_normalized_error is not None and max_normalized_error <= 0.0:
+            raise ValueError("'max_normalized_error' must be positive.")
+        self.std = std
+        self.max_normalized_error = max_normalized_error
 
 
     def compute(
@@ -78,8 +86,14 @@ class BaseHeightL2(BaseRewardTerm):
         task_context: TaskContext
     ) -> torch.Tensor:
         
-        height = task_context.state["qpos"][:, self.height_qpos_id]
-        return (height - self.target_height).square()
+        height = task_context.state.qpos[:, self.height_qpos_id]
+        normalized_error = (height - self.target_height) / self.std
+        if self.max_normalized_error is not None:
+            normalized_error = normalized_error.clamp(
+                min=-self.max_normalized_error,
+                max=self.max_normalized_error,
+            )
+        return normalized_error.square()
 
 
 @register_reward
@@ -106,10 +120,10 @@ class BaseHeightL2XySpeedWeighted(BaseRewardTerm):
         task_context: TaskContext
     ) -> torch.Tensor:
         
-        height = task_context.state["qpos"][:, self.height_qpos_id]
+        height = task_context.state.qpos[:, self.height_qpos_id]
         height_error_l2 = (height - self.target_height).square()
         xy_speed = torch.linalg.norm(
-            task_context.state["qvel"][:, self.xy_qvel_ids],
+            task_context.state.qvel[:, self.xy_qvel_ids],
             dim=-1,
         ).clamp_min(self.min_speed)
         return height_error_l2 / xy_speed
@@ -132,7 +146,7 @@ class BaseAngularVelocityXyL2(BaseRewardTerm):
     ) -> torch.Tensor:
         
         return torch.mean(
-            task_context.state["base_ang_vel_body"][:, :2].square(),
+            task_context.state.base_ang_vel_body[:, :2].square(),
             dim=-1,
         )
 
@@ -163,7 +177,7 @@ class ProjectedGravityXyL2(BaseRewardTerm):
         task_context: TaskContext
     ) -> torch.Tensor:
         
-        quaternion = task_context.state["qpos"][:, self.qpos_ids]
+        quaternion = task_context.state.qpos[:, self.qpos_ids]
         quaternion = quaternion / quaternion.norm(
             dim=-1,
             keepdim=True,

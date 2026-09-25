@@ -5,7 +5,11 @@ from typing import Any
 from abc import ABC, abstractmethod
 
 from envs.simulators.utils.context import ModelContext
+from envs.simulators.utils.state import SimulatorState
 from app.utils.context import RuntimeContext
+
+
+_FOOT_CONTACT_FORCE_THRESHOLD: float = 15.0
 
 
 class BaseSimulator(ABC):
@@ -116,5 +120,12 @@ class BaseSimulator(ABC):
     def get_state(
         self,
         env_ids: torch.Tensor | None = None,
-    ) -> dict[str, torch.Tensor]:
+    ) -> SimulatorState:
+        """Return simulator state for all or selected environments.
+
+        Implementations may return views backed by reusable internal buffers.
+        A returned tensor is guaranteed to remain valid only until the next
+        state read that reuses the same buffer. Callers must clone values that
+        need to outlive that boundary.
+        """
         raise NotImplementedError

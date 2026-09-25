@@ -3,6 +3,7 @@ from __future__ import annotations
 import warnings
 import torch
 import numpy as np
+from datetime import datetime
 from pathlib import Path
 from collections import deque
 from collections.abc import Callable, Mapping, Sequence
@@ -503,7 +504,7 @@ class OnPolicyRunner(BaseRunner):
 
     def test(
         self,
-        num_episodes: int = 1000,
+        num_episodes: int,
     ) -> None:
 
         if (
@@ -612,9 +613,11 @@ class OnPolicyRunner(BaseRunner):
 
     def play(
         self,
-        num_steps: int = 5000,
-        formats: VideoFormat | VideoFormats = "gif",
+        num_steps: int,
+        formats: VideoFormat | VideoFormats,
+        num_plays: int,
     ) -> None:
+        
         try:
             from runners.utils.frames import save_frames_to_video
         except ModuleNotFoundError as error:
@@ -635,6 +638,12 @@ class OnPolicyRunner(BaseRunner):
             or num_steps <= 0
         ):
             raise ValueError("'num_steps' must be a positive integer.")
+        if (
+            not isinstance(num_plays, int)
+            or isinstance(num_plays, bool)
+            or num_plays <= 0
+        ):
+            raise ValueError("'num_plays' must be a positive integer.")
 
         original_environment = self.environment
         temporary_environment: BaseEnv | None = None
@@ -645,11 +654,15 @@ class OnPolicyRunner(BaseRunner):
             self.environment = temporary_environment
 
         try:
-            self._play_steps(
-                num_steps,
-                formats,
-                save_frames_to_video,
-            )
+            for play_index in range(num_plays):
+                if not self._play_steps(
+                    num_steps,
+                    formats,
+                    save_frames_to_video,
+                ):
+                    break
+                if play_index + 1 < num_plays:
+                    self.algorithm.reset_policy_state()
         finally:
             self.algorithm.reset_policy_state()
             if temporary_environment is not None:
@@ -662,7 +675,8 @@ class OnPolicyRunner(BaseRunner):
         num_steps: int,
         formats: VideoFormat | VideoFormats,
         frame_saver: Callable[..., list[Path]],
-    ) -> None:
+    ) -> bool:
+        
         if not hasattr(self, "environment"):
             raise RuntimeError("environment is not instantiated.")
 
@@ -678,13 +692,15 @@ class OnPolicyRunner(BaseRunner):
             num_steps=num_steps,
         ):
             self._run_callbacks("_on_play_end")
-            return
+            return False
 
         frames: list[np.ndarray] = []
         step = 0
+        stopped_by_callback = False
         while step < num_steps:
 
             if not self._run_callbacks("_on_step_start"):
+                stopped_by_callback = True
                 break
 
             with torch.no_grad():
@@ -720,6 +736,7 @@ class OnPolicyRunner(BaseRunner):
             obs = next_obs
 
             if not self._run_callbacks("_on_step_end", info=info):
+                stopped_by_callback = True
                 break
             step += 1
             if playback_done:
@@ -727,10 +744,12 @@ class OnPolicyRunner(BaseRunner):
 
         output_paths: list[Path] = []
         if frames:
+            video_dir = Path(self.context.save_dir) / "videos"
             output_paths = frame_saver(
                 frames,
-                directory=Path(self.context.save_dir) / "videos",
+                directory=video_dir,
                 fps=self.environment.render_fps,
+                file_name=self._next_playback_file_name(video_dir),
                 formats=formats,
             )
         self._run_callbacks(
@@ -740,6 +759,18 @@ class OnPolicyRunner(BaseRunner):
                 "output_paths": output_paths,
             },
         )
+        return not stopped_by_callback
+
+
+    def _next_playback_file_name(self, directory: Path) -> str:
+        stage = self.stage_index if self.stage_index is not None else 0
+        iteration = self.current_iteration + 1
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        prefix = f"stage_{stage:03d}_iter_{iteration:04d}_{timestamp}"
+        number = 1
+        while any(directory.glob(f"{prefix}_{number}.*")):
+            number += 1
+        return f"{prefix}_{number}"
 
 
     def _warm_up_playback_renderer(self, max_frames: int = 120) -> None:

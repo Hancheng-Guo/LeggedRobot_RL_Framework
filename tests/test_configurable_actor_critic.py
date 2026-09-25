@@ -8,6 +8,7 @@ import yaml
 from app.utils.context import RuntimeContext
 from rl.algorithms.ppo import PPO
 from rl.policies.configurable_actor_critic import ConfigurableActorCritic
+from rl.policies.modules.network import ConfigurableNetwork
 from rl.policies.modules.operators import Add
 from rl.policies.modules.registry import build_module
 from rl.policies.modules.recurrent import StatefulGRU
@@ -32,6 +33,24 @@ RECURRENT_ACTOR_CONFIG: list[dict[str, Any]] = [
     {"type": "gru", "input_size": 3, "hidden_size": 8},
     {"type": "linear", "in_features": 8, "out_features": "action_dim"},
 ]
+
+
+def _linear(network: ConfigurableNetwork, name: str) -> torch.nn.Linear:
+    module = network.get_submodule(name)
+    assert isinstance(module, torch.nn.Linear)
+    return module
+
+
+def _sequential(network: ConfigurableNetwork, name: str) -> torch.nn.Sequential:
+    module = network.get_submodule(name)
+    assert isinstance(module, torch.nn.Sequential)
+    return module
+
+
+def _gru(network: ConfigurableNetwork, name: str) -> torch.nn.GRU:
+    module = network.get_submodule(name)
+    assert isinstance(module, torch.nn.GRU)
+    return module
 
 
 def make_component(policy_config: Path | None = None) -> Component:
@@ -220,8 +239,8 @@ def test_named_modules_can_inherit_parameters_between_stages(
         distribution={"type": "diagonal_gaussian"},
     )
     with torch.no_grad():
-        policy.actor.encoder.weight.fill_(1.25)
-        policy.critic.encoder.weight.fill_(2.5)
+        _linear(policy.actor, "encoder").weight.fill_(1.25)
+        _linear(policy.critic, "encoder").weight.fill_(2.5)
 
     inherited_actor = [dict(module) for module in actor]
     inherited_critic = [dict(module) for module in critic]
@@ -234,12 +253,12 @@ def test_named_modules_can_inherit_parameters_between_stages(
     )
 
     torch.testing.assert_close(
-        policy.actor.encoder.weight,
-        torch.full_like(policy.actor.encoder.weight, 1.25),
+        _linear(policy.actor, "encoder").weight,
+        torch.full_like(_linear(policy.actor, "encoder").weight, 1.25),
     )
     torch.testing.assert_close(
-        policy.critic.encoder.weight,
-        torch.full_like(policy.critic.encoder.weight, 2.5),
+        _linear(policy.critic, "encoder").weight,
+        torch.full_like(_linear(policy.critic, "encoder").weight, 2.5),
     )
 
 
@@ -285,9 +304,10 @@ def test_stage_can_reuse_named_composite_as_a_module_type(
         actor=stage1_actor, critic=CRITIC_CONFIG,
         distribution={"type": "diagonal_gaussian"},
     )
-    custom1 = policy.actor.custom1
+    custom1 = _sequential(policy.actor, "custom1")
+    assert isinstance(custom1[0], torch.nn.Linear)
     with torch.no_grad():
-        custom1[0].weight.fill_(1.5)
+        _linear(policy.actor, "custom1.0").weight.fill_(1.5)
 
     policy.config_update(
         component=make_component(), obs_dim=3, action_dim=2,
@@ -301,8 +321,8 @@ def test_stage_can_reuse_named_composite_as_a_module_type(
     )
 
     torch.testing.assert_close(
-        policy.actor.custom1[0].weight,
-        torch.full_like(policy.actor.custom1[0].weight, 1.5),
+        _linear(policy.actor, "custom1.0").weight,
+        torch.full_like(_linear(policy.actor, "custom1.0").weight, 1.5),
     )
 
 
@@ -325,8 +345,10 @@ def test_composite_module_can_be_restored_from_artifact(
         critic=CRITIC_CONFIG,
         distribution={"type": "diagonal_gaussian"},
     )
+    gru_weight = _gru(first.actor, "custom1.memory.gru").weight_ih_l0
+    assert isinstance(gru_weight, torch.Tensor)
     with torch.no_grad():
-        first.actor.custom1.memory.gru.weight_ih_l0.fill_(0.75)
+        gru_weight.fill_(0.75)
     artifacts = first.export_module_artifacts()
 
     restored = ConfigurableActorCritic(context=runtime_context)
@@ -346,11 +368,11 @@ def test_composite_module_can_be_restored_from_artifact(
     assert set(restored.get_recurrent_state(batch_size=2)) == {
         "custom1.memory"
     }
+    restored_weight = _gru(restored.actor, "custom1.memory.gru").weight_ih_l0
+    assert isinstance(restored_weight, torch.Tensor)
     torch.testing.assert_close(
-        restored.actor.custom1.memory.gru.weight_ih_l0,
-        torch.full_like(
-            restored.actor.custom1.memory.gru.weight_ih_l0, 0.75
-        ),
+        restored_weight,
+        torch.full_like(restored_weight, 0.75),
     )
 
 
@@ -413,7 +435,7 @@ def test_composite_module_cold_starts_from_policy_checkpoint(
         distribution={"type": "diagonal_gaussian"},
     )
     with torch.no_grad():
-        first.actor.custom1[0].weight.fill_(0.625)
+        _linear(first.actor, "custom1.0").weight.fill_(0.625)
     checkpoint = first.checkpoint_state_dict()
 
     restored = ConfigurableActorCritic(context=runtime_context)
@@ -431,8 +453,8 @@ def test_composite_module_cold_starts_from_policy_checkpoint(
     restored.load_checkpoint_state_dict(checkpoint)
 
     torch.testing.assert_close(
-        restored.actor.custom1[0].weight,
-        torch.full_like(restored.actor.custom1[0].weight, 0.625),
+        _linear(restored.actor, "custom1.0").weight,
+        torch.full_like(_linear(restored.actor, "custom1.0").weight, 0.625),
     )
 
 
@@ -544,14 +566,14 @@ def test_network_selects_observation_fields_and_concatenates_branches(
     )
     obs = torch.randn(4, 5)
 
-    expected = policy.actor.C(torch.cat([
-        policy.actor.A(obs[:, :3]),
-        policy.actor.B(obs[:, 3:]),
+    expected = policy.actor.get_submodule("C")(torch.cat([
+        policy.actor.get_submodule("A")(obs[:, :3]),
+        policy.actor.get_submodule("B")(obs[:, 3:]),
     ], dim=-1))
 
     torch.testing.assert_close(policy.actor_forward(obs), expected)
-    assert policy.actor.A.in_features == 3
-    assert policy.actor.B.in_features == 2
+    assert _linear(policy.actor, "A").in_features == 3
+    assert _linear(policy.actor, "B").in_features == 2
 
 
 def test_network_adds_named_module_outputs(
@@ -589,8 +611,8 @@ def test_network_adds_named_module_outputs(
     obs = torch.randn(4, 3)
 
     expected = (
-        policy.actor.motor_action(obs)
-        + policy.actor.actuator_shift(obs)
+        policy.actor.get_submodule("motor_action")(obs)
+        + policy.actor.get_submodule("actuator_shift")(obs)
     )
 
     torch.testing.assert_close(policy.actor_forward(obs), expected)
@@ -646,7 +668,9 @@ def test_network_returns_requested_named_outputs(
     )
 
     torch.testing.assert_close(final_output, policy.actor_forward(obs))
-    torch.testing.assert_close(outputs["features"], policy.actor.features(obs))
+    torch.testing.assert_close(
+        outputs["features"], policy.actor.get_submodule("features")(obs)
+    )
     assert list(outputs) == ["features"]
 
     with pytest.raises(KeyError, match="Unknown module output"):
@@ -676,15 +700,15 @@ def test_non_trainable_module_keeps_input_gradients(
 
     assert all(
         parameter.requires_grad is False
-        for parameter in policy.actor.encoder.parameters()
+        for parameter in policy.actor.get_submodule("encoder").parameters()
     )
     assert all(
         parameter.grad is None
-        for parameter in policy.actor.encoder.parameters()
+        for parameter in policy.actor.get_submodule("encoder").parameters()
     )
     assert all(
         parameter.grad is not None
-        for parameter in policy.actor.head.parameters()
+        for parameter in policy.actor.get_submodule("head").parameters()
     )
     assert obs.grad is not None
 
@@ -705,7 +729,7 @@ def test_inherited_module_can_be_frozen(
         distribution={"type": "diagonal_gaussian"},
     )
     with torch.no_grad():
-        policy.actor.encoder.weight.fill_(1.25)
+        _linear(policy.actor, "encoder").weight.fill_(1.25)
 
     next_actor = [dict(module) for module in actor]
     next_actor[0].update({"inherit": True, "trainable": False})
@@ -716,12 +740,12 @@ def test_inherited_module_can_be_frozen(
     )
 
     torch.testing.assert_close(
-        policy.actor.encoder.weight,
-        torch.full_like(policy.actor.encoder.weight, 1.25),
+        _linear(policy.actor, "encoder").weight,
+        torch.full_like(_linear(policy.actor, "encoder").weight, 1.25),
     )
     assert all(
         parameter.requires_grad is False
-        for parameter in policy.actor.encoder.parameters()
+        for parameter in policy.actor.get_submodule("encoder").parameters()
     )
 
 
@@ -763,10 +787,10 @@ def test_network_slices_named_module_outputs(
     )
     obs = torch.randn(4, 3)
 
-    a_output = policy.actor.A(obs)
-    expected = policy.actor.E(torch.cat([
-        policy.actor.B(a_output[..., 0:6]),
-        policy.actor.C(a_output[..., 6:10]),
+    a_output = policy.actor.get_submodule("A")(obs)
+    expected = policy.actor.get_submodule("E")(torch.cat([
+        policy.actor.get_submodule("B")(a_output[..., 0:6]),
+        policy.actor.get_submodule("C")(a_output[..., 6:10]),
     ], dim=-1))
 
     torch.testing.assert_close(policy.actor_forward(obs), expected)
@@ -810,8 +834,8 @@ def test_network_resolves_previous_module_output_features(
         distribution={"type": "diagonal_gaussian"},
     )
 
-    assert policy.actor.A.in_features == 3
-    assert policy.actor.B.in_features == 10
+    assert _linear(policy.actor, "A").in_features == 3
+    assert _linear(policy.actor, "B").in_features == 10
 
 
 def test_network_rejects_unknown_observation_field(
@@ -1155,9 +1179,12 @@ def test_ppo_optimizer_excludes_non_trainable_parameters(
         for parameter in algorithm.policy.parameters()
         if parameter.requires_grad
     }
+    assert isinstance(algorithm.policy, ConfigurableActorCritic)
     frozen_parameters = {
         id(parameter)
-        for parameter in algorithm.policy.actor.frozen_encoder.parameters()
+        for parameter in algorithm.policy.actor.get_submodule(
+            "frozen_encoder"
+        ).parameters()
     }
 
     assert optimizer_parameters == expected_parameters

@@ -15,7 +15,7 @@ _HALF_PERIOD_DURATION_NAME = "half_period_duration"
 _LANDED_DISTANCE_FACTOR = -1.0
 _LIFTED_DISTANCE_FACTOR = -0.25
 
-_IDLE_SPEED_THRESHOLD = 1.0e-7
+_IDLE_SPEED_THRESHOLD = 0.1
 _TROT_LOOPS = {
     False: ((0b1111, 0),),
     True: (
@@ -38,8 +38,8 @@ def _named_tensor_squeeze(
     
     if name in task_context.command:
         return task_context.command[name].squeeze(-1)
-    if name in task_context.state:
-        return task_context.state[name].squeeze(-1)
+    if hasattr(task_context.state, name):
+        return getattr(task_context.state, name).squeeze(-1)
     raise ValueError(f"'{name}' is missing from task context.")
 
 
@@ -121,7 +121,7 @@ class TrotLoopDurationTanh(BaseRewardTerm):
         task_context: TaskContext,
     ) -> torch.Tensor:
         
-        foot_contact = task_context.state["foot_ground_contact"].any(dim=1)
+        foot_contact = task_context.state.foot_ground_contact
         foot_states = (
             foot_contact[:, 0].long() * 0b1000
             + foot_contact[:, 1].long() * 0b0100
@@ -308,7 +308,7 @@ class QuadrupedalGaitPhaseL2Exp(BaseRewardTerm):
         task_context: TaskContext,
     ) -> torch.Tensor:
 
-        qpos = task_context.state["qpos"]
+        qpos = task_context.state.qpos
         base_pos = qpos[:, self.base_pos_qpos_ids]
         quaternion = qpos[:, self.base_quat_qpos_ids]
         quaternion = quaternion / quaternion.norm(
@@ -316,7 +316,7 @@ class QuadrupedalGaitPhaseL2Exp(BaseRewardTerm):
             keepdim=True,
         ).clamp_min(torch.finfo(quaternion.dtype).eps)
 
-        foot_pos = task_context.state["geom_xpos"][:, self.foot_geom_ids, :]
+        foot_pos = task_context.state.geom_xpos[:, self.foot_geom_ids, :]
 
         w = quaternion[:, 0:1]
         xyz = quaternion[:, 1:4]

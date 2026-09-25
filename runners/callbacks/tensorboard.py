@@ -221,7 +221,7 @@ class TensorboardCallback(BaseCallback):
             self.tensorboard_url = self._SERVER_URLS[self.tensorboard_root_dir]
             self._server_started = True
 
-        logger.info(f"TensorBoard dir: {self.tensorboard_log_dir}")
+        logger.info("TensorBoard dir: %s", self.tensorboard_log_dir.as_posix())
         logger.info(f"TensorBoard url: {self.tensorboard_url}")
         return True
 
@@ -329,6 +329,9 @@ class TensorboardCallback(BaseCallback):
             tensor = value.detach().float()
             if log:
                 for reduction in reductions - {"histogram"}:
+                    # Consume reusable step buffers synchronously. The
+                    # reduction returns a Python float, so the writer never
+                    # retains a reference to the source tensor.
                     reduced = self._reduce_tensor(tensor, reduction)
                     writer.add_scalar(
                         f"{name}/{reduction}",
@@ -337,6 +340,8 @@ class TensorboardCallback(BaseCallback):
                     )
 
             if "histogram" in reductions:
+                # The accumulator copies counts and scalar statistics into
+                # callback-owned tensors instead of retaining ``tensor``.
                 self._accumulate_histogram(name, tensor)
 
         if self.global_step % self.histogram_step_interval == 0:

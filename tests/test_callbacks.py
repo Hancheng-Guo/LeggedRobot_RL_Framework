@@ -9,6 +9,7 @@ import torch
 from runners.callbacks.checkpoint import CheckpointCallback
 from runners.callbacks.early_stopping import EarlystoppingCallback
 from runners.callbacks.logging import LoggingCallback
+from runners.callbacks.keyboard_interrupt import KeyboardInterruptCallback
 from runners.callbacks.progress_bar import ProgressBarCallback
 from runners.callbacks import tensorboard as tensorboard_module
 from runners.callbacks.tensorboard import TensorboardCallback
@@ -61,6 +62,21 @@ def make_runner() -> BaseRunner:
         rollout_length=1,
         algorithm=DummyAlgorithm(),
     ))
+
+
+def test_keyboard_interrupt_stops_and_saves_after_update(tmp_path: Path) -> None:
+    checkpoint_path = tmp_path / "latest.pt"
+    saved: list[bool] = []
+    runner = cast(BaseRunner, SimpleNamespace(
+        save=lambda: (saved.append(True), checkpoint_path)[1],
+    ))
+    callback = KeyboardInterruptCallback(runner)
+    callback._stop_requested = True
+
+    assert callback._on_step_end() is False
+    assert callback._on_iteration_end() is False
+    assert callback._on_train_end() is True
+    assert saved == [True]
 
 
 def make_context(save_dir: Path) -> RuntimeContext:
@@ -435,7 +451,7 @@ def test_logging_callback_reports_test_and_play_lifecycle(
     })
     callback._on_play_start()
     output_path = tmp_path / "videos" / "play.gif"
-    callback._on_play_end({"output_paths": [output_path]})
+    callback._on_play_end({"output_paths": [output_path], "frame_count": 12})
     session.close()
 
     content = (tmp_path / "logs" / "training.log").read_text(
@@ -444,7 +460,10 @@ def test_logging_callback_reports_test_and_play_lifecycle(
     assert "Testing started for stage 1." in content
     assert "Testing ended for stage 1: 3 episodes" in content
     assert "Playback started for stage 1." in content
-    assert f"Playback ended. Saved output to: {output_path}" in content
+    assert (
+        f"Playback ended. Saved output (12 frames per file) to: "
+        f"{output_path.as_posix()}"
+    ) in content
 
 
 def test_global_logger_uses_callback_handlers(
@@ -691,7 +710,7 @@ def test_tensorboard_starts_server_and_logs_returned_url(
     content = (tmp_path / "logs" / "training.log").read_text(
         encoding="utf-8"
     )
-    assert f"TensorBoard dir: {tensorboard.tensorboard_log_dir}" in content
+    assert f"TensorBoard dir: {tensorboard.tensorboard_log_dir.as_posix()}" in content
     assert "TensorBoard url: http://127.0.0.1:43123/" in content
     assert FakeTensorBoard.configured_argv == (
         "tensorboard",

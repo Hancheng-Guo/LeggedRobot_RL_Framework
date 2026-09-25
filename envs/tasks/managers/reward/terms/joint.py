@@ -26,22 +26,27 @@ class JointVelocityL2(BaseRewardTerm):
     ) -> torch.Tensor:
 
         return torch.mean(
-            task_context.state["qvel"][:, self.qvel_ids].square(),
+            task_context.state.qvel[:, self.qvel_ids].square(),
             dim=-1,
         )
 
 
 @register_reward
-class JointPositionL2(BaseRewardTerm):
+class JointPositionDiffL2(BaseRewardTerm):
 
     def __init__(
         self,
         model_context: ModelContext,
+        std: float = 1.0,
         *args, **kwargs,
     ) -> None:
         
         super().__init__(*args, **kwargs)
 
+        if std <= 0:
+            raise ValueError("'std' must be a positive float.")
+
+        self.std = std
         self.qpos_ids = model_context.joint_qpos_ids
         self.default_position = model_context.joint_default_pos
 
@@ -51,9 +56,10 @@ class JointPositionL2(BaseRewardTerm):
         task_context: TaskContext
     ) -> torch.Tensor:
         
-        position = task_context.state["qpos"][:, self.qpos_ids]
+        position = task_context.state.qpos[:, self.qpos_ids]
         error = position - self.default_position
-        return torch.sum(error.square(), dim=-1)
+        error_norm = error / self.std
+        return torch.mean(error_norm.square(), dim=-1)
 
 
 @register_reward
@@ -93,7 +99,7 @@ class JointLimitViolationL1(BaseRewardTerm):
         task_context: TaskContext
     ) -> torch.Tensor:
         
-        position = task_context.state["qpos"][:, self.qpos_ids]
+        position = task_context.state.qpos[:, self.qpos_ids]
         upper_excess = (position - self.upper_limits).clamp_min(0.0)
         lower_excess = (self.lower_limits - position).clamp_min(0.0)
         return torch.sum(upper_excess + lower_excess, dim=-1)
@@ -118,6 +124,6 @@ class JointPowerL1(BaseRewardTerm):
         task_context: TaskContext
     ) -> torch.Tensor:
         
-        joint_velocity = task_context.state["qvel"][:, self.qvel_ids]
-        actuator_force = task_context.state["actuator_force"]
-        return torch.sum((actuator_force * joint_velocity).abs(), dim=-1)
+        joint_velocity = task_context.state.qvel[:, self.qvel_ids]
+        actuator_force = task_context.state.actuator_force
+        return torch.mean((actuator_force * joint_velocity).abs(), dim=-1)

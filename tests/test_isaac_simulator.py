@@ -28,6 +28,10 @@ class FakeIsaacBackend:
         self.step_frame_skip: int | None = None
         self.closed = False
 
+    @property
+    def playback_env_index(self) -> int:
+        return 0
+
     def configure(self, **configuration: Any) -> None:
         self.configure_arguments = configuration
         self.num_envs = int(configuration["num_envs"])
@@ -74,10 +78,10 @@ class FakeIsaacBackend:
             "contact_forces": torch.zeros(count, 3, 6),
             "foot_ground_contact": torch.zeros(
                 count,
-                3,
                 2,
                 dtype=torch.bool,
             ),
+            "foot_contact_normal_force": torch.zeros(count, 2),
         }
 
     def render(self) -> np.ndarray:
@@ -207,7 +211,7 @@ def test_isaac_sim_forwards_reset_step_state_render_and_close(
     assert backend.reset_ids is env_ids
     assert backend.step_action is action
     assert backend.step_frame_skip == 10
-    assert state["qpos"].shape == (1, 9)
+    assert state.qpos.shape == (1, 9)
     assert frame is not None
     assert frame.shape == (4, 6, 3)
     assert backend.closed

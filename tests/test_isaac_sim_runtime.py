@@ -288,13 +288,10 @@ def test_render_returns_rgb_channels_after_camera_warmup() -> None:
     assert np.array_equal(frame, rgba[..., :3])
 
 
-def test_camera_follows_selected_environment_robot() -> None:
+def test_camera_follows_selected_environment_robot(runtime_context) -> None:
     poses: list[dict[str, Any]] = []
     runtime = IsaacSimRuntime.__new__(IsaacSimRuntime)
-    runtime.context = SimpleNamespace(
-        device=torch.device("cpu"),
-        dtype=torch.float32,
-    )
+    runtime.context = runtime_context
     runtime._camera_env_index = 1
     runtime._articulation = SimpleNamespace(
         get_world_poses=lambda: (
@@ -572,7 +569,9 @@ def test_precomputed_contact_layout_is_reused_for_state_queries(
     ]))
 
     runtime._prepare_state_buffers()
-    contact_ids, contact_forces, foot_contact = runtime._contact_state()
+    contact_ids, contact_forces, foot_contact, foot_contact_force = (
+        runtime._contact_state()
+    )
 
     assert runtime._indices(None) is runtime._all_env_indices
     assert contact_ids.tolist() == [
@@ -583,10 +582,10 @@ def test_precomputed_contact_layout_is_reused_for_state_queries(
         [0.0, 20.0],
         [5.0, 10.0],
     ]
-    assert foot_contact.squeeze(-1).tolist() == [
-        [False, True],
-        [False, False],
-    ]
+    assert foot_contact.tolist() == [[True], [False]]
+    torch.testing.assert_close(
+        foot_contact_force, torch.tensor([[20.0], [0.0]]),
+    )
 
 
 @pytest.mark.parametrize(

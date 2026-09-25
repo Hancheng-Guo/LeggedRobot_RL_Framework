@@ -1,4 +1,5 @@
 from collections.abc import Mapping, Sequence
+from datetime import datetime, tzinfo
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -14,11 +15,13 @@ from envs.registry import ENV_TYPE_MAP
 from rl.algorithms.base import OnPolicyAlgorithm, PolicyOutput
 from runners.callbacks.base import BaseCallback
 from runners.on_policy import OnPolicyRunner
+from runners import on_policy as on_policy_module
 from utils.component import Component, ComponentInfo
 
 
 class TrackingEnvironment(BaseEnv):
     instances: list["TrackingEnvironment"] = []
+    SUPPORTS_CONCURRENT_INSTANCES: bool = True
 
     def __init__(self, context: RuntimeContext) -> None:
         super().__init__(context)
@@ -314,7 +317,7 @@ def test_play_restores_original_environment_after_failure(
     monkeypatch.setattr(runner, "_play_steps", fail_during_play)
 
     with pytest.raises(RuntimeError, match="play failed"):
-        runner.play(num_steps=1)
+        runner.play(num_steps=1, formats="gif", num_plays=1)
 
     temporary_environment = TrackingEnvironment.instances[-1]
     assert temporary_environment is not original_environment
@@ -348,15 +351,75 @@ def test_play_reuses_environment_when_concurrent_instances_are_unsupported(
     monkeypatch.setattr(runner, "_play_steps", fail_during_play)
 
     with pytest.raises(RuntimeError, match="play failed"):
-        runner.play(num_steps=1)
+        runner.play(num_steps=1, formats="gif", num_plays=1)
 
     assert TrackingEnvironment.instances == [environment]
     assert environment.closed is False
     assert runner.environment is environment
 
 
+def test_playback_file_name_uses_stage_iteration_and_collision_suffix(
+    runtime_context: RuntimeContext,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz: tzinfo | None = None) -> "FixedDatetime":
+            return cls(2026, 9, 25, 14, 51, 31, tzinfo=tz)
+
+    monkeypatch.setattr(on_policy_module, "datetime", FixedDatetime)
+    runner = OnPolicyRunner(context=runtime_context)
+    runner.stage_index = 2
+    runner.current_iteration = 124
+    video_dir = tmp_path / "videos"
+    video_dir.mkdir()
+
+    first_name = "stage_002_iter_0125_20260925_145131_1"
+    assert runner._next_playback_file_name(video_dir) == first_name
+    (video_dir / f"{first_name}.gif").touch()
+    assert runner._next_playback_file_name(video_dir) == (
+        "stage_002_iter_0125_20260925_145131_2"
+    )
+
+
+def test_play_records_requested_number_of_plays(
+    runtime_context: RuntimeContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = OnPolicyRunner(context=runtime_context)
+    environment = TrackingEnvironment(runtime_context)
+    environment.SUPPORTS_CONCURRENT_INSTANCES = False
+    runner.environment = environment
+    runner.algorithm = MinimalAlgorithm(runtime_context)
+    recordings: list[int] = []
+
+    def record_playback(num_steps: int, formats: Any, frame_saver: Any) -> bool:
+        recordings.append(num_steps)
+        return True
+
+    monkeypatch.setattr(runner, "_play_steps", record_playback)
+    runner.play(num_steps=12, formats="gif", num_plays=3)
+
+    assert recordings == [12, 12, 12]
+
+
+@pytest.mark.parametrize("num_plays", [0, -1, True, 1.5])
+def test_play_rejects_invalid_play_count(
+    runtime_context: RuntimeContext,
+    num_plays: Any,
+) -> None:
+    runner = OnPolicyRunner(context=runtime_context)
+    runner.environment = TrackingEnvironment(runtime_context)
+    runner.algorithm = MinimalAlgorithm(runtime_context)
+
+    with pytest.raises(ValueError, match="num_plays"):
+        runner.play(num_steps=1, formats="gif", num_plays=num_plays)
+
+
 def test_play_stops_when_primary_environment_episode_ends(
     runtime_context: RuntimeContext,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class PlaybackEnvironment(TrackingEnvironment):
         def __init__(self, context: RuntimeContext) -> None:
@@ -383,8 +446,14 @@ def test_play_stops_when_primary_environment_episode_ends(
     runner.callbacks = []
     runner.algorithm = MinimalAlgorithm(runtime_context)
     runner.algorithm.set_eval_mode = lambda: None
-    runner.algorithm.act = lambda obs, deterministic: SimpleNamespace(
-        action=torch.zeros(2, 1)
+    monkeypatch.setattr(
+        runner.algorithm,
+        "act",
+        lambda obs, deterministic=False: PolicyOutput(
+            action=torch.zeros(2, 1),
+            log_prob=torch.zeros(2),
+            value=torch.zeros(2),
+        ),
     )
     runner.algorithm.reset_policy_state = lambda env_ids=None: None
     saved_frame_counts: list[int] = []
@@ -408,7 +477,9 @@ def test_play_warms_up_renderer_before_progress_callbacks(
     lifecycle: list[str] = []
 
     class WarmupEnvironment(TrackingEnvironment):
-        render_mode = "rgb_array"
+        @property
+        def render_mode(self) -> str:
+            return "rgb_array"
 
         def __init__(self, context: RuntimeContext) -> None:
             super().__init__(context)

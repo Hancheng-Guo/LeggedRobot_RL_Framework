@@ -3,7 +3,7 @@ runtime:
   dtype: float32
   num_threads: 4
   seed: null
-  deterministic_ops: true
+  deterministic_ops: false
 
 logging:
   file_name: training.log
@@ -15,35 +15,37 @@ stage:
       max_iterations: 500
       transition:
         - {metric: "rollout/mean_len", method: mean, operator: ">=", threshold: 900.0, window: 20}
+        - {metric: "reward/foot_contact_without_command", method: mean, operator: ">=", threshold: 1.0, window: 50}
 
   - velocity_tracking:
       max_iterations: 5000
       transition:
-        - {metric: "reward/track_linear_velocity_xy_l2_exp_and_logcosh", method: mean, operator: ">=", threshold: 9.0, window: 100}
-        - {metric: "reward/track_angular_velocity_z_l2_exp_and_logcosh", method: mean, operator: ">=", threshold: 4.5, window: 100}
+        - {metric: "reward/track_linear_velocity_x_l2_exp_and_logcosh", method: mean, operator: ">=", threshold: 1.8, window: 25}
+        - {metric: "reward/track_linear_velocity_y_l2_exp_and_logcosh", method: mean, operator: ">=", threshold: 1.8, window: 25}
+        - {metric: "reward/track_angular_velocity_z_l2_exp_and_logcosh", method: mean, operator: ">=", threshold: 0.9, window: 100}
         - {metric: "rollout/mean_len", method: mean, operator: ">=", threshold: 900.0, window: 100}
 
 
 component:
   runner:
     - type: on_policy
-      config: rl_unitree_go1
+      config: isaac_rollout_64
 
   algorithm:
     - type: ppo
-      config: ppo_unitree_go1_stage1
+      config: ppo_num_batch_32
 
   policy:
     - type: actor_critic
-      config: actor_critic_unitree_go1_velocity
+      config: actor_critic_direct_actuation
 
   environment:
     - type: vector_env
-      config: vector_env_1_unitree_go1
+      config: vector_env_1024
 
   simulator:
-    - type: mujoco
-      config: mujoco_unitree_go1_velocity
+    - type: isaac_sim
+      config: isaac_sim_unitree_go1_rgb_array
 
   task:
     - type: locomotion

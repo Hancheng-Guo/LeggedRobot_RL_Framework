@@ -1,6 +1,7 @@
 model_path: .\assets\unitree_go1\MJCF\scene.xml
 sim_dt: 0.002
 frame_skip: 10
+step_workers: 8
 render_mode: rgb_array
 foot_geom_names: [FR, FL, RR, RL]
 floor_geom_names: [floor]

@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from app.utils.context import RuntimeContext
 from envs.simulators.utils.context import ModelContext
 from envs.tasks.utils.context import TaskContext, TaskStepResult
+from envs.simulators.utils.state import SimulatorState
 from envs.tasks.managers.action.base import ActionManager
 from envs.tasks.managers.command.base import CommandManager
 from envs.tasks.managers.observation.base import ObservationManager
@@ -144,7 +145,7 @@ class BaseTaskLogic(ABC):
 
     def build_task_context(
         self,
-        state: dict[str, torch.Tensor],
+        state: SimulatorState,
         episode_step: torch.Tensor,
         step_dt: float,
         env_ids: torch.Tensor | None = None,
@@ -152,6 +153,7 @@ class BaseTaskLogic(ABC):
     
         if env_ids is None:
             command = self.command
+            last_command = self.last_command
             action = self.action
             last_action = self.last_action
 
@@ -161,6 +163,11 @@ class BaseTaskLogic(ABC):
                 for name, value
                 in self.command.items()
             }
+            last_command = {
+                name: value[env_ids]
+                for name, value
+                in self.last_command.items()
+            }
 
             action = self.action[env_ids]
             last_action = self.last_action[env_ids]
@@ -168,10 +175,12 @@ class BaseTaskLogic(ABC):
         return TaskContext(
             state=state,
             command=command,
+            last_command=last_command,
             action=action,
             last_action=last_action,
             episode_step=episode_step,
             step_dt=step_dt,
+            env_ids=env_ids,
         )
 
     
@@ -236,6 +245,11 @@ class BaseTaskLogic(ABC):
     @property
     def command(self) -> dict[str, torch.Tensor]:
         return self.command_manager.command
+
+
+    @property
+    def last_command(self) -> dict[str, torch.Tensor]:
+        return self.command_manager.last_command
 
 
     @property

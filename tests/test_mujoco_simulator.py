@@ -6,6 +6,7 @@ import pytest
 import torch
 
 from envs.simulators.mujoco import MujocoSimulator
+from envs.simulators.utils.state import SimulatorState
 from utils.component import Component
 
 
@@ -17,6 +18,8 @@ def _configure_go1_simulator(
     *,
     num_envs: int = 1,
     reset_keyframe: str | None = None,
+    frame_skip: int = 1,
+    step_workers: int = 1,
 ) -> MujocoSimulator:
     model_path = (
         Path(__file__).parents[1]
@@ -31,7 +34,8 @@ def _configure_go1_simulator(
         num_envs=num_envs,
         model_path=model_path,
         sim_dt=0.002,
-        frame_skip=1,
+        frame_skip=frame_skip,
+        step_workers=step_workers,
         foot_geom_names=(),
         floor_geom_names=(),
         reset_keyframe=reset_keyframe,
@@ -167,11 +171,12 @@ def test_mujoco_state_exposes_base_velocity_in_body_frame(runtime_context):
 
     state = simulator.get_state()
 
-    assert state["base_lin_vel_body"].shape == (1, 3)
-    assert state["base_ang_vel_body"].shape == (1, 3)
-    assert state["foot_ground_contact"].shape == (
+    assert isinstance(state, SimulatorState)
+
+    assert state.base_lin_vel_body.shape == (1, 3)
+    assert state.base_ang_vel_body.shape == (1, 3)
+    assert state.foot_ground_contact.shape == (
         1,
-        state["contact_geom_ids"].shape[1],
         simulator.model_context.foot_geom_ids.numel(),
     )
 
@@ -192,14 +197,43 @@ def test_mujoco_foot_ground_contact_applies_force_threshold(
     contact_forces = torch.zeros(1, 4, 6)
     contact_forces[0, :, 0] = torch.tensor([14.9, 15.0, -20.0, 30.0])
 
-    foot_ground_contact = simulator._get_foot_ground_contact(
+    foot_contact_state = simulator._get_foot_contact_state(
         contact_geom_ids,
         contact_forces,
     )
 
-    assert foot_ground_contact.squeeze(-1).tolist() == [
-        [False, True, True, False],
+    assert foot_contact_state["foot_ground_contact"].tolist() == [[True]]
+    torch.testing.assert_close(
+        foot_contact_state["foot_contact_normal_force"],
+        torch.tensor([[35.0]]),
+    )
+
+
+def test_mujoco_foot_ground_contact_excludes_zero_force_at_zero_threshold(
+    runtime_context,
+    model_context,
+):
+    simulator = MujocoSimulator(runtime_context)
+    simulator.model_context = model_context
+    simulator.foot_contact_force_threshold = 0.0
+    contact_geom_ids = torch.tensor([
+        [[3, 0], [0, 3]],
+        [[3, 0], [0, 3]],
+    ])
+    contact_forces = torch.zeros(2, 2, 6)
+    contact_forces[0, 1, 0] = 2.0
+
+    foot_contact_state = simulator._get_foot_contact_state(
+        contact_geom_ids, contact_forces,
+    )
+
+    assert foot_contact_state["foot_ground_contact"].tolist() == [
+        [True], [False],
     ]
+    torch.testing.assert_close(
+        foot_contact_state["foot_contact_normal_force"],
+        torch.tensor([[2.0], [0.0]]),
+    )
 
 
 def test_mujoco_reset_uses_configured_keyframe(runtime_context):
@@ -297,3 +331,146 @@ def test_mujoco_reconfiguration_does_not_reuse_stale_keyframe_id(
         simulator.datas[0].qpos,
         simulator.models[0].qpos0,
     )
+
+
+def test_mujoco_step_uses_native_nstep(runtime_context, monkeypatch):
+    simulator = _configure_go1_simulator(
+        runtime_context,
+        num_envs=2,
+        frame_skip=7,
+    )
+    calls = []
+
+    def record_step(model, data, *, nstep):
+        calls.append((model, data, nstep))
+
+    monkeypatch.setattr(mujoco, "mj_step", record_step)
+
+    try:
+        simulator.step(torch.zeros(2, simulator.model_context.nu))
+    finally:
+        simulator.close()
+
+    assert calls == [
+        (simulator.models[0], simulator.datas[0], 7),
+        (simulator.models[1], simulator.datas[1], 7),
+    ]
+
+
+def test_mujoco_step_reuses_persistent_executor(runtime_context):
+    simulator = _configure_go1_simulator(
+        runtime_context,
+        num_envs=2,
+        step_workers=2,
+    )
+    executor = simulator._step_executor
+
+    try:
+        action = torch.zeros(2, simulator.model_context.nu)
+        simulator.step(action)
+        simulator.step(action)
+        assert simulator._step_executor is executor
+    finally:
+        simulator.close()
+
+    assert executor is not None
+    assert simulator._step_executor is None
+
+
+def test_mujoco_rejects_invalid_step_workers(runtime_context):
+    simulator = MujocoSimulator(runtime_context)
+
+    with pytest.raises(ValueError, match="step_workers"):
+        simulator.config_update(
+            component=Component(None, None, None, None, None, None),
+            step_workers=0,
+        )
+
+
+def test_mujoco_parallel_step_matches_serial_trajectory(runtime_context):
+    serial = _configure_go1_simulator(
+        runtime_context,
+        num_envs=2,
+        frame_skip=10,
+    )
+    parallel = _configure_go1_simulator(
+        runtime_context,
+        num_envs=2,
+        frame_skip=10,
+        step_workers=2,
+    )
+
+    try:
+        serial.reset()
+        parallel.reset()
+        action = torch.linspace(
+            -0.2,
+            0.2,
+            steps=2 * serial.model_context.nu,
+        ).reshape(2, serial.model_context.nu)
+        for _ in range(20):
+            serial.step(action)
+            parallel.step(action)
+
+        for serial_data, parallel_data in zip(serial.datas, parallel.datas):
+            np.testing.assert_array_equal(serial_data.qpos, parallel_data.qpos)
+            np.testing.assert_array_equal(serial_data.qvel, parallel_data.qvel)
+    finally:
+        serial.close()
+        parallel.close()
+
+
+def test_mujoco_reuses_fixed_state_buffers(runtime_context):
+    simulator = _configure_go1_simulator(runtime_context, num_envs=2)
+    fixed_fields = (
+        "qpos",
+        "qvel",
+        "qacc",
+        "ctrl",
+        "geom_xpos",
+        "actuator_force",
+        "base_lin_vel_body",
+        "base_ang_vel_body",
+        "geom_xvel",
+    )
+
+    try:
+        simulator.reset()
+        first = simulator.get_state()
+        pointers = {
+            name: getattr(first, name).data_ptr()
+            for name in fixed_fields
+        }
+        second = simulator.get_state()
+
+        assert {
+            name: getattr(second, name).data_ptr()
+            for name in fixed_fields
+        } == pointers
+
+        subset = simulator.get_state(torch.tensor([0]))
+        assert all(
+            getattr(subset, name).data_ptr() != pointers[name]
+            for name in fixed_fields
+        )
+        assert all(
+            getattr(subset, name).shape[0] == 1
+            for name in fixed_fields
+        )
+        assert all(
+            getattr(simulator._reset_state_numpy_buffers, name).shape[0] == 2
+            for name in fixed_fields
+        )
+
+        larger_subset = simulator.get_state(torch.tensor([0, 1]))
+        assert all(
+            getattr(larger_subset, name).data_ptr()
+            == getattr(subset, name).data_ptr()
+            for name in fixed_fields
+        )
+        assert all(
+            getattr(larger_subset, name).shape[0] == 2
+            for name in fixed_fields
+        )
+    finally:
+        simulator.close()

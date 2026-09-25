@@ -1,0 +1,12 @@
+{
+    "include": ["app", "envs", "rl", "runners", "tests", "utils"],
+    "exclude": [
+        "tests/manual",
+        "tests/test_isaac_sim_runtime.py",
+        "tests/test_isaac_simulator.py",
+        "envs/simulators/isaac_sim.py",
+        "envs/simulators/isaac_sim_backend.py",
+        "envs/simulators/isaac_sim_model.py",
+        "envs/simulators/isaac_sim_runtime.py"
+    ]
+}

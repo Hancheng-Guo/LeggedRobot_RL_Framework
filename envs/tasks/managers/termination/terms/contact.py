@@ -76,7 +76,7 @@ class BodyContact(BaseTerminationTerm):
         task_context: TaskContext
     ) -> torch.Tensor:
         
-        contact_geom_ids = task_context.state["contact_geom_ids"]
+        contact_geom_ids = task_context.state.contact_geom_ids
         if contact_geom_ids.ndim != 3 or contact_geom_ids.shape[-1] != 2:
             raise ValueError(
                 "'contact_geom_ids' must have shape "

@@ -1,6 +1,8 @@
 constants:
-  base_target_height: &base_target_height 0.22
+  base_target_height: &base_target_height 0.2
   foot_lifted_height: &foot_lifted_height 0.1
+  integral_length: &integral_length 200
+  action_lags: &action_lags 3
 
 
 action_manager_config:
@@ -30,7 +32,10 @@ observation_manager_config:
     foot_duration_tanh: {scale: 1.0}
     foot_contact_state: {scale: 1.0}
     foot_height: {scale: 3.0}
-    last_action: {scale: 0.1, lags: 2}
+    last_action: {scale: 0.1, lags: *action_lags}
+    track_linear_velocity_x_error_integral_tanh: {scale: 1.0, integral_length: *integral_length}
+    track_linear_velocity_y_error_integral_tanh: {scale: 1.0, integral_length: *integral_length}
+    track_angular_velocity_z_error_integral_tanh: {scale: 1.0, integral_length: *integral_length}
 
 
 reward_manager_config:
@@ -38,15 +43,16 @@ reward_manager_config:
     track_linear_velocity_x_l2_exp_and_logcosh: {weight: 2.0, params: {logcosh_weight: 0.1}}
     track_linear_velocity_y_l2_exp_and_logcosh: {weight: 2.0, params: {logcosh_weight: 0.1}}
     track_angular_velocity_z_l2_exp_and_logcosh: {weight: 1.0, params: {logcosh_weight: 0.1, std: 2.5}}
-    # track_linear_velocity_xy_error_integral_l2: {weight: -1.0e-3, params: {integral_length: 25}}
-    # track_angular_velocity_z_error_integral_l2: {weight: -1.0e-3, params: {integral_length: 25}}
+    track_linear_velocity_x_error_integral_l2: {weight: -2.0, params: {integral_length: *integral_length}}
+    track_linear_velocity_y_error_integral_l2: {weight: -2.0, params: {integral_length: *integral_length}}
+    track_angular_velocity_z_error_integral_l2: {weight: -1.0, params: {integral_length: *integral_length}}
     
     base_height_l2: {weight: -0.5, params: {target_height: *base_target_height, std: 0.2}}
     base_linear_velocity_z_l2: {weight: -1.0}
     # base_angular_velocity_xy_l2: {weight: -1.0}
     projected_gravity_xy_l2: {weight: -2.0}
 
-    action_diff_l2: {weight: -0.2}
+    action_diff_l2: {weight: -0.2, params: {max_lag: *action_lags}}
 
     joint_velocity_l2: {weight: -0.02}
     joint_position_diff_l2: {weight: -5.0}
@@ -57,11 +63,11 @@ reward_manager_config:
 
     trot_loop_duration_tanh: {weight: 5.0, params: {growth_rate: 5.0}}
     # quadrupedal_foot_velocity_diff_l2: {weight: -1.0}
-    foot_state_switch: {weight: -0.5}
+    foot_state_switch: {weight: -1.0}
     foot_state_duration_cubic_command_weighed_exp: {weight: 0.2, params: {sigma: 0.5}}
     foot_sliding_velocity_l2: {weight: -1.0}
     foot_contact_without_command: {weight: 2.0}
-    # foot_lift_height_diff_command_gated_l2: {weight: -1.0, params: {target_height: *foot_lifted_height}}
+    foot_lift_height_diff_command_gated_l2: {weight: -1.0, params: {target_height: *foot_lifted_height}}
 
 
 termination_manager_config:

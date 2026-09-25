@@ -15,6 +15,7 @@ stage:
       max_iterations: 500
       transition:
         - {metric: "rollout/mean_len", method: mean, operator: ">=", threshold: 900.0, window: 20}
+        - {metric: "reward/foot_contact_without_command", method: mean, operator: ">=", threshold: 1.0, window: 50}
 
   - velocity_tracking:
       max_iterations: 5000

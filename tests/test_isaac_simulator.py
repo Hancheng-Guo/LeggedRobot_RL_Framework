@@ -28,6 +28,10 @@ class FakeIsaacBackend:
         self.step_frame_skip: int | None = None
         self.closed = False
 
+    @property
+    def playback_env_index(self) -> int:
+        return 0
+
     def configure(self, **configuration: Any) -> None:
         self.configure_arguments = configuration
         self.num_envs = int(configuration["num_envs"])

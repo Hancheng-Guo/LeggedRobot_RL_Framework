@@ -251,7 +251,9 @@ class StageCallback(BaseCallback):
         self,
         state: Mapping[str, Any],
     ) -> None:
-        condition_values = state.get("condition_values", ())
+        condition_values: Sequence[Sequence[float]] = state.get(
+            "condition_values", ()
+        )
         if len(condition_values) != len(self._conditions):
             raise ValueError(
                 "Checkpoint stage-condition count does not match configuration."

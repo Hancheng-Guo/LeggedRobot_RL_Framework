@@ -3,7 +3,7 @@ from typing import Any
 
 import numpy as np
 import pytest
-from PIL import Image
+from PIL import GifImagePlugin, Image
 
 from runners.utils import frames as frames_module
 from runners.utils.frames import save_frames_to_video
@@ -26,6 +26,7 @@ def test_save_frames_chooses_format_and_suffix(tmp_path: Path) -> None:
     output_path = output_paths[0]
     assert output_path.is_file()
     with Image.open(output_path) as image:
+        assert isinstance(image, GifImagePlugin.GifImageFile)
         assert image.format == "GIF"
         assert image.n_frames == 2
         assert image.info["duration"] == 50

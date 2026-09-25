@@ -615,6 +615,7 @@ class OnPolicyRunner(BaseRunner):
         self,
         num_steps: int = 5000,
         formats: VideoFormat | VideoFormats = "gif",
+        num_plays: int = 1,
     ) -> None:
         try:
             from runners.utils.frames import save_frames_to_video
@@ -636,6 +637,12 @@ class OnPolicyRunner(BaseRunner):
             or num_steps <= 0
         ):
             raise ValueError("'num_steps' must be a positive integer.")
+        if (
+            not isinstance(num_plays, int)
+            or isinstance(num_plays, bool)
+            or num_plays <= 0
+        ):
+            raise ValueError("'num_plays' must be a positive integer.")
 
         original_environment = self.environment
         temporary_environment: BaseEnv | None = None
@@ -646,11 +653,15 @@ class OnPolicyRunner(BaseRunner):
             self.environment = temporary_environment
 
         try:
-            self._play_steps(
-                num_steps,
-                formats,
-                save_frames_to_video,
-            )
+            for play_index in range(num_plays):
+                if not self._play_steps(
+                    num_steps,
+                    formats,
+                    save_frames_to_video,
+                ):
+                    break
+                if play_index + 1 < num_plays:
+                    self.algorithm.reset_policy_state()
         finally:
             self.algorithm.reset_policy_state()
             if temporary_environment is not None:
@@ -663,7 +674,8 @@ class OnPolicyRunner(BaseRunner):
         num_steps: int,
         formats: VideoFormat | VideoFormats,
         frame_saver: Callable[..., list[Path]],
-    ) -> None:
+    ) -> bool:
+        
         if not hasattr(self, "environment"):
             raise RuntimeError("environment is not instantiated.")
 
@@ -679,13 +691,15 @@ class OnPolicyRunner(BaseRunner):
             num_steps=num_steps,
         ):
             self._run_callbacks("_on_play_end")
-            return
+            return False
 
         frames: list[np.ndarray] = []
         step = 0
+        stopped_by_callback = False
         while step < num_steps:
 
             if not self._run_callbacks("_on_step_start"):
+                stopped_by_callback = True
                 break
 
             with torch.no_grad():
@@ -721,6 +735,7 @@ class OnPolicyRunner(BaseRunner):
             obs = next_obs
 
             if not self._run_callbacks("_on_step_end", info=info):
+                stopped_by_callback = True
                 break
             step += 1
             if playback_done:
@@ -743,6 +758,7 @@ class OnPolicyRunner(BaseRunner):
                 "output_paths": output_paths,
             },
         )
+        return not stopped_by_callback
 
 
     def _next_playback_file_name(self, directory: Path) -> str:

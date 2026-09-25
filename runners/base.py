@@ -75,6 +75,7 @@ class BaseRunner(ABC):
         self,
         num_steps: int = 5000,
         formats: VideoFormat | VideoFormats = "gif",
+        num_plays: int = 1,
     ) -> None:
         raise NotImplementedError
 

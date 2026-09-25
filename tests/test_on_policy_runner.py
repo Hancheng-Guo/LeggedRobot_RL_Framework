@@ -383,6 +383,40 @@ def test_playback_file_name_uses_stage_iteration_and_collision_suffix(
     )
 
 
+def test_play_records_requested_number_of_plays(
+    runtime_context: RuntimeContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = OnPolicyRunner(context=runtime_context)
+    environment = TrackingEnvironment(runtime_context)
+    environment.SUPPORTS_CONCURRENT_INSTANCES = False
+    runner.environment = environment
+    runner.algorithm = MinimalAlgorithm(runtime_context)
+    recordings: list[int] = []
+
+    def record_playback(num_steps: int, formats: Any, frame_saver: Any) -> bool:
+        recordings.append(num_steps)
+        return True
+
+    monkeypatch.setattr(runner, "_play_steps", record_playback)
+    runner.play(num_steps=12, num_plays=3)
+
+    assert recordings == [12, 12, 12]
+
+
+@pytest.mark.parametrize("num_plays", [0, -1, True, 1.5])
+def test_play_rejects_invalid_play_count(
+    runtime_context: RuntimeContext,
+    num_plays: Any,
+) -> None:
+    runner = OnPolicyRunner(context=runtime_context)
+    runner.environment = TrackingEnvironment(runtime_context)
+    runner.algorithm = MinimalAlgorithm(runtime_context)
+
+    with pytest.raises(ValueError, match="num_plays"):
+        runner.play(num_steps=1, num_plays=num_plays)
+
+
 def test_play_stops_when_primary_environment_episode_ends(
     runtime_context: RuntimeContext,
     monkeypatch: pytest.MonkeyPatch,

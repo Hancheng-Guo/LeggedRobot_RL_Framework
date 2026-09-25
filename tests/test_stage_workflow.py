@@ -210,6 +210,7 @@ class WorkflowRunner(BaseRunner):
         self,
         num_steps: int = 5000,
         formats: VideoFormat | VideoFormats = "gif",
+        num_plays: int = 1,
     ) -> None:
         self.play_calls.append(num_steps)
 

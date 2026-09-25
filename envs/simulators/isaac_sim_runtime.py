@@ -234,6 +234,7 @@ class IsaacSimRuntime:
             physics_prim_path="/World/physicsScene",
         )
         physics_context = self._world.get_physics_context()
+        self._log_physics_device(physics_context, "before reset")
         aggregate_pairs_capacity = max(1024, self.num_envs * 64)
         if (
             physics_context.get_gpu_found_lost_aggregate_pairs_capacity()
@@ -357,8 +358,30 @@ class IsaacSimRuntime:
         # Initialize every physics-backed view together through the simulation
         # manager callbacks triggered by reset.
         self._world.reset()
+        self._log_physics_device(physics_context, "after reset")
         if self._camera is not None:
             self._camera.initialize()
+
+
+    def _log_physics_device(self, physics_context: Any, phase: str) -> None:
+        """Record the actual PhysX settings for diagnostics on the Isaac host."""
+
+        LOGGER.info(
+            "PhysX configuration (%s):\n"
+            "  requested tensor device: %s\n"
+            "  simulation device: %s\n"
+            "  GPU simulation: %s\n"
+            "  GPU pipeline: %s\n"
+            "  GPU dynamics: %s\n"
+            "  broadphase: %s",
+            phase,
+            self.context.device,
+            self._simulation_manager.get_physics_sim_device(),
+            physics_context.use_gpu_sim,
+            physics_context.use_gpu_pipeline,
+            physics_context.is_gpu_dynamics_enabled(),
+            physics_context.get_broadphase_type(),
+        )
 
 
     def _build_camera(self, camera_type: Any) -> None:

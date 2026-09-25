@@ -1,0 +1,25 @@
+{
+    "python-envs.defaultEnvManager": "ms-python.python:conda",
+    "python-envs.defaultPackageManager": "ms-python.python:conda",
+    "python.testing.pytestArgs": [
+        "tests"
+    ],
+    "python.testing.pytestEnabled": true,
+    "python.envFile": "${workspaceFolder}/.env",
+    "explorer.autoReveal": false,
+    "outline.collapseItems": "alwaysCollapse",
+    "workbench.colorCustomizations": {
+        "editor.wordHighlightBackground": "#FFD70030",
+        "editor.wordHighlightBorder": "#a68d00",
+        "editor.wordHighlightStrongBackground": "#FF8C0040",
+        "editor.wordHighlightStrongBorder": "#a94c00",
+
+        "editor.lineHighlightBackground": "#ffffff20",
+
+        "editor.findMatchHighlightBackground": "#0088ff36",
+        "editor.findMatchHighlightBorder": "#007adf",
+        "editor.findMatchBackground": "#95ff003e",
+        "editor.findMatchBorder": "#47b100"
+    }
+
+}

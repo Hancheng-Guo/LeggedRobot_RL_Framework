@@ -1,9 +1,9 @@
 .pytest*/
-.vscode/
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
+!.vscode/settings.json
 __pycache__/
 checkpoints
-
-pytest.ini
-pyrightconfig.json
 
 /temp*

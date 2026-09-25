@@ -1,0 +1,8 @@
+{
+    "include": ["app", "envs", "rl", "runners", "tests", "utils"],
+    "exclude": [
+        "tests/manual",
+        "tests/test_mujoco_simulator.py",
+        "envs/simulators/mujoco.py"
+    ]
+}

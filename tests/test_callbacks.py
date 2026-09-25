@@ -444,7 +444,7 @@ def test_logging_callback_reports_test_and_play_lifecycle(
     assert "Testing started for stage 1." in content
     assert "Testing ended for stage 1: 3 episodes" in content
     assert "Playback started for stage 1." in content
-    assert f"Playback ended. Saved output to: {output_path}" in content
+    assert f"Playback ended. Saved output to: {output_path.as_posix()}" in content
 
 
 def test_global_logger_uses_callback_handlers(
@@ -691,7 +691,7 @@ def test_tensorboard_starts_server_and_logs_returned_url(
     content = (tmp_path / "logs" / "training.log").read_text(
         encoding="utf-8"
     )
-    assert f"TensorBoard dir: {tensorboard.tensorboard_log_dir}" in content
+    assert f"TensorBoard dir: {tensorboard.tensorboard_log_dir.as_posix()}" in content
     assert "TensorBoard url: http://127.0.0.1:43123/" in content
     assert FakeTensorBoard.configured_argv == (
         "tensorboard",

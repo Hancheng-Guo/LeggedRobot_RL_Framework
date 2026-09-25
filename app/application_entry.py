@@ -89,6 +89,16 @@ class ApplicationEntry:
             log_file=self.save_dir / "logs" / file_name,
             console=console,
         )
+        logger.info(
+            "Application %s initialized.\n"
+            "  Config: %s\n"
+            "  Output: %s\n"
+            "  Log: %s",
+            self.app_name,
+            (self.load_dir / "configs" / f"{self.app_name}.yaml").as_posix(),
+            self.save_dir.as_posix(),
+            (self.save_dir / "logs" / file_name).as_posix(),
+        )
 
         try:
             configured_runtime = self.config.get("runtime")
@@ -155,6 +165,7 @@ class ApplicationEntry:
     def train(self) -> None:
         self._ensure_open()
         self._save_configs()
+        logger.info("Training configuration saved to %s.", (self.save_dir / "configs").as_posix())
         self.stage_manager.train()
 
 

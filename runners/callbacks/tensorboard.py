@@ -221,7 +221,7 @@ class TensorboardCallback(BaseCallback):
             self.tensorboard_url = self._SERVER_URLS[self.tensorboard_root_dir]
             self._server_started = True
 
-        logger.info(f"TensorBoard dir: {self.tensorboard_log_dir}")
+        logger.info("TensorBoard dir: %s", self.tensorboard_log_dir.as_posix())
         logger.info(f"TensorBoard url: {self.tensorboard_url}")
         return True
 

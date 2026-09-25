@@ -112,7 +112,7 @@ class LoggingCallback(BaseCallback):
         if output_paths:
             self.logger.info(
                 "Playback ended. Saved output to: %s",
-                ", ".join(str(path) for path in output_paths),
+                ", ".join(path.as_posix() for path in output_paths),
             )
         else:
             self.logger.warning(

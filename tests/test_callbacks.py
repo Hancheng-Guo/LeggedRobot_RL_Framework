@@ -451,7 +451,7 @@ def test_logging_callback_reports_test_and_play_lifecycle(
     })
     callback._on_play_start()
     output_path = tmp_path / "videos" / "play.gif"
-    callback._on_play_end({"output_paths": [output_path]})
+    callback._on_play_end({"output_paths": [output_path], "frame_count": 12})
     session.close()
 
     content = (tmp_path / "logs" / "training.log").read_text(
@@ -460,7 +460,10 @@ def test_logging_callback_reports_test_and_play_lifecycle(
     assert "Testing started for stage 1." in content
     assert "Testing ended for stage 1: 3 episodes" in content
     assert "Playback started for stage 1." in content
-    assert f"Playback ended. Saved output to: {output_path.as_posix()}" in content
+    assert (
+        f"Playback ended. Saved output (12 frames per file) to: "
+        f"{output_path.as_posix()}"
+    ) in content
 
 
 def test_global_logger_uses_callback_handlers(

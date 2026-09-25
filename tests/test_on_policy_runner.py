@@ -1,4 +1,5 @@
 from collections.abc import Mapping, Sequence
+from datetime import datetime, tzinfo
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -14,11 +15,13 @@ from envs.registry import ENV_TYPE_MAP
 from rl.algorithms.base import OnPolicyAlgorithm, PolicyOutput
 from runners.callbacks.base import BaseCallback
 from runners.on_policy import OnPolicyRunner
+from runners import on_policy as on_policy_module
 from utils.component import Component, ComponentInfo
 
 
 class TrackingEnvironment(BaseEnv):
     instances: list["TrackingEnvironment"] = []
+    SUPPORTS_CONCURRENT_INSTANCES: bool = True
 
     def __init__(self, context: RuntimeContext) -> None:
         super().__init__(context)
@@ -355,8 +358,34 @@ def test_play_reuses_environment_when_concurrent_instances_are_unsupported(
     assert runner.environment is environment
 
 
+def test_playback_file_name_uses_stage_iteration_and_collision_suffix(
+    runtime_context: RuntimeContext,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz: tzinfo | None = None) -> "FixedDatetime":
+            return cls(2026, 9, 25, 14, 51, 31, tzinfo=tz)
+
+    monkeypatch.setattr(on_policy_module, "datetime", FixedDatetime)
+    runner = OnPolicyRunner(context=runtime_context)
+    runner.stage_index = 2
+    runner.current_iteration = 124
+    video_dir = tmp_path / "videos"
+    video_dir.mkdir()
+
+    first_name = "stage_002_iter_0125_20260925_145131_1"
+    assert runner._next_playback_file_name(video_dir) == first_name
+    (video_dir / f"{first_name}.gif").touch()
+    assert runner._next_playback_file_name(video_dir) == (
+        "stage_002_iter_0125_20260925_145131_2"
+    )
+
+
 def test_play_stops_when_primary_environment_episode_ends(
     runtime_context: RuntimeContext,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class PlaybackEnvironment(TrackingEnvironment):
         def __init__(self, context: RuntimeContext) -> None:
@@ -383,8 +412,14 @@ def test_play_stops_when_primary_environment_episode_ends(
     runner.callbacks = []
     runner.algorithm = MinimalAlgorithm(runtime_context)
     runner.algorithm.set_eval_mode = lambda: None
-    runner.algorithm.act = lambda obs, deterministic: SimpleNamespace(
-        action=torch.zeros(2, 1)
+    monkeypatch.setattr(
+        runner.algorithm,
+        "act",
+        lambda obs, deterministic=False: PolicyOutput(
+            action=torch.zeros(2, 1),
+            log_prob=torch.zeros(2),
+            value=torch.zeros(2),
+        ),
     )
     runner.algorithm.reset_policy_state = lambda env_ids=None: None
     saved_frame_counts: list[int] = []
@@ -408,7 +443,9 @@ def test_play_warms_up_renderer_before_progress_callbacks(
     lifecycle: list[str] = []
 
     class WarmupEnvironment(TrackingEnvironment):
-        render_mode = "rgb_array"
+        @property
+        def render_mode(self) -> str:
+            return "rgb_array"
 
         def __init__(self, context: RuntimeContext) -> None:
             super().__init__(context)

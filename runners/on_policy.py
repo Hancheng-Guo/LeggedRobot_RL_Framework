@@ -3,6 +3,7 @@ from __future__ import annotations
 import warnings
 import torch
 import numpy as np
+from datetime import datetime
 from pathlib import Path
 from collections import deque
 from collections.abc import Callable, Mapping, Sequence
@@ -727,10 +728,12 @@ class OnPolicyRunner(BaseRunner):
 
         output_paths: list[Path] = []
         if frames:
+            video_dir = Path(self.context.save_dir) / "videos"
             output_paths = frame_saver(
                 frames,
-                directory=Path(self.context.save_dir) / "videos",
+                directory=video_dir,
                 fps=self.environment.render_fps,
+                file_name=self._next_playback_file_name(video_dir),
                 formats=formats,
             )
         self._run_callbacks(
@@ -740,6 +743,17 @@ class OnPolicyRunner(BaseRunner):
                 "output_paths": output_paths,
             },
         )
+
+
+    def _next_playback_file_name(self, directory: Path) -> str:
+        stage = self.stage_index if self.stage_index is not None else 0
+        iteration = self.current_iteration + 1
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        prefix = f"stage_{stage:03d}_iter_{iteration:04d}_{timestamp}"
+        number = 1
+        while any(directory.glob(f"{prefix}_{number}.*")):
+            number += 1
+        return f"{prefix}_{number}"
 
 
     def _warm_up_playback_renderer(self, max_frames: int = 120) -> None:

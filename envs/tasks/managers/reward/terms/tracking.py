@@ -1,9 +1,7 @@
 import math
-
 import torch
 from collections.abc import Sequence
 
-from envs.simulators.utils.context import ModelContext
 from envs.tasks.managers.reward.terms.base import BaseRewardTerm
 from envs.tasks.managers.reward.terms.registry import register_reward
 from envs.tasks.managers.reward.terms.utils import command_vector
@@ -43,6 +41,57 @@ class _BaseCommandTracking(BaseRewardTerm):
     ) -> torch.Tensor:
         
         return command_vector(task_context, self.command_names)
+
+
+class _BaseVelocityErrorIntegralL2(_BaseCommandTracking):
+
+    def __init__(
+        self,
+        num_envs: int,
+        integral_length: int = 100,
+        *args, **kwargs,
+    ) -> None:
+
+        super().__init__(*args, **kwargs)
+
+        if (
+            not isinstance(integral_length, int)
+            or isinstance(integral_length, bool)
+            or integral_length < 1
+        ):
+            raise ValueError("'integral_length' must be a positive integer.")
+
+        self.integral_length = integral_length
+        self.error_history = torch.zeros(
+            (num_envs, integral_length),
+            dtype=self.context.dtype,
+            device=self.context.device,
+        )
+
+
+    def _compute_integral(
+        self,
+        task_context: TaskContext,
+        velocity: torch.Tensor,
+    ) -> torch.Tensor:
+
+        command = self.command_vector(task_context)
+        target = _command_target_check(command, velocity)
+        error = target - velocity
+        self.error_history = torch.roll(self.error_history, shifts=-1, dims=-1)
+        self.error_history[:, -1] = error.squeeze(-1) * task_context.step_dt
+        return self.error_history.sum(dim=-1).square()
+
+
+    def reset(
+        self,
+        env_ids: torch.Tensor | None = None
+    ) -> None:
+
+        if env_ids is None:
+            self.error_history.zero_()
+        else:
+            self.error_history[env_ids] = 0.0
 
 
 @register_reward
@@ -301,60 +350,6 @@ class TrackLinearVelocityYL2ExpAndLogcosh(_BaseCommandTracking):
 
 
 @register_reward
-class TrackLinearVelocityXyErrorIntegralL2(_BaseCommandTracking):
-
-    def __init__(
-        self,
-        num_envs: int,
-        integral_length: int = 100,
-        command_names: Sequence[str] = ("lin_vel_x", "lin_vel_y"),
-        *args, **kwargs,
-    ) -> None:
-
-        super().__init__(command_names=command_names, *args, **kwargs)
-
-        if (
-            not isinstance(integral_length, int)
-            or isinstance(integral_length, bool)
-            or integral_length < 1
-        ):
-            raise ValueError("'integral_length' must be a positive integer.")
-
-        self.integral_length = integral_length
-        self.error_history = torch.zeros(
-            (num_envs, integral_length, 2),
-            dtype=self.context.dtype,
-            device=self.context.device,
-        )
-
-
-    def compute(
-        self,
-        task_context: TaskContext
-    ) -> torch.Tensor:
-
-        command = self.command_vector(task_context)
-        velocity = task_context.state.base_lin_vel_body[:, :2]
-        target = _command_target_check(command, velocity)
-        error = target - velocity
-        self.error_history = torch.roll(self.error_history, shifts=-1, dims=1)
-        self.error_history[:, -1] = error * task_context.step_dt
-        integral_error = self.error_history.sum(dim=1)
-        return integral_error.square().sum(dim=-1)
-
-
-    def reset(
-        self,
-        env_ids: torch.Tensor | None = None
-    ) -> None:
-
-        if env_ids is None:
-            self.error_history.zero_()
-        else:
-            self.error_history[env_ids] = 0.0
-
-
-@register_reward
 class TrackAngularVelocityZL2Exp(_BaseCommandTracking):
 
     def __init__(
@@ -438,30 +433,17 @@ class TrackAngularVelocityZL2ExpAndLogcosh(_BaseCommandTracking):
 
 
 @register_reward
-class TrackAngularVelocityZErrorIntegralL2(_BaseCommandTracking):
+class TrackLinearVelocityXErrorIntegralL2(_BaseVelocityErrorIntegralL2):
 
     def __init__(
         self,
-        num_envs: int,
-        integral_length: int = 100,
-        command_names: Sequence[str] = ("ang_vel_z",),
+        command_names: Sequence[str] = ("lin_vel_x",),
         *args, **kwargs,
     ) -> None:
         
-        super().__init__(command_names=command_names, *args, **kwargs)
-
-        if (
-            not isinstance(integral_length, int)
-            or isinstance(integral_length, bool)
-            or integral_length < 1
-        ):
-            raise ValueError("'integral_length' must be a positive integer.")
-
-        self.integral_length = integral_length
-        self.error_history = torch.zeros(
-            (num_envs, integral_length),
-            dtype=self.context.dtype,
-            device=self.context.device,
+        super().__init__(
+            command_names=command_names,
+            *args, **kwargs
         )
 
 
@@ -469,22 +451,58 @@ class TrackAngularVelocityZErrorIntegralL2(_BaseCommandTracking):
         self,
         task_context: TaskContext
     ) -> torch.Tensor:
-
-        command = self.command_vector(task_context)
-        velocity = task_context.state.base_ang_vel_body[:, 2:3]
-        target = _command_target_check(command, velocity)
-        error = target - velocity
-        self.error_history = torch.roll(self.error_history, shifts=-1, dims=-1)
-        self.error_history[:, -1] = error.squeeze(-1) * task_context.step_dt
-        return self.error_history.sum(dim=-1).square()
+        
+        return self._compute_integral(
+            task_context,
+            task_context.state.base_lin_vel_body[:, 0:1]
+        )
 
 
-    def reset(
+@register_reward
+class TrackLinearVelocityYErrorIntegralL2(_BaseVelocityErrorIntegralL2):
+
+    def __init__(
         self,
-        env_ids: torch.Tensor | None = None
+        command_names: Sequence[str] = ("lin_vel_y",),
+        *args, **kwargs,
     ) -> None:
+        
+        super().__init__(
+            command_names=command_names,
+            *args, **kwargs
+        )
 
-        if env_ids is None:
-            self.error_history.zero_()
-        else:
-            self.error_history[env_ids] = 0.0
+
+    def compute(
+        self,
+        task_context: TaskContext
+    ) -> torch.Tensor:
+        
+        return self._compute_integral(
+            task_context, task_context.state.base_lin_vel_body[:, 1:2]
+        )
+
+
+@register_reward
+class TrackAngularVelocityZErrorIntegralL2(_BaseVelocityErrorIntegralL2):
+
+    def __init__(
+        self,
+        command_names: Sequence[str] = ("ang_vel_z",),
+        *args, **kwargs,
+    ) -> None:
+        
+        super().__init__(
+            command_names=command_names,
+            *args, **kwargs
+        )
+
+
+    def compute(
+        self,
+        task_context: TaskContext
+    ) -> torch.Tensor:
+        
+        return self._compute_integral(
+            task_context, task_context.state.base_ang_vel_body[:, 2:3]
+        )

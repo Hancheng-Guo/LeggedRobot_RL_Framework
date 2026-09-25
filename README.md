@@ -588,9 +588,11 @@ term 顺序决定最终 observation 的拼接顺序。所有 observation term �
 | `foot_contact_normal_force` | 足端法向接触力 |
 | `foot_contact_state` | 足端接触状态 |
 | `command` | 所有命令拼接结果 |
-| `track_linear_velocity_xy_error_integral` | 最近 `integral_length` 步的有符号 XY 速度误差积分，输出 X、Y 两维 |
-| `track_angular_velocity_z_error_integral` | 最近 `integral_length` 步的有符号 Z 角速度误差积分，输出一维 |
-| `track_linear_velocity_xy_error_integral_tanh` | 对 XY 误差积分逐分量计算 `tanh(alpha * integral)`；默认 `alpha=1.0` |
+| `track_linear_velocity_x_error_integral` | 最近 `integral_length` 步的有符号 X 速度误差积分 |
+| `track_linear_velocity_y_error_integral` | 最近 `integral_length` 步的有符号 Y 速度误差积分 |
+| `track_angular_velocity_z_error_integral` | 最近 `integral_length` 步的有符号 Z 角速度误差积分 |
+| `track_linear_velocity_x_error_integral_tanh` | 对 X 误差积分计算 `tanh(alpha * integral)`；默认 `alpha=1.0` |
+| `track_linear_velocity_y_error_integral_tanh` | 对 Y 误差积分计算 `tanh(alpha * integral)`；默认 `alpha=1.0` |
 | `track_angular_velocity_z_error_integral_tanh` | 对 Z 误差积分计算 `tanh(alpha * integral)`；默认 `alpha=1.0` |
 | `last_action` | 最近 `lags` 步策略动作，按从新到旧排列（默认 `lags: 1`） |
 
@@ -624,7 +626,8 @@ reward_manager_config:
 | `projected_gravity_xy_l2` | — |
 | `track_linear_velocity_xy_l2_exp` | `x_std=1.0`、`y_std=1.0`、`command_names=[lin_vel_x, lin_vel_y]` |
 | `track_linear_velocity_xy_l2_exp_and_logcosh` | 上述参数 + `logcosh_weight=0.5` |
-| `track_linear_velocity_xy_error_integral_l2` | 最近 `integral_length` 步的 XY 有符号误差乘 `step_dt` 后分别积分，再取 L2 平方；默认 `integral_length=100`、`command_names=[lin_vel_x, lin_vel_y]` |
+| `track_linear_velocity_x_error_integral_l2` | 最近 `integral_length` 步的 X 有符号速度误差乘 `step_dt` 后积分，再取平方；默认 `integral_length=100` |
+| `track_linear_velocity_y_error_integral_l2` | 最近 `integral_length` 步的 Y 有符号速度误差乘 `step_dt` 后积分，再取平方；默认 `integral_length=100` |
 | `track_angular_velocity_z_l2_exp` | `std=1.0`、`command_names=[ang_vel_z]` |
 | `track_angular_velocity_z_l2_exp_and_logcosh` | `std=1.0`、`command_names=[ang_vel_z]`、`logcosh_weight=0.5` |
 | `track_angular_velocity_z_error_integral_l2` | 最近 `integral_length` 步的 Z 有符号误差乘 `step_dt` 后积分，再取平方；默认 `integral_length=100`、`command_names=[ang_vel_z]` |

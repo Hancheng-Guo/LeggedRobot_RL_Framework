@@ -214,7 +214,10 @@ def test_velocity_error_integral_observations_track_signed_history(
         command_dim=3,
         action_dim=2,
         terms={
-            "track_linear_velocity_xy_error_integral": {
+            "track_linear_velocity_x_error_integral": {
+                "integral_length": 2,
+            },
+            "track_linear_velocity_y_error_integral": {
                 "integral_length": 2,
             },
             "track_angular_velocity_z_error_integral": {
@@ -284,7 +287,7 @@ def test_velocity_error_integral_observations_reject_invalid_length(
             command_dim=3,
             action_dim=2,
             terms={
-                "track_linear_velocity_xy_error_integral": {
+                "track_linear_velocity_x_error_integral": {
                     "integral_length": integral_length,
                 },
             },
@@ -302,10 +305,16 @@ def test_tanh_velocity_error_integrals_map_signed_integrals(
         command_dim=3,
         action_dim=2,
         terms={
-            "track_linear_velocity_xy_error_integral": {
+            "track_linear_velocity_x_error_integral": {
                 "integral_length": 2,
             },
-            "track_linear_velocity_xy_error_integral_tanh": {
+            "track_linear_velocity_y_error_integral": {
+                "integral_length": 2,
+            },
+            "track_linear_velocity_x_error_integral_tanh": {
+                "integral_length": 2, "alpha": 2.0,
+            },
+            "track_linear_velocity_y_error_integral_tanh": {
                 "integral_length": 2, "alpha": 2.0,
             },
             "track_angular_velocity_z_error_integral": {
@@ -329,7 +338,8 @@ def test_tanh_velocity_error_integrals_map_signed_integrals(
     z_integral = torch.full((2, 1), 0.3)
     expected = torch.cat((
         xy_integral,
-        torch.tanh(2.0 * xy_integral),
+        torch.tanh(2.0 * xy_integral[:, :1]),
+        torch.tanh(2.0 * xy_integral[:, 1:2]),
         z_integral,
         torch.tanh(2.0 * z_integral),
     ), dim=-1)
@@ -346,7 +356,8 @@ def test_tanh_velocity_error_integrals_reject_invalid_alpha(
     alpha,
 ):
     for term_name in (
-        "track_linear_velocity_xy_error_integral_tanh",
+        "track_linear_velocity_x_error_integral_tanh",
+        "track_linear_velocity_y_error_integral_tanh",
         "track_angular_velocity_z_error_integral_tanh",
     ):
         with pytest.raises(ValueError, match="finite positive"):

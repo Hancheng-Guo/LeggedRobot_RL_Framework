@@ -98,16 +98,16 @@ class _BaseVelocityErrorIntegral(BaseObservationTerm):
 
 
 @register_observation
-class TrackLinearVelocityXyErrorIntegral(_BaseVelocityErrorIntegral):
+class TrackLinearVelocityXErrorIntegral(_BaseVelocityErrorIntegral):
 
     def __init__(
         self,
-        command_names: Sequence[str] = ("lin_vel_x", "lin_vel_y"),
+        command_names: Sequence[str] = ("lin_vel_x",),
         *args, **kwargs,
     ) -> None:
         
         super().__init__(
-            output_dim=2,
+            output_dim=1,
             command_names=command_names,
             *args, **kwargs,
         )
@@ -120,7 +120,33 @@ class TrackLinearVelocityXyErrorIntegral(_BaseVelocityErrorIntegral):
         
         return self._compute_integral(
             task_context,
-            task_context.state.base_lin_vel_body[:, :2],
+            task_context.state.base_lin_vel_body[:, :1],
+        )
+
+
+@register_observation
+class TrackLinearVelocityYErrorIntegral(_BaseVelocityErrorIntegral):
+
+    def __init__(
+        self,
+        command_names: Sequence[str] = ("lin_vel_y",),
+        *args, **kwargs,
+    ) -> None:
+        
+        super().__init__(
+            output_dim=1,
+            command_names=command_names,
+            *args, **kwargs,
+        )
+
+
+    def compute(
+        self,
+        task_context: TaskContext
+    ) -> torch.Tensor:
+        
+        return self._compute_integral(
+            task_context, task_context.state.base_lin_vel_body[:, 1:2],
         )
 
 
@@ -150,8 +176,7 @@ class TrackAngularVelocityZErrorIntegral(_BaseVelocityErrorIntegral):
         )
 
 
-@register_observation
-class TrackLinearVelocityXyErrorIntegralTanh(TrackLinearVelocityXyErrorIntegral):
+class _BaseTanhVelocityErrorIntegral(_BaseVelocityErrorIntegral):
 
     def __init__(
         self,
@@ -172,34 +197,54 @@ class TrackLinearVelocityXyErrorIntegralTanh(TrackLinearVelocityXyErrorIntegral)
         self.alpha = float(alpha)
 
 
-    def compute(
+    def _compute_tanh_integral(
         self,
-        task_context: TaskContext
+        task_context: TaskContext,
+        velocity: torch.Tensor,
     ) -> torch.Tensor:
         
-        return torch.tanh(self.alpha * super().compute(task_context))
+        return torch.tanh(
+            self.alpha * self._compute_integral(task_context, velocity)
+        )
 
 
 @register_observation
-class TrackAngularVelocityZErrorIntegralTanh(TrackAngularVelocityZErrorIntegral):
+class TrackLinearVelocityXErrorIntegralTanh(_BaseTanhVelocityErrorIntegral):
 
     def __init__(
         self,
-        alpha: float = 1.0,
-        *args, **kwargs
+        command_names: Sequence[str] = ("lin_vel_x",),
+        *args, **kwargs,
     ) -> None:
         
-        super().__init__(*args, **kwargs)
+        super().__init__(
+            output_dim=1,
+            command_names=command_names,
+            *args, **kwargs,
+        )
+
+
+    def compute(self, task_context: TaskContext) -> torch.Tensor:
+        return self._compute_tanh_integral(
+            task_context,
+            task_context.state.base_lin_vel_body[:, :1],
+        )
+
+
+@register_observation
+class TrackLinearVelocityYErrorIntegralTanh(_BaseTanhVelocityErrorIntegral):
+
+    def __init__(
+        self,
+        command_names: Sequence[str] = ("lin_vel_y",),
+        *args, **kwargs,
+    ) -> None:
         
-        if (
-            not isinstance(alpha, (int, float))
-            or isinstance(alpha, bool)
-            or not math.isfinite(alpha)
-            or alpha <= 0
-        ):
-            raise ValueError("'alpha' must be a finite positive number.")
-        
-        self.alpha = float(alpha)
+        super().__init__(
+            output_dim=1,
+            command_names=command_names,
+            *args, **kwargs,
+        )
 
 
     def compute(
@@ -207,4 +252,34 @@ class TrackAngularVelocityZErrorIntegralTanh(TrackAngularVelocityZErrorIntegral)
         task_context: TaskContext
     ) -> torch.Tensor:
         
-        return torch.tanh(self.alpha * super().compute(task_context))
+        return self._compute_tanh_integral(
+            task_context,
+            task_context.state.base_lin_vel_body[:, 1:2],
+        )
+
+
+@register_observation
+class TrackAngularVelocityZErrorIntegralTanh(_BaseTanhVelocityErrorIntegral):
+
+    def __init__(
+        self,
+        command_names: Sequence[str] = ("ang_vel_z",),
+        *args, **kwargs
+    ) -> None:
+        
+        super().__init__(
+            output_dim=1,
+            command_names=command_names,
+            *args, **kwargs,
+        )
+
+
+    def compute(
+        self,
+        task_context: TaskContext
+    ) -> torch.Tensor:
+        
+        return self._compute_tanh_integral(
+            task_context,
+            task_context.state.base_ang_vel_body[:, 2:3],
+        )

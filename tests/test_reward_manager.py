@@ -55,6 +55,7 @@ def make_reward_context() -> TaskContext:
     return TaskContext(
         state=make_simulator_state(),
         command={},
+        last_command={},
         action=torch.tensor([[1.0, 3.0], [2.0, 2.0]]),
         last_action=torch.tensor([[0.0, 1.0], [1.0, 1.0]]),
         episode_step=torch.zeros(2, dtype=torch.long),
@@ -98,6 +99,11 @@ def make_state_reward_context() -> TaskContext:
             "lin_vel_y": torch.tensor([[2.0], [0.0]]),
             "ang_vel_z": torch.tensor([[0.5], [-0.5]]),
         },
+        last_command={
+            "lin_vel_x": torch.tensor([[0.0], [0.0]]),
+            "lin_vel_y": torch.tensor([[2.0], [0.0]]),
+            "ang_vel_z": torch.tensor([[0.5], [-0.5]]),
+        },
         action=torch.zeros(2, 2),
         last_action=torch.zeros(2, 2),
         episode_step=torch.ones(2, dtype=torch.long),
@@ -119,6 +125,11 @@ def make_phase_gait_context() -> TaskContext:
             geom_xpos=geom_xpos,
         ),
         command={
+            "foot_phase_real": torch.ones(2, 4),
+            "foot_phase_imag": torch.zeros(2, 4),
+            "half_period_duration": torch.full((2,), 0.04),
+        },
+        last_command={
             "foot_phase_real": torch.ones(2, 4),
             "foot_phase_imag": torch.zeros(2, 4),
             "half_period_duration": torch.full((2,), 0.04),
@@ -149,6 +160,11 @@ def make_quadrupedal_foot_context() -> TaskContext:
             contact_forces=contact_forces,
         ),
         command={
+            "lin_vel_x": torch.zeros(2, 1),
+            "lin_vel_y": torch.zeros(2, 1),
+            "ang_vel_z": torch.zeros(2, 1),
+        },
+        last_command={
             "lin_vel_x": torch.zeros(2, 1),
             "lin_vel_y": torch.zeros(2, 1),
             "ang_vel_z": torch.zeros(2, 1),
@@ -793,6 +809,11 @@ def test_trot_loop_duration_tracks_valid_contact_sequence_and_resets(
             "lin_vel_y": torch.zeros(2, 1),
             "ang_vel_z": torch.zeros(2, 1),
         },
+        last_command={
+            "lin_vel_x": torch.tensor([[1.0], [0.0]]),
+            "lin_vel_y": torch.zeros(2, 1),
+            "ang_vel_z": torch.zeros(2, 1),
+        },
         action=torch.zeros(2, 2),
         last_action=torch.zeros(2, 2),
         episode_step=torch.ones(2, dtype=torch.long),
@@ -859,6 +880,11 @@ def test_trot_loop_duration_resets_on_invalid_contact_sequence(
             "lin_vel_y": torch.zeros(1, 1),
             "ang_vel_z": torch.zeros(1, 1),
         },
+        last_command={
+            "lin_vel_x": torch.ones(1, 1),
+            "lin_vel_y": torch.zeros(1, 1),
+            "ang_vel_z": torch.zeros(1, 1),
+        },
         action=torch.zeros(1, 2),
         last_action=torch.zeros(1, 2),
         episode_step=torch.ones(1, dtype=torch.long),
@@ -907,6 +933,11 @@ def test_trot_loop_duration_treats_small_commands_as_idle(
             ),
         ),
         command={
+            "lin_vel_x": torch.tensor([[0.05]]),
+            "lin_vel_y": torch.zeros(1, 1),
+            "ang_vel_z": torch.zeros(1, 1),
+        },
+        last_command={
             "lin_vel_x": torch.tensor([[0.05]]),
             "lin_vel_y": torch.zeros(1, 1),
             "ang_vel_z": torch.zeros(1, 1),

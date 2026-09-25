@@ -76,6 +76,11 @@ def make_task_context(num_envs: int = 2) -> TaskContext:
             "lin_vel_y": torch.full((num_envs, 1), 0.2),
             "ang_vel_z": torch.full((num_envs, 1), 0.3),
         },
+        last_command={
+            "lin_vel_x": torch.full((num_envs, 1), 0.1),
+            "lin_vel_y": torch.full((num_envs, 1), 0.2),
+            "ang_vel_z": torch.full((num_envs, 1), 0.3),
+        },
         action=torch.tensor([[0.6, -0.7]]).repeat(num_envs, 1),
         last_action=torch.zeros(num_envs, 2),
         episode_step=torch.arange(num_envs),
@@ -196,6 +201,163 @@ def test_last_action_history_tracks_steps_and_partial_reset(
     torch.testing.assert_close(
         resumed, torch.tensor([[9.0, 10.0, 0.0, 0.0, 0.0, 0.0]]),
     )
+
+
+def test_velocity_error_integral_observations_track_signed_history(
+    runtime_context,
+    model_context,
+):
+    manager = ObservationManager(
+        num_envs=2,
+        context=runtime_context,
+        model_context=model_context,
+        command_dim=3,
+        action_dim=2,
+        terms={
+            "track_linear_velocity_xy_error_integral": {
+                "integral_length": 2,
+            },
+            "track_angular_velocity_z_error_integral": {
+                "integral_length": 2,
+            },
+        },
+    )
+    context = make_task_context()
+    context.step_dt = 0.1
+    context.episode_step.zero_()
+    for command in context.command.values():
+        command.zero_()
+    context.state.base_lin_vel_body[:, :2] = torch.tensor([-1.0, -2.0])
+    context.state.base_ang_vel_body[:, 2] = -1.0
+
+    initial, _ = manager.compute(context)
+    torch.testing.assert_close(initial, torch.zeros(2, 3))
+
+    context.last_command = {
+        name: value.clone() for name, value in context.command.items()
+    }
+    context.command["lin_vel_x"].fill_(5.0)
+    context.command["ang_vel_z"].fill_(3.0)
+    context.episode_step[:] = 1
+    first, _ = manager.compute(context)
+    torch.testing.assert_close(
+        first, torch.tensor([[0.1, 0.2, 0.1], [0.1, 0.2, 0.1]]),
+    )
+    repeated, _ = manager.compute(context)
+    torch.testing.assert_close(repeated, first)
+
+    context.episode_step[:] = 2
+    context.state.base_lin_vel_body[0, :2] = torch.tensor([1.0, 2.0])
+    context.state.base_ang_vel_body[0, 2] = 1.0
+    second, _ = manager.compute(context)
+    torch.testing.assert_close(
+        second, torch.tensor([[0.0, 0.0, 0.0], [0.2, 0.4, 0.2]]),
+    )
+
+    context.episode_step[:] = 3
+    third, _ = manager.compute(context)
+    torch.testing.assert_close(
+        third, torch.tensor([[-0.2, -0.4, -0.2], [0.2, 0.4, 0.2]]),
+    )
+
+    manager.reset(torch.tensor([1]))
+    reset_context = make_task_context(num_envs=1)
+    reset_context.env_ids = torch.tensor([1])
+    reset_context.episode_step.zero_()
+    reset_observation, _ = manager.compute(
+        reset_context, env_ids=reset_context.env_ids,
+    )
+    torch.testing.assert_close(reset_observation, torch.zeros(1, 3))
+
+
+@pytest.mark.parametrize("integral_length", [0, -1, 1.5, True])
+def test_velocity_error_integral_observations_reject_invalid_length(
+    runtime_context,
+    model_context,
+    integral_length,
+):
+    with pytest.raises(ValueError, match="positive integer"):
+        ObservationManager(
+            num_envs=2,
+            context=runtime_context,
+            model_context=model_context,
+            command_dim=3,
+            action_dim=2,
+            terms={
+                "track_linear_velocity_xy_error_integral": {
+                    "integral_length": integral_length,
+                },
+            },
+        )
+
+
+def test_tanh_velocity_error_integrals_map_signed_integrals(
+    runtime_context,
+    model_context,
+):
+    manager = ObservationManager(
+        num_envs=2,
+        context=runtime_context,
+        model_context=model_context,
+        command_dim=3,
+        action_dim=2,
+        terms={
+            "track_linear_velocity_xy_error_integral": {
+                "integral_length": 2,
+            },
+            "track_linear_velocity_xy_error_integral_tanh": {
+                "integral_length": 2, "alpha": 2.0,
+            },
+            "track_angular_velocity_z_error_integral": {
+                "integral_length": 2,
+            },
+            "track_angular_velocity_z_error_integral_tanh": {
+                "integral_length": 2, "alpha": 2.0,
+            },
+        },
+    )
+    context = make_task_context()
+    context.step_dt = 0.1
+    context.episode_step[:] = 1
+    for command in context.last_command.values():
+        command.zero_()
+    context.state.base_lin_vel_body[:, :2] = torch.tensor([-1.0, 2.0])
+    context.state.base_ang_vel_body[:, 2] = -3.0
+
+    observation, _ = manager.compute(context)
+    xy_integral = torch.tensor([[0.1, -0.2]]).repeat(2, 1)
+    z_integral = torch.full((2, 1), 0.3)
+    expected = torch.cat((
+        xy_integral,
+        torch.tanh(2.0 * xy_integral),
+        z_integral,
+        torch.tanh(2.0 * z_integral),
+    ), dim=-1)
+    torch.testing.assert_close(observation, expected)
+
+    repeated, _ = manager.compute(context)
+    torch.testing.assert_close(repeated, expected)
+
+
+@pytest.mark.parametrize("alpha", [0, -1.0, float("nan"), float("inf"), True])
+def test_tanh_velocity_error_integrals_reject_invalid_alpha(
+    runtime_context,
+    model_context,
+    alpha,
+):
+    for term_name in (
+        "track_linear_velocity_xy_error_integral_tanh",
+        "track_angular_velocity_z_error_integral_tanh",
+    ):
+        with pytest.raises(ValueError, match="finite positive"):
+            ObservationManager(
+                num_envs=2,
+                context=runtime_context,
+                model_context=model_context,
+                command_dim=3,
+                action_dim=2,
+                terms={term_name: {"alpha": alpha}},
+            )
 
 
 def test_observation_manager_validates_selected_env_count(

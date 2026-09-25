@@ -95,6 +95,7 @@ class FakeTask:
         return TaskContext(
             state=state,
             command={"target": command},
+            last_command={"target": command.clone()},
             action=action,
             last_action=last_action,
             episode_step=episode_step,

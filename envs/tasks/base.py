@@ -153,6 +153,7 @@ class BaseTaskLogic(ABC):
     
         if env_ids is None:
             command = self.command
+            last_command = self.last_command
             action = self.action
             last_action = self.last_action
 
@@ -162,6 +163,11 @@ class BaseTaskLogic(ABC):
                 for name, value
                 in self.command.items()
             }
+            last_command = {
+                name: value[env_ids]
+                for name, value
+                in self.last_command.items()
+            }
 
             action = self.action[env_ids]
             last_action = self.last_action[env_ids]
@@ -169,6 +175,7 @@ class BaseTaskLogic(ABC):
         return TaskContext(
             state=state,
             command=command,
+            last_command=last_command,
             action=action,
             last_action=last_action,
             episode_step=episode_step,
@@ -238,6 +245,11 @@ class BaseTaskLogic(ABC):
     @property
     def command(self) -> dict[str, torch.Tensor]:
         return self.command_manager.command
+
+
+    @property
+    def last_command(self) -> dict[str, torch.Tensor]:
+        return self.command_manager.last_command
 
 
     @property

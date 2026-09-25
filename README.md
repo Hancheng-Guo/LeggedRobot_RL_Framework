@@ -588,6 +588,10 @@ term 顺序决定最终 observation 的拼接顺序。所有 observation term �
 | `foot_contact_normal_force` | 足端法向接触力 |
 | `foot_contact_state` | 足端接触状态 |
 | `command` | 所有命令拼接结果 |
+| `track_linear_velocity_xy_error_integral` | 最近 `integral_length` 步的有符号 XY 速度误差积分，输出 X、Y 两维 |
+| `track_angular_velocity_z_error_integral` | 最近 `integral_length` 步的有符号 Z 角速度误差积分，输出一维 |
+| `track_linear_velocity_xy_error_integral_tanh` | 对 XY 误差积分逐分量计算 `tanh(alpha * integral)`；默认 `alpha=1.0` |
+| `track_angular_velocity_z_error_integral_tanh` | 对 Z 误差积分计算 `tanh(alpha * integral)`；默认 `alpha=1.0` |
 | `last_action` | 最近 `lags` 步策略动作，按从新到旧排列（默认 `lags: 1`） |
 
 ### 9.4 Reward Manager

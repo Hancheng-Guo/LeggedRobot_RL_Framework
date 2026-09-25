@@ -37,6 +37,7 @@ def make_task_context() -> TaskContext:
     return TaskContext(
         state=make_simulator_state(qpos=qpos),
         command={},
+        last_command={},
         action=torch.zeros(2, 2),
         last_action=torch.zeros(2, 2),
         episode_step=torch.zeros(2, dtype=torch.long),

@@ -65,7 +65,7 @@ class BaseRunner(ABC):
     @abstractmethod
     def test(
         self,
-        num_episodes: int = 1000,
+        num_episodes: int,
     ) -> None:
         raise NotImplementedError
 
@@ -73,9 +73,9 @@ class BaseRunner(ABC):
     @abstractmethod
     def play(
         self,
-        num_steps: int = 5000,
-        formats: VideoFormat | VideoFormats = "gif",
-        num_plays: int = 1,
+        num_steps: int,
+        formats: VideoFormat | VideoFormats,
+        num_plays: int,
     ) -> None:
         raise NotImplementedError
 

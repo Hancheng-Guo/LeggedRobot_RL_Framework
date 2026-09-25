@@ -317,7 +317,7 @@ def test_play_restores_original_environment_after_failure(
     monkeypatch.setattr(runner, "_play_steps", fail_during_play)
 
     with pytest.raises(RuntimeError, match="play failed"):
-        runner.play(num_steps=1)
+        runner.play(num_steps=1, formats="gif", num_plays=1)
 
     temporary_environment = TrackingEnvironment.instances[-1]
     assert temporary_environment is not original_environment
@@ -351,7 +351,7 @@ def test_play_reuses_environment_when_concurrent_instances_are_unsupported(
     monkeypatch.setattr(runner, "_play_steps", fail_during_play)
 
     with pytest.raises(RuntimeError, match="play failed"):
-        runner.play(num_steps=1)
+        runner.play(num_steps=1, formats="gif", num_plays=1)
 
     assert TrackingEnvironment.instances == [environment]
     assert environment.closed is False
@@ -399,7 +399,7 @@ def test_play_records_requested_number_of_plays(
         return True
 
     monkeypatch.setattr(runner, "_play_steps", record_playback)
-    runner.play(num_steps=12, num_plays=3)
+    runner.play(num_steps=12, formats="gif", num_plays=3)
 
     assert recordings == [12, 12, 12]
 
@@ -414,7 +414,7 @@ def test_play_rejects_invalid_play_count(
     runner.algorithm = MinimalAlgorithm(runtime_context)
 
     with pytest.raises(ValueError, match="num_plays"):
-        runner.play(num_steps=1, num_plays=num_plays)
+        runner.play(num_steps=1, formats="gif", num_plays=num_plays)
 
 
 def test_play_stops_when_primary_environment_episode_ends(

@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import Path
 from collections.abc import Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.utils.context import RuntimeContext
 from runners.callbacks.stage import StageCallback
@@ -11,6 +13,9 @@ from runners.registry import RUNNER_TYPE_MAP
 from utils.component import create_component, Component
 from utils.config import load_yaml
 from utils.logging import get_logger
+
+if TYPE_CHECKING:
+    from runners.utils.frames import VideoFormat, VideoFormats
 
 
 logger = get_logger(__name__)
@@ -366,16 +371,13 @@ class StageManager:
         self.runner.stage_update(stage_callback)
         
 
-    def test(
-        self,
-        *args, **kwargs
-    ) -> None:
+    def test(self, num_episodes: int) -> None:
 
         if hasattr(self, "runner"):
             if self.continue_training:
                 logger.warning("Model is not trained completely.")
             self.runner.stage_update(None)
-            self.runner.test(*args, **kwargs)
+            self.runner.test(num_episodes=num_episodes)
             return
 
         checkpoint_path = self._prepare_evaluation_stage()
@@ -390,19 +392,25 @@ class StageManager:
         )
         if checkpoint_path is not None:
             self._load_evaluation_checkpoint()
-        self.runner.test(*args, **kwargs)
+        self.runner.test(num_episodes=num_episodes)
 
 
     def play(
         self,
-        *args, **kwargs
+        num_steps: int,
+        formats: VideoFormat | VideoFormats,
+        num_plays: int,
     ) -> None:
 
         if hasattr(self, "runner"):
             if self.continue_training:
                 logger.warning("Model is not trained completely.")
             self.runner.stage_update(None)
-            self.runner.play(*args, **kwargs)
+            self.runner.play(
+                num_steps=num_steps,
+                formats=formats,
+                num_plays=num_plays,
+            )
             return
 
         checkpoint_path = self._prepare_evaluation_stage()
@@ -417,7 +425,11 @@ class StageManager:
         )
         if checkpoint_path is not None:
             self._load_evaluation_checkpoint()
-        self.runner.play(*args, **kwargs)
+        self.runner.play(
+            num_steps=num_steps,
+            formats=formats,
+            num_plays=num_plays,
+        )
 
 
     def _prepare_evaluation_stage(self) -> Path | None:

@@ -153,7 +153,7 @@ class WorkflowRunner(BaseRunner):
         self.max_iterations_history: list[int] = []
         self.callback_results: list[list[bool]] = []
         self.test_calls: list[int] = []
-        self.play_calls: list[int] = []
+        self.play_calls: list[tuple[int, VideoFormat | VideoFormats, int]] = []
         self.allow_transition = True
 
     def config_update(
@@ -203,16 +203,16 @@ class WorkflowRunner(BaseRunner):
         if results[-1] is False:
             self.stop_callback.append(callback)
 
-    def test(self, num_episodes: int = 1000) -> None:
+    def test(self, num_episodes: int) -> None:
         self.test_calls.append(num_episodes)
 
     def play(
         self,
-        num_steps: int = 5000,
-        formats: VideoFormat | VideoFormats = "gif",
-        num_plays: int = 1,
+        num_steps: int,
+        formats: VideoFormat | VideoFormats,
+        num_plays: int,
     ) -> None:
-        self.play_calls.append(num_steps)
+        self.play_calls.append((num_steps, formats, num_plays))
 
     def close(self) -> None:
         pass
@@ -378,10 +378,10 @@ def test_application_entry_can_test_and_play_after_training(
 
     application.train()
     application.test(num_episodes=7)
-    application.play(num_steps=11)
+    application.play(num_steps=11, formats=["gif", "mp4"], num_plays=3)
 
     assert manager.current_stage == len(manager.stage_detail)
     assert runner.stage_callback is None
     assert runner.max_iterations_history == [3, 5]
     assert runner.test_calls == [7]
-    assert runner.play_calls == [11]
+    assert runner.play_calls == [(11, ["gif", "mp4"], 3)]

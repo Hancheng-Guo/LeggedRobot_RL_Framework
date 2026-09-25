@@ -1,14 +1,20 @@
+from __future__ import annotations
+
 import warnings
 import shutil
 from pathlib import Path
 from datetime import datetime
 from types import TracebackType
+from typing import TYPE_CHECKING
 
 from app.stage_manager import StageManager
 from app.utils.context import create_runtime_context, RuntimeContext
 from utils.component import create_component_info
 from utils.config import load_yaml
 from utils.logging import configure_logging, get_logger, LoggingSession
+
+if TYPE_CHECKING:
+    from runners.utils.frames import VideoFormat, VideoFormats
 
 
 logger = get_logger(__name__)
@@ -171,14 +177,26 @@ class ApplicationEntry:
         self.stage_manager.train()
 
 
-    def test(self, *args, **kwargs) -> None:
+    def test(
+        self,
+        num_episodes: int = 1000
+    ) -> None:
         self._ensure_open()
-        self.stage_manager.test(*args, **kwargs)
+        self.stage_manager.test(num_episodes=num_episodes)
 
 
-    def play(self, *args, **kwargs) -> None:
+    def play(
+        self,
+        num_steps: int = 500,
+        formats: VideoFormat | VideoFormats = "gif",
+        num_plays: int = 3,
+    ) -> None:
         self._ensure_open()
-        self.stage_manager.play(*args, **kwargs)
+        self.stage_manager.play(
+            num_steps=num_steps,
+            formats=formats,
+            num_plays=num_plays,
+        )
 
 
     def save(self) -> Path:

@@ -504,7 +504,7 @@ class OnPolicyRunner(BaseRunner):
 
     def test(
         self,
-        num_episodes: int = 1000,
+        num_episodes: int,
     ) -> None:
 
         if (
@@ -613,10 +613,11 @@ class OnPolicyRunner(BaseRunner):
 
     def play(
         self,
-        num_steps: int = 5000,
-        formats: VideoFormat | VideoFormats = "gif",
-        num_plays: int = 1,
+        num_steps: int,
+        formats: VideoFormat | VideoFormats,
+        num_plays: int,
     ) -> None:
+        
         try:
             from runners.utils.frames import save_frames_to_video
         except ModuleNotFoundError as error:

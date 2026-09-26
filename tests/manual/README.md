@@ -38,3 +38,5 @@ python tests/manual/profile_isaac_sim_runtime.py --num-envs 1024 --steps 20
 ```
 
 脚本默认不创建相机。需要单独量化相机成本时，为相同环境数加上 `--with-camera`。每组输出 `step`（包含配置中的 10 个物理子步）、`get_state` 和可选的 `render` 耗时；请比较预热后的汇总数据。脚本不执行 PPO 更新，因此吞吐量仅代表仿真与状态读取。
+
+若初始化停滞，脚本默认每 120 秒向终端输出一次 Python 线程堆栈。可用 `--stack-interval 30` 缩短间隔；把最后一组堆栈和前后的日志一起保存，用于定位卡住的调用。

@@ -6,6 +6,7 @@ Run from the repository root with the Python environment that has Isaac Sim.
 from __future__ import annotations
 
 import argparse
+import faulthandler
 import logging
 import statistics
 import sys
@@ -34,6 +35,12 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--warmup", type=int, default=3)
     parser.add_argument("--steps", type=int, default=20)
     parser.add_argument(
+        "--stack-interval",
+        type=int,
+        default=120,
+        help="Print all Python thread stacks every N seconds while blocked (0 disables).",
+    )
+    parser.add_argument(
         "--with-camera",
         action="store_true",
         help="Build the RGB camera and time render() separately.",
@@ -44,8 +51,8 @@ def parse_arguments() -> argparse.Namespace:
         default=PROJECT_ROOT / "configs/simulators/isaac_sim_unitree_go1_rgb_array.yaml",
     )
     args = parser.parse_args()
-    if args.num_envs <= 0 or args.warmup < 0 or args.steps <= 0:
-        parser.error("--num-envs and --steps must be positive; --warmup must be nonnegative")
+    if args.num_envs <= 0 or args.warmup < 0 or args.steps <= 0 or args.stack_interval < 0:
+        parser.error("--num-envs and --steps must be positive; --warmup and --stack-interval must be nonnegative")
     return args
 
 
@@ -101,6 +108,12 @@ def main() -> None:
         config["frame_skip"],
         args.with_camera,
     )
+    if args.stack_interval:
+        faulthandler.dump_traceback_later(
+            args.stack_interval,
+            repeat=True,
+            file=sys.stderr,
+        )
     try:
         start = time.perf_counter()
         runtime.configure(
@@ -168,6 +181,7 @@ def main() -> None:
             report("render", render_times)
         LOGGER.info("Approximate simulator throughput: %.0f env steps/s", args.num_envs * 1000 / (statistics.mean(step_times) + statistics.mean(state_times) + (statistics.mean(render_times) if render_times else 0)))
     finally:
+        faulthandler.cancel_dump_traceback_later()
         runtime.close()
 
 

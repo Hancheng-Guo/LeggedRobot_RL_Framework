@@ -51,10 +51,18 @@ python tests/manual/profile_isaac_sim_runtime.py --num-envs 16 --steps 5 *> isaa
 
 ## Isaac Sim 无相机训练验证
 
-下面的脚本使用独立的 128 环境配置，运行一个真实的 standing PPO 更新。它只在脚本进程中关闭 Fabric 变换和速度输出，不创建相机，也不执行 GIF 播放：
+下面的脚本使用独立的 128 环境配置，运行一个真实的 standing PPO 更新，分别统计物理步进、环境步进和 PPO 更新。模拟器配置关闭 Fabric 变换和速度输出，不创建相机：
 
 ```powershell
 python tests/manual/train_isaac_without_camera.py *> isaac_headless_train.log
 ```
 
 出现 `CAMERA-FREE TRAINING PASSED` 表示训练阶段已完成。结果会保存在独立的 `checkpoints/unitree_go1_isaac_cuda_headless_train_test_*` 目录；请同时检查终端日志和目录内的 `logs/training.log`。
+
+使用该测试生成的 checkpoint 验证独立相机播放。`--train-time` 填输出目录末尾的时间戳：
+
+```powershell
+python tests/manual/play_isaac_headless_checkpoint.py --app-name unitree_go1_isaac_cuda_headless_train_test --train-time 2026-09-26_19-15-18 --render-mode rgb_array --num-steps 50 *> isaac_camera_playback.log
+```
+
+正式训练仍使用原有入口，选择 `unitree_go1_isaac_cuda_velocity`。`application.play()` 会在播放时检查环境的 render mode：无渲染模式时直接跳过。训练结束后运行上面的独立脚本播放 checkpoint；脚本会在新的 Isaac Sim 进程中调用原来的 `application.play()`。`--render-mode none` 跳过播放，`--render-mode rgb_array` 创建相机并生成视频。

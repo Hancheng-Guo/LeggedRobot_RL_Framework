@@ -30,6 +30,11 @@ class BaseEnv(ABC):
         return None
 
 
+    def check_render_mode(self) -> bool:
+        """Whether playback has a configured render mode."""
+        return self.render_mode is not None
+
+
     @property
     def playback_env_index(self) -> int:
         """Environment whose episode bounds a playback recording."""

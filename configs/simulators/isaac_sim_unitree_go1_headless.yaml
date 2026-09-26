@@ -1,4 +1,6 @@
 model_path: .\assets\unitree_go1\USD\go1\go1.usda
+# ros_package_paths:
+#   - {go1_description: .\assets\unitree_go1\URDF}
 sim_dt: 0.002
 frame_skip: 10
 robot_prim_path: /Robot
@@ -9,7 +11,7 @@ foot_body_prim_paths:
   - /Geometry/base/trunk/FL_hip/FL_thigh/FL_calf/FL_foot
   - /Geometry/base/trunk/RR_hip/RR_thigh/RR_calf/RR_foot
   - /Geometry/base/trunk/RL_hip/RL_thigh/RL_calf/RL_foot
-floor_prim_paths: []
+floor_prim_paths: []  # /World/GroundPlane
 foot_contact_force_threshold: 15.0
 merge_fixed_joints: false
 allow_self_collision: false

@@ -23,6 +23,10 @@ class TrackingEnvironment(BaseEnv):
     instances: list["TrackingEnvironment"] = []
     SUPPORTS_CONCURRENT_INSTANCES: bool = True
 
+    @property
+    def render_mode(self) -> str:
+        return "human"
+
     def __init__(self, context: RuntimeContext) -> None:
         super().__init__(context)
         self.closed = False

@@ -122,14 +122,14 @@ def main() -> None:
             LOGGER.info("Starting %s.", name)
             start = time.perf_counter()
             operation()
-            if phase == "_start_application" and args.disable_fabric_output:
+            if phase == "_start_application":
                 import carb.settings
 
                 settings = carb.settings.get_settings()
-                settings.set_bool("/physics/fabricUpdateTransformations", False)
-                settings.set_bool("/physics/fabricUpdateVelocities", False)
+                settings.set_bool("/physics/fabricUpdateTransformations", not args.disable_fabric_output)
+                settings.set_bool("/physics/fabricUpdateVelocities", not args.disable_fabric_output)
                 LOGGER.info(
-                    "Fabric output disabled: transformations=%s, velocities=%s",
+                    "Profiler Fabric output: transformations=%s, velocities=%s",
                     settings.get("/physics/fabricUpdateTransformations"),
                     settings.get("/physics/fabricUpdateVelocities"),
                 )

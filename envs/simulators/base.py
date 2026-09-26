@@ -9,13 +9,11 @@ from envs.simulators.utils.state import SimulatorState
 from app.utils.context import RuntimeContext
 
 
-_FOOT_CONTACT_FORCE_THRESHOLD: float = 15.0
-
-
 class BaseSimulator(ABC):
 
     SUPPORTED_RENDER_MODES = frozenset(("human", "rgb_array"))
     SUPPORTS_CONCURRENT_INSTANCES = True
+    FOOT_CONTACT_FORCE_THRESHOLD: float = 15.0
 
     def __init__(
         self,

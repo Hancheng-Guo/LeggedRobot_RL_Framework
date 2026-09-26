@@ -159,6 +159,17 @@ class IsaacSimRuntime:
             self._stop_log_bridge()
             raise
         LOGGER.info("Isaac Sim runtime initialized.")
+        import carb.settings  # pyright: ignore[reportMissingImports]
+
+        fabric_output_enabled = self.render_mode is not None
+        settings = carb.settings.get_settings()
+        settings.set_bool("/physics/fabricUpdateTransformations", fabric_output_enabled)
+        settings.set_bool("/physics/fabricUpdateVelocities", fabric_output_enabled)
+        LOGGER.info(
+            "Fabric transform and velocity output %s for render mode %s.",
+            "enabled" if fabric_output_enabled else "disabled",
+            self.render_mode,
+        )
 
 
     def _start_log_bridge(self) -> None:

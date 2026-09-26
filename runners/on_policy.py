@@ -628,6 +628,10 @@ class OnPolicyRunner(BaseRunner):
 
         if not hasattr(self, "environment"):
             raise RuntimeError("environment is not instantiated.")
+        if not self.environment.check_render_mode():
+            LOGGER.info("Skipping playback because render mode is disabled.")
+            return
+
 
         if not hasattr(self, "algorithm"):
             raise RuntimeError("algorithm is not instantiated.")

@@ -39,6 +39,11 @@ def parse_arguments() -> argparse.Namespace:
         help="Build the RGB camera and time render() separately.",
     )
     parser.add_argument(
+        "--disable-fabric-output",
+        action="store_true",
+        help="Disable unused Fabric transform and velocity publishing for headless GPU tensor profiling.",
+    )
+    parser.add_argument(
         "--sim-config",
         type=Path,
         default=PROJECT_ROOT / "configs/simulators/isaac_sim_unitree_go1_rgb_array.yaml",
@@ -46,6 +51,8 @@ def parse_arguments() -> argparse.Namespace:
     args = parser.parse_args()
     if args.num_envs <= 0 or args.warmup < 0 or args.steps <= 0:
         parser.error("--num-envs and --steps must be positive; --warmup must be nonnegative")
+    if args.with_camera and args.disable_fabric_output:
+        parser.error("--disable-fabric-output requires a run without --with-camera")
     return args
 
 
@@ -96,10 +103,11 @@ def main() -> None:
         joint_positions=reset_config.get("joint_positions", {}),
     )
     LOGGER.info(
-        "Starting Isaac Sim benchmark: num_envs=%d, frame_skip=%d, camera=%s",
+        "Starting Isaac Sim benchmark: num_envs=%d, frame_skip=%d, camera=%s, disable_fabric_output=%s",
         args.num_envs,
         config["frame_skip"],
         args.with_camera,
+        args.disable_fabric_output,
     )
     for method_name, label in (
         ("_start_application", "Isaac Sim application startup"),
@@ -110,10 +118,21 @@ def main() -> None:
     ):
         original = getattr(runtime, method_name)
 
-        def timed_phase(*, operation=original, name=label):
+        def timed_phase(*, operation=original, name=label, phase=method_name):
             LOGGER.info("Starting %s.", name)
             start = time.perf_counter()
             operation()
+            if phase == "_start_application" and args.disable_fabric_output:
+                import carb.settings
+
+                settings = carb.settings.get_settings()
+                settings.set_bool("/physics/fabricUpdateTransformations", False)
+                settings.set_bool("/physics/fabricUpdateVelocities", False)
+                LOGGER.info(
+                    "Fabric output disabled: transformations=%s, velocities=%s",
+                    settings.get("/physics/fabricUpdateTransformations"),
+                    settings.get("/physics/fabricUpdateVelocities"),
+                )
             LOGGER.info("Completed %s in %.2f s.", name, time.perf_counter() - start)
 
         setattr(runtime, method_name, timed_phase)

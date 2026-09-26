@@ -33,11 +33,13 @@ python tests/manual/isaac_shutdown_diagnostic.py --mode model --num-envs 16 --st
 在安装 Isaac Sim 的设备上，从项目根目录运行：
 
 ```powershell
-python tests/manual/profile_isaac_sim_runtime.py --num-envs 128 --steps 20
-python tests/manual/profile_isaac_sim_runtime.py --num-envs 1024 --steps 20
+python tests/manual/profile_isaac_sim_runtime.py --num-envs 16 --steps 5
+python tests/manual/profile_isaac_sim_runtime.py --num-envs 64 --steps 5
 ```
 
 脚本默认不创建相机。需要单独量化相机成本时，为相同环境数加上 `--with-camera`。每组输出 `step`（包含配置中的 10 个物理子步）、`get_state` 和可选的 `render` 耗时；请比较预热后的汇总数据。脚本不执行 PPO 更新，因此吞吐量仅代表仿真与状态读取。
+
+验证 Fabric 输出的同步开销时，对相同环境数运行 `--disable-fabric-output`。此选项仅在无相机模式下可用，会在创建 Isaac Sim 应用后同时关闭 Fabric 的变换和速度发布；它不会修改正常训练配置。
 
 若初始化停滞，查看最后一条 `Starting ...` 阶段日志。终端输出过长时可保存完整输出：
 

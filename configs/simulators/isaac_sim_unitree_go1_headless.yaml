@@ -1,0 +1,33 @@
+model_path: .\assets\unitree_go1\USD\go1\go1.usda
+sim_dt: 0.002
+frame_skip: 10
+robot_prim_path: /Robot
+env_spacing: 2.0
+base_body_prim_path: /Geometry/base/trunk
+foot_body_prim_paths:
+  - /Geometry/base/trunk/FR_hip/FR_thigh/FR_calf/FR_foot
+  - /Geometry/base/trunk/FL_hip/FL_thigh/FL_calf/FL_foot
+  - /Geometry/base/trunk/RR_hip/RR_thigh/RR_calf/RR_foot
+  - /Geometry/base/trunk/RL_hip/RL_thigh/RL_calf/RL_foot
+floor_prim_paths: []
+foot_contact_force_threshold: 15.0
+merge_fixed_joints: false
+allow_self_collision: false
+joint_stiffness: 100.0
+joint_damping: 2.0
+reset_state:
+  base_position: [0.0, 0.0, 0.27]
+  base_orientation: [1.0, 0.0, 0.0, 0.0]
+  joint_positions:
+    FR_hip_joint: 0.0
+    FR_thigh_joint: 0.9
+    FR_calf_joint: -1.8
+    FL_hip_joint: 0.0
+    FL_thigh_joint: 0.9
+    FL_calf_joint: -1.8
+    RR_hip_joint: 0.0
+    RR_thigh_joint: 0.9
+    RR_calf_joint: -1.8
+    RL_hip_joint: 0.0
+    RL_thigh_joint: 0.9
+    RL_calf_joint: -1.8

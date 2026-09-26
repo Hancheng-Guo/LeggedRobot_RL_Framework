@@ -48,3 +48,13 @@ python tests/manual/profile_isaac_sim_runtime.py --num-envs 16 --steps 5 *> isaa
 ```
 
 之后用 `Get-Content isaac_profile.log -Tail 80` 查看末尾，或直接提供日志文件。
+
+## Isaac Sim 无相机训练验证
+
+下面的脚本使用独立的 128 环境配置，运行一个真实的 standing PPO 更新。它只在脚本进程中关闭 Fabric 变换和速度输出，不创建相机，也不执行 GIF 播放：
+
+```powershell
+python tests/manual/train_isaac_without_camera.py *> isaac_headless_train.log
+```
+
+出现 `CAMERA-FREE TRAINING PASSED` 表示训练阶段已完成。结果会保存在独立的 `checkpoints/unitree_go1_isaac_cuda_headless_train_test_*` 目录；请同时检查终端日志和目录内的 `logs/training.log`。

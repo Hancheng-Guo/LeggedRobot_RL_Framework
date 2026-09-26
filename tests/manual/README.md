@@ -7,6 +7,7 @@
 | `profile_mujoco_state.py` | MuJoCo | 分析 `MujocoSimulator.get_state()` 及各状态字段的耗时占比。 |
 | `benchmark_mujoco_step_threads.py` | MuJoCo | 比较不同环境数和工作线程数的仿真步进吞吐量。 |
 | `isaac_shutdown_diagnostic.py` | Isaac Sim | 分阶段复现 Isaac Sim 启动、场景构建与关闭时的问题。 |
+| `verify_isaac_simulation_app_restart.py` | Isaac Sim | 验证同一 Python 进程能否连续启动和关闭 `SimulationApp`。 |
 | `profile_isaac_sim_runtime.py` | Isaac Sim | 测量项目运行时的初始化、物理步进、状态读取与可选的相机渲染。 |
 
 ## MuJoCo 性能分析
@@ -66,3 +67,13 @@ python tests/manual/play_isaac_headless_checkpoint.py --app-name unitree_go1_isa
 ```
 
 正式训练仍使用原有入口，选择 `unitree_go1_isaac_cuda_velocity`。`application.play()` 会在播放时检查环境的 render mode：无渲染模式时直接跳过。训练结束后运行上面的独立脚本播放 checkpoint；脚本会在新的 Isaac Sim 进程中调用原来的 `application.play()`。`--render-mode none` 跳过播放，`--render-mode rgb_array` 创建相机并生成视频。
+
+## Isaac Sim 同进程重启验证
+
+在安装 Isaac Sim 的设备上，从项目根目录运行：
+
+```powershell
+python tests/manual/verify_isaac_simulation_app_restart.py *> isaac_simulation_app_restart.log
+```
+
+脚本在同一个 Python 进程中连续两次启动、更新、关闭 `SimulationApp`，每步输出时间和阶段。出现 `ISAAC SIMULATIONAPP SAME-PROCESS RESTART PASSED` 表示最小生命周期测试通过；若卡住或崩溃，请保留完整日志和进程退出码。通过此测试仍不能证明 World、相机和项目环境能在同一进程内重建，后续需分别验证。

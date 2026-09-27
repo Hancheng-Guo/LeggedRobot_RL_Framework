@@ -61,6 +61,23 @@ class BaseSimulator(ABC):
         return 0
 
 
+    @property
+    def active_render_mode(self) -> str | None:
+        return self.render_mode
+
+
+    def has_playback_render_mode(self) -> bool:
+        return self.render_mode is not None
+
+
+    def prepare_playback(self) -> None:
+        """Prepare simulator-specific playback resources, if needed."""
+
+
+    def terminate_playback(self) -> None:
+        """Release simulator-specific playback resources, if any."""
+
+
     def _tensor(
         self,
         values: Any

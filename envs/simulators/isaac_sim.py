@@ -57,6 +57,7 @@ class IsaacSimSimulator(BaseSimulator):
         self.sim_dt: float
         self.frame_skip: int
         self.render_mode: str | None = None
+        self.train_render_mode: str | None = None
         self.env_spacing: float = 2.0
         self.robot_prim_path: str = "/Robot"
         self.base_body_prim_path: str | None = None
@@ -77,6 +78,7 @@ class IsaacSimSimulator(BaseSimulator):
         sim_dt: float | None = None,
         frame_skip: int | None = None,
         render_mode: str | None = None,
+        train_render_mode: str | None = None,
         env_spacing: float | None = None,
         robot_prim_path: str | None = None,
         base_body_prim_path: str | None = None,
@@ -100,6 +102,7 @@ class IsaacSimSimulator(BaseSimulator):
                 sim_dt,
                 frame_skip,
                 render_mode,
+                train_render_mode,
                 env_spacing,
                 robot_prim_path,
                 base_body_prim_path,
@@ -122,6 +125,12 @@ class IsaacSimSimulator(BaseSimulator):
             and (num_envs is None or num_envs == self.num_envs)
         ):
             return
+
+        if self._backend is not None:
+            raise RuntimeError(
+                "Reconfiguring the Isaac Sim backend would restart SimulationApp "
+                "in the same process, which is not supported now."
+            )
 
         if num_envs is not None and num_envs <= 0:
             raise ValueError("'num_envs' must be greater than 0.")
@@ -220,14 +229,18 @@ class IsaacSimSimulator(BaseSimulator):
                 self.camera_prim_path = camera_prim_path
             if parsed_reset_state is not None:
                 self.reset_state = parsed_reset_state
-        if render_mode is not None:
-            if render_mode not in self.SUPPORTED_RENDER_MODES:
-                raise ValueError(f"Unsupported render mode: {render_mode!r}.")
-            self.render_mode = render_mode
+
+        for mode in (render_mode, train_render_mode):
+            if mode is not None and mode not in self.SUPPORTED_RENDER_MODES:
+                raise ValueError(f"Unsupported render mode: {mode!r}.")
+        self.render_mode = render_mode
+        self.train_render_mode = train_render_mode
 
         self._validate_required_configuration()
-        if self._backend is not None:
-            self._backend.close()
+        # Backend rebuilding is disabled until same-process SimulationApp restart
+        # is verified with a fully configured Isaac environment.
+        # if self._backend is not None:
+        #     self._backend.close()
         self._backend = self._backend_factory(self.context)
         self._backend.configure(
             num_envs=self.num_envs,
@@ -241,7 +254,7 @@ class IsaacSimSimulator(BaseSimulator):
             ),
             sim_dt=self.sim_dt,
             frame_skip=self.frame_skip,
-            render_mode=self.render_mode,
+            render_mode=self.train_render_mode,
             env_spacing=self.env_spacing,
             robot_prim_path=self.robot_prim_path,
             base_body_prim_path=self.base_body_prim_path,
@@ -452,6 +465,26 @@ class IsaacSimSimulator(BaseSimulator):
 
     def render(self) -> np.ndarray | None:
         return self._require_backend().render()
+
+
+    def prepare_playback(self) -> None:
+        mode = self.render_mode
+        if mode is None:
+            return
+        backend = self._require_backend()
+        if mode == backend.render_mode:
+            return
+        backend.activate_playback(mode)
+
+
+    def terminate_playback(self) -> None:
+        backend = self._require_backend()
+        backend.terminate_playback()
+
+
+    @property
+    def active_render_mode(self) -> str | None:
+        return self._require_backend().render_mode
 
 
     @property

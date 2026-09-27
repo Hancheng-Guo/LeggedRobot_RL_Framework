@@ -19,6 +19,22 @@ from envs.simulators import isaac_sim_runtime
 pytestmark = pytest.mark.isaacsim
 
 
+@pytest.fixture
+def fake_carb_settings(monkeypatch):
+    values: dict[str, bool] = {}
+    settings = SimpleNamespace(
+        get=lambda key: values.get(key, False),
+        set_bool=lambda key, value: values.__setitem__(key, value),
+    )
+    carb_module = ModuleType("carb")
+    settings_module = ModuleType("carb.settings")
+    settings_module.get_settings = lambda: settings  # type: ignore[attr-defined]
+    carb_module.settings = settings_module  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "carb", carb_module)
+    monkeypatch.setitem(sys.modules, "carb.settings", settings_module)
+    return values
+
+
 class FakePrim:
     def __init__(
         self,
@@ -144,6 +160,7 @@ def test_kit_log_bridge_forwards_selected_levels_without_recursion(
 def test_start_application_disables_native_kit_console(
     monkeypatch,
     capsys,
+    fake_carb_settings,
 ) -> None:
     launch_configs: list[dict[str, Any]] = []
     lifecycle: list[str] = []
@@ -157,7 +174,7 @@ def test_start_application_disables_native_kit_console(
     simulation_app = ModuleType("isaacsim.simulation_app")
     simulation_app.SimulationApp = FakeSimulationApp  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "isaacsim.simulation_app", simulation_app)
-    monkeypatch.setattr(isaac_sim_runtime.LOGGER, "info", lambda message: None)
+    monkeypatch.setattr(isaac_sim_runtime.LOGGER, "info", lambda *args: None)
 
     runtime = IsaacSimRuntime.__new__(IsaacSimRuntime)
     runtime.render_mode = None
@@ -178,10 +195,15 @@ def test_start_application_disables_native_kit_console(
     ]
     assert lifecycle == ["bridge", "application"]
     assert "native startup info" not in capsys.readouterr().out
+    assert fake_carb_settings == {
+        "/physics/fabricUpdateTransformations": False,
+        "/physics/fabricUpdateVelocities": False,
+    }
 
 
 def test_rgb_application_disables_texture_streaming(
     monkeypatch,
+    fake_carb_settings,
 ) -> None:
     launch_configs: list[dict[str, Any]] = []
 
@@ -192,7 +214,7 @@ def test_rgb_application_disables_texture_streaming(
     simulation_app = ModuleType("isaacsim.simulation_app")
     simulation_app.SimulationApp = FakeSimulationApp  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "isaacsim.simulation_app", simulation_app)
-    monkeypatch.setattr(isaac_sim_runtime.LOGGER, "info", lambda message: None)
+    monkeypatch.setattr(isaac_sim_runtime.LOGGER, "info", lambda *args: None)
 
     runtime = IsaacSimRuntime.__new__(IsaacSimRuntime)
     runtime.render_mode = "rgb_array"
@@ -204,6 +226,10 @@ def test_rgb_application_disables_texture_streaming(
         "--/rtx-transient/resourcemanager/"
         "texturestreaming/enabled=false"
     ) in launch_configs[0]["extra_args"]
+    assert fake_carb_settings == {
+        "/physics/fabricUpdateTransformations": True,
+        "/physics/fabricUpdateVelocities": True,
+    }
 
 
 def test_start_application_stops_log_bridge_after_startup_failure(
@@ -254,6 +280,58 @@ def test_rgb_camera_does_not_use_kit_run_loop_frequency() -> None:
         }
     ]
     assert "frequency" not in camera_arguments[0]
+
+
+def test_playback_cleanup_can_retry_after_camera_destroy_failure(
+    fake_carb_settings,
+) -> None:
+    lifecycle: list[str] = []
+    destroy_attempts = 0
+
+    def destroy_camera() -> None:
+        nonlocal destroy_attempts
+        destroy_attempts += 1
+        if destroy_attempts == 1:
+            raise RuntimeError("camera destroy failed")
+        lifecycle.append("camera.destroy")
+
+    runtime = IsaacSimRuntime.__new__(IsaacSimRuntime)
+    runtime.render_mode = "rgb_array"
+    runtime._playback_restore = (None, False, False, False)
+    runtime._camera = SimpleNamespace(destroy=destroy_camera)
+    runtime._camera_env_index = 0
+    runtime.camera_prim_path = "/World/Camera"
+    runtime._app = SimpleNamespace(update=lambda: lifecycle.append("app.update"))
+    runtime._world = SimpleNamespace(
+        stage=SimpleNamespace(
+            RemovePrim=lambda path: lifecycle.append(f"remove:{path}")
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="camera destroy failed"):
+        runtime.terminate_playback()
+
+    assert runtime._playback_restore is not None
+    assert runtime._camera is not None
+    assert runtime.render_mode is None
+    assert fake_carb_settings == {
+        "/physics/fabricUpdateTransformations": False,
+        "/physics/fabricUpdateVelocities": False,
+    }
+
+    with pytest.raises(RuntimeError, match="cleanup is incomplete"):
+        runtime.activate_playback("rgb_array")
+    assert destroy_attempts == 1
+
+    runtime.terminate_playback()
+
+    assert runtime._playback_restore is None
+    assert runtime._camera is None
+    assert lifecycle == [
+        "camera.destroy",
+        "app.update",
+        "remove:/World/Camera",
+    ]
 
 
 @pytest.mark.parametrize(

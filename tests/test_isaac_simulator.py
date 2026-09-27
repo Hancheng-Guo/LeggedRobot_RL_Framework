@@ -12,6 +12,7 @@ from envs.simulators.isaac_sim_backend import (
     IsaacSimModelMetadata,
     IsaacSimResetState,
 )
+from envs.simulators.isaac_sim_runtime import IsaacSimRuntime
 from envs.simulators.registry import SIM_TYPE_MAP
 from utils.component import Component
 
@@ -27,6 +28,17 @@ class FakeIsaacBackend:
         self.step_action: torch.Tensor | None = None
         self.step_frame_skip: int | None = None
         self.closed = False
+        self.activated_mode: str | None = None
+        self.render_mode: str | None = None
+
+    def activate_playback(self, render_mode: str) -> None:
+        self.activated_mode = render_mode
+        self.render_mode = render_mode
+
+    def terminate_playback(self) -> None:
+        mode = self.configure_arguments["render_mode"]
+        assert mode is None or isinstance(mode, str)
+        self.render_mode = mode
 
     @property
     def playback_env_index(self) -> int:
@@ -34,6 +46,9 @@ class FakeIsaacBackend:
 
     def configure(self, **configuration: Any) -> None:
         self.configure_arguments = configuration
+        mode = configuration["render_mode"]
+        assert mode is None or isinstance(mode, str)
+        self.render_mode = mode
         self.num_envs = int(configuration["num_envs"])
         self.metadata = IsaacSimModelMetadata(
             body_names=("trunk", "FR_foot", "FL_foot"),
@@ -99,6 +114,7 @@ def _configure(
     tmp_path: Path,
     runtime_context,
     floor_prim_paths: tuple[str, ...] | None = None,
+    train_render_mode: str | None = None,
 ) -> tuple[IsaacSimSimulator, FakeIsaacBackend]:
     model_path = tmp_path / "robot.urdf"
     model_path.write_text("<robot name='test'/>", encoding="utf-8")
@@ -117,6 +133,7 @@ def _configure(
         sim_dt=0.002,
         frame_skip=10,
         render_mode="rgb_array",
+        train_render_mode=train_render_mode,
         floor_prim_paths=floor_prim_paths,
     )
     assert backend is not None
@@ -125,6 +142,70 @@ def _configure(
 
 def test_isaac_sim_is_registered_without_importing_optional_runtime() -> None:
     assert SIM_TYPE_MAP["isaac_sim"] is IsaacSimSimulator
+
+
+def test_isaac_playback_mode_does_not_create_training_camera(
+    tmp_path: Path, runtime_context
+) -> None:
+    simulator, backend = _configure(tmp_path, runtime_context)
+    assert simulator.render_mode == "rgb_array"
+    assert simulator.train_render_mode is None
+    assert simulator.active_render_mode is None
+    assert backend.configure_arguments["render_mode"] is None
+    simulator.prepare_playback()
+    assert backend.activated_mode == "rgb_array"
+    assert simulator.active_render_mode == "rgb_array"
+    simulator.terminate_playback()
+    assert simulator.active_render_mode is None
+
+
+def test_isaac_explicit_training_render_mode_controls_runtime(
+    tmp_path: Path, runtime_context
+) -> None:
+    simulator, backend = _configure(
+        tmp_path, runtime_context, train_render_mode="rgb_array"
+    )
+    assert simulator.render_mode == "rgb_array"
+    assert simulator.train_render_mode == "rgb_array"
+    assert backend.configure_arguments["render_mode"] == "rgb_array"
+    simulator.prepare_playback()
+    assert backend.activated_mode is None
+
+
+def test_isaac_reconfiguration_rejects_backend_restart(
+    tmp_path: Path, runtime_context
+) -> None:
+    simulator, original_backend = _configure(
+        tmp_path, runtime_context, train_render_mode="rgb_array"
+    )
+
+    with pytest.raises(RuntimeError, match="not supported"):
+        simulator.config_update(component=_component(), num_envs=3)
+
+    assert simulator._backend is original_backend
+    assert not original_backend.closed
+    assert simulator.num_envs == 2
+    assert simulator.render_mode == "rgb_array"
+    assert simulator.train_render_mode == "rgb_array"
+
+
+def test_isaac_playback_requires_render_mode_even_with_training_camera(
+    tmp_path: Path, runtime_context
+) -> None:
+    simulator, backend = _configure(tmp_path, runtime_context)
+    simulator.render_mode = None
+    simulator.train_render_mode = "rgb_array"
+    backend.render_mode = "rgb_array"
+    assert simulator.has_playback_render_mode() is False
+    simulator.prepare_playback()
+    assert backend.activated_mode is None
+
+
+def test_headless_isaac_rejects_human_playback() -> None:
+    runtime = object.__new__(IsaacSimRuntime)
+    runtime._playback_restore = None
+    with pytest.raises(RuntimeError, match="separate non-headless process"):
+        runtime.activate_playback("human")
 
 
 def test_isaac_sim_parses_reset_state() -> None:
@@ -232,20 +313,21 @@ def test_isaac_sim_reuses_backend_when_stage_configuration_is_unchanged(
     assert not backend.closed
 
 
-def test_isaac_sim_rebuilds_backend_when_environment_count_changes(
+def test_isaac_sim_rejects_environment_count_change(
     tmp_path: Path,
     runtime_context,
 ) -> None:
     simulator, original_backend = _configure(tmp_path, runtime_context)
 
-    simulator.config_update(
-        component=_component(),
-        num_envs=3,
-    )
+    with pytest.raises(RuntimeError, match="not supported"):
+        simulator.config_update(
+            component=_component(),
+            num_envs=3,
+        )
 
-    assert simulator._backend is not original_backend
-    assert original_backend.closed
-    assert simulator.num_envs == 3
+    assert simulator._backend is original_backend
+    assert not original_backend.closed
+    assert simulator.num_envs == 2
 
 
 def test_isaac_sim_builds_multiple_floor_geom_ids(

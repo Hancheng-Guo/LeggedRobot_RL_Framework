@@ -43,6 +43,7 @@ class IsaacSimRuntime:
         self._body_view: Any = None
         self._camera: Any = None
         self._camera_env_index: int | None = None
+        self._playback_restore: tuple[str | None, bool, bool, bool] | None = None
         self._simulation_manager: Any = None
         self._kit_logging: Any = None
         self._kit_logger_handle: Any = None
@@ -234,7 +235,7 @@ class IsaacSimRuntime:
         from isaacsim.core.experimental.prims import Articulation, RigidPrim  # pyright: ignore[reportMissingImports]
         from isaacsim.core.simulation_manager import SimulationManager  # pyright: ignore[reportMissingImports]
         from isaacsim.core.utils.stage import add_reference_to_stage  # pyright: ignore[reportMissingImports]
-        from pxr import Usd, UsdGeom, UsdPhysics  # pyright: ignore[reportMissingImports]
+        from pxr import Usd, UsdGeom, UsdPhysics
 
         self._simulation_manager = SimulationManager
         self._world = World(
@@ -383,6 +384,79 @@ class IsaacSimRuntime:
             position=np.asarray((2.5, 2.5, 1.8)),
             resolution=self.camera_resolution,
         )
+
+
+    def activate_playback(self, render_mode: str) -> None:
+        """Enable RGB playback in the existing headless SimulationApp."""
+
+        if self._playback_restore is not None:
+            raise RuntimeError(
+                "Previous Isaac playback cleanup is incomplete; "
+                "call terminate_playback() before starting playback again."
+            )
+        if render_mode == "human":
+            raise RuntimeError(
+                "Cannot use render_mode='human' in the running headless Isaac Sim "
+                "application. Start a separate non-headless process for human playback."
+            )
+        if render_mode != "rgb_array":
+            raise ValueError(f"Unsupported Isaac playback mode: {render_mode!r}.")
+        if self.render_mode == "rgb_array":
+            return
+
+        import carb.settings  # pyright: ignore[reportMissingImports]
+        from isaacsim.sensors.camera import Camera  # pyright: ignore[reportMissingImports]
+
+        settings = carb.settings.get_settings()
+        self._playback_restore = (
+            self.render_mode,
+            bool(settings.get("/physics/fabricUpdateTransformations")),
+            bool(settings.get("/physics/fabricUpdateVelocities")),
+            self._world.stage.GetPrimAtPath(
+                self._requested_camera_prim_path or "/World/Camera"
+            ).IsValid(),
+        )
+        try:
+            settings.set_bool("/physics/fabricUpdateTransformations", True)
+            settings.set_bool("/physics/fabricUpdateVelocities", True)
+            self._build_camera(Camera)
+            self._camera.initialize()
+            self._camera_env_index = int(
+                self._default_root_positions[:, :2].square().sum(dim=-1).argmin().item()
+            )
+            self.render_mode = "rgb_array"
+        except BaseException:
+            self.terminate_playback()
+            raise
+        LOGGER.info("Enabled Fabric output and RGB camera for Isaac playback.")
+
+
+    def terminate_playback(self) -> None:
+
+        restore = self._playback_restore
+        if restore is None:
+            return
+
+        import carb.settings  # pyright: ignore[reportMissingImports]
+
+        previous_mode, transformations, velocities, camera_prim_existed = restore
+        try:
+            if self._camera is not None:
+                self._camera.destroy()
+                self._camera = None
+                self._app.update()
+                gc.collect()
+            if self.camera_prim_path and not camera_prim_existed:
+                self._world.stage.RemovePrim(self.camera_prim_path)
+            self.camera_prim_path = None
+            self._camera_env_index = None
+        finally:
+            settings = carb.settings.get_settings()
+            settings.set_bool("/physics/fabricUpdateTransformations", transformations)
+            settings.set_bool("/physics/fabricUpdateVelocities", velocities)
+            self.render_mode = previous_mode
+        self._playback_restore = None
+        LOGGER.info("Restored Isaac training camera and Fabric settings after playback.")
 
 
     def _normalized_robot_prim_path(self) -> str:
@@ -1022,7 +1096,7 @@ class IsaacSimRuntime:
                 dtype=self.context.dtype,
             )
         if type(value).__module__.startswith("warp."):
-            import warp as wp  # pyright: ignore[reportMissingImports]
+            import warp as wp
 
             return wp.to_torch(value).to(
                 device=self.context.device,
@@ -1039,6 +1113,6 @@ class IsaacSimRuntime:
     def _warp(value: torch.Tensor) -> Any:
         """Expose a contiguous Torch tensor to Isaac's Warp-based API."""
 
-        import warp as wp  # pyright: ignore[reportMissingImports]
+        import warp as wp
 
         return wp.from_torch(value.contiguous())

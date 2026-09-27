@@ -30,7 +30,7 @@ component:
       config: vector_env_128
   simulator:
     - type: isaac_sim
-      config: isaac_sim_unitree_go1_headless
+      config: isaac_sim_unitree_go1_rgb_array
   task:
     - type: locomotion
       config: locomotion_unitree_go1_standing

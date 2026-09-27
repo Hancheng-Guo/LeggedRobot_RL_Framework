@@ -19,7 +19,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.application_entry import ApplicationEntry  # noqa: E402
+from tests.manual.isaac_test_application import manual_isaac_application  # noqa: E402
 from envs.simulators.isaac_sim_runtime import IsaacSimRuntime  # noqa: E402
 from envs.vector_env import VectorEnv  # noqa: E402
 from rl.algorithms.ppo import PPO  # noqa: E402
@@ -92,7 +92,7 @@ def main() -> None:
     timings, originals = profile_training_calls()
     try:
         with viewport_patch:
-            with ApplicationEntry("unitree_go1_isaac_cuda_headless_train_test") as app:
+            with manual_isaac_application() as app:
                 print(
                     "Starting camera-free PPO training; "
                     f"disable_viewport_updates={args.disable_viewport_updates}.",

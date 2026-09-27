@@ -54,7 +54,7 @@ python tests/manual/profile_isaac_sim_runtime.py --num-envs 16 --steps 5 *> isaa
 
 ## Isaac Sim 无相机训练验证
 
-下面的脚本使用独立的 128 环境配置，运行一个真实的 standing PPO 更新，分别统计物理步进、环境步进和 PPO 更新。模拟器配置关闭 Fabric 变换和速度输出，不创建相机：
+下面的脚本使用 `tests/manual/configs/unitree_go1_isaac_cuda_headless_train_test.yaml` 中独立的 128 环境测试参数，运行一个真实的 standing PPO 更新，分别统计物理步进、环境步进和 PPO 更新。测试辅助入口会临时装载该配置，并将实际配置归档进 checkpoint；不会向正式任务目录增加任务。训练时关闭 Fabric 变换和速度输出，不创建相机：
 
 ```powershell
 python tests/manual/train_isaac_without_camera.py *> isaac_headless_train.log
@@ -68,7 +68,7 @@ python tests/manual/train_isaac_without_camera.py *> isaac_headless_train.log
 python tests/manual/play_isaac_headless_checkpoint.py --app-name unitree_go1_isaac_cuda_headless_train_test --train-time 2026-09-26_19-15-18 --render-mode rgb_array --num-steps 50 *> isaac_camera_playback.log
 ```
 
-正式训练仍使用原有入口，选择 `unitree_go1_isaac_cuda_velocity`。`application.play()` 会在播放时检查环境的 render mode：无渲染模式时直接跳过。训练结束后运行上面的独立脚本播放 checkpoint；脚本会在新的 Isaac Sim 进程中调用原来的 `application.play()`。`--render-mode none` 跳过播放，`--render-mode rgb_array` 创建相机并生成视频。
+正式训练仍使用原有入口，选择 `unitree_go1_isaac_cuda_velocity`。Isaac 模拟器的 `train_render_mode` 默认是 `None`，训练时不创建相机并关闭 Fabric 输出；`render_mode` 仅在 `application.play()` 时生效。设置为 `rgb_array` 时，播放在原有 headless `SimulationApp` 中启用 Fabric 输出、创建相机并生成视频。设置为 `human` 时，若训练应用以 headless 启动，播放会明确报错，需另起非 headless 进程。上面的独立 checkpoint 脚本仍可用于单独验证播放。
 
 ## Isaac Sim 同进程重启验证
 
@@ -92,13 +92,13 @@ python tests/manual/verify_isaac_camera_activation.py *> isaac_camera_activation
 
 ## Go1 训练后同应用播放
 
-下面的脚本使用已有的 `unitree_go1_isaac_cuda_headless_train_test` 配置完成一次 PPO 训练，然后在原来的 World 中创建相机，使用原来的 `ApplicationEntry.play()` 生成 GIF；运行期间不关闭或重启 `SimulationApp`：
+下面的脚本使用 `unitree_go1_isaac_cuda_headless_train_test` 测试配置完成一次 PPO 训练，然后连续两次调用 `ApplicationEntry.play()`；每次播放都会在原来的 World 中启用相机并生成 GIF，结束后销毁相机、恢复 Fabric 设置，期间不关闭或重启 `SimulationApp`：
 
 ```powershell
 python tests/manual/verify_isaac_go1_camera_activation.py *> isaac_go1_camera_activation.log
 ```
 
-出现 `ISAAC GO1 SAME-APP CAMERA PLAYBACK PASSED` 表示训练、相机启用、播放、GIF 生成和应用关闭均完成。该脚本为验证目的直接访问 Isaac 运行时内部对象，不改变正式训练或播放的行为。若失败，请提供完整日志及最后一条 `PHASE` 输出。
+出现 `ISAAC GO1 SAME-APP CAMERA PLAYBACK PASSED` 表示训练、相机启用、播放、GIF 生成和应用关闭均完成。若失败，请提供完整日志及最后一条 `PHASE` 输出。
 
 ## 无相机训练的 viewport 性能对比
 

@@ -34,6 +34,11 @@ class IsaacSimModelMetadata:
 
 class IsaacSimBackend(Protocol):
     metadata: IsaacSimModelMetadata
+    render_mode: str | None
+
+    def activate_playback(self, render_mode: str) -> None: ...
+
+    def terminate_playback(self) -> None: ...
 
     @property
     def playback_env_index(self) -> int: ...

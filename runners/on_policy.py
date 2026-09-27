@@ -113,37 +113,6 @@ class OnPolicyRunner(BaseRunner):
         )
 
 
-    def _create_temporary_environment(
-        self,
-        num_envs: int,
-    ) -> BaseEnv:
-        
-        if num_envs <= 0:
-            raise ValueError("'num_envs' must be greater than 0.")
-        component = self._component
-        if component is None:
-            raise RuntimeError("Runner component configuration is missing.")
-
-        environment_info = component.environment
-        if environment_info is None:
-            raise RuntimeError("Environment configuration is missing.")
-        if environment_info.type not in ENV_TYPE_MAP:
-            raise ValueError(
-                f"Invalid environment type: {environment_info.type!r}."
-            )
-
-        environment_config = load_yaml(environment_info.config)
-        environment_config["num_envs"] = num_envs
-        environment = ENV_TYPE_MAP[environment_info.type](
-            context=self.context,
-        )
-        environment.config_update(
-            component=component,
-            **environment_config,
-        )
-        return environment
-
-
     def stage_update(
         self,
         stage_callback: StageCallback | None,
@@ -628,7 +597,7 @@ class OnPolicyRunner(BaseRunner):
 
         if not hasattr(self, "environment"):
             raise RuntimeError("environment is not instantiated.")
-        if not self.environment.check_render_mode():
+        if not self.environment.has_playback_render_mode():
             LOGGER.info("Skipping playback because render mode is disabled.")
             return
 
@@ -649,29 +618,22 @@ class OnPolicyRunner(BaseRunner):
         ):
             raise ValueError("'num_plays' must be a positive integer.")
 
-        original_environment = self.environment
-        temporary_environment: BaseEnv | None = None
-        if original_environment.supports_concurrent_instances:
-            temporary_environment = self._create_temporary_environment(
-                num_envs=1,
-            )
-            self.environment = temporary_environment
-
+        self.environment.prepare_playback()
         try:
             for play_index in range(num_plays):
                 if not self._play_steps(
-                    num_steps,
-                    formats,
-                    save_frames_to_video,
+                    num_steps=num_steps,
+                    formats=formats,
+                    frame_saver=save_frames_to_video,
                 ):
                     break
                 if play_index + 1 < num_plays:
                     self.algorithm.reset_policy_state()
         finally:
-            self.algorithm.reset_policy_state()
-            if temporary_environment is not None:
-                temporary_environment.close()
-            self.environment = original_environment
+            try:
+                self.algorithm.reset_policy_state()
+            finally:
+                self.environment.terminate_playback()
 
 
     def _play_steps(
@@ -686,10 +648,14 @@ class OnPolicyRunner(BaseRunner):
 
         if not hasattr(self, "algorithm"):
             raise RuntimeError("algorithm is not instantiated.")
-        
+
         self.algorithm.set_eval_mode()
         obs = self.environment.reset()
-        self._warm_up_playback_renderer()
+        render_mode = self.environment.render_mode
+        if render_mode == "rgb_array":
+            self._warm_up_playback_renderer()
+        elif render_mode == "human":
+            self.environment.render()
 
         if not self._run_callbacks(
             "_on_play_start",
@@ -777,9 +743,10 @@ class OnPolicyRunner(BaseRunner):
         return f"{prefix}_{number}"
 
 
-    def _warm_up_playback_renderer(self, max_frames: int = 120) -> None:
-        if self.environment.render_mode != "rgb_array":
-            return
+    def _warm_up_playback_renderer(
+        self,
+        max_frames: int = 120,
+    ) -> None:
 
         LOGGER.info("Warming up playback renderer.")
         for frame_index in range(1, max_frames + 1):

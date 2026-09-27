@@ -99,3 +99,14 @@ python tests/manual/verify_isaac_go1_camera_activation.py *> isaac_go1_camera_ac
 ```
 
 出现 `ISAAC GO1 SAME-APP CAMERA PLAYBACK PASSED` 表示训练、相机启用、播放、GIF 生成和应用关闭均完成。该脚本为验证目的直接访问 Isaac 运行时内部对象，不改变正式训练或播放的行为。若失败，请提供完整日志及最后一条 `PHASE` 输出。
+
+## 无相机训练的 viewport 性能对比
+
+Go1 同应用播放验证通过后，可比较当前 headless 默认设置与关闭 viewport 更新的设置。以下两条命令均使用同一 128 环境配置、无相机、Fabric 输出关闭，并各运行一次 PPO 训练；唯一差别是第二条在创建 `SimulationApp` 时设置 `disable_viewport_updates=True`：
+
+```powershell
+python tests/manual/train_isaac_without_camera.py *> isaac_viewport_default.log
+python tests/manual/train_isaac_without_camera.py --disable-viewport-updates *> isaac_viewport_disabled.log
+```
+
+两份日志都应出现 `CAMERA-FREE TRAINING PASSED`。比较 `TRAINING TIMINGS` 中 `IsaacSimRuntime.step`、`IsaacSimRuntime.get_state`、`VectorEnv.step`、`PPO.update` 的 `calls` 和 `mean`，以及整体训练耗时。尽量在相同设备负载下交替运行两组至少两轮；每次运行在独立进程中完成，以免 Isaac 状态相互影响。这个开关只作用于手动脚本，不修改正式运行时配置。

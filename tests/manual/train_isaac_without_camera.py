@@ -5,9 +5,12 @@ Run from the repository root using the Python environment with Isaac Sim.
 
 from __future__ import annotations
 
+import argparse
 import sys
 import time
+from contextlib import nullcontext
 from pathlib import Path
+from unittest.mock import patch
 
 import torch
 
@@ -61,20 +64,52 @@ def print_timings(timings: dict[str, list[float]]) -> None:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--disable-viewport-updates",
+        action="store_true",
+        help="Disable the default viewport while keeping camera-free training unchanged.",
+    )
+    args = parser.parse_args()
+
+    viewport_patch = nullcontext()
+    if args.disable_viewport_updates:
+        import isaacsim.simulation_app as simulation_app_module
+
+        original_simulation_app = simulation_app_module.SimulationApp
+
+        def create_simulation_app(config):
+            if not config.get("headless", False):
+                raise RuntimeError("Viewport comparison requires headless mode.")
+            return original_simulation_app(
+                {**config, "disable_viewport_updates": True}
+            )
+
+        viewport_patch = patch.object(
+            simulation_app_module,
+            "SimulationApp",
+            create_simulation_app,
+        )
+
     start = time.perf_counter()
     timings, originals = profile_training_calls()
     try:
-        with ApplicationEntry("unitree_go1_isaac_cuda_headless_train_test") as app:
-            print("Starting camera-free PPO training.", flush=True)
-            app.train()
-            if app.stage_manager.continue_training:
-                raise RuntimeError("PPO stage did not complete its first update.")
-            print_timings(timings)
-            print(
-                f"CAMERA-FREE TRAINING PASSED in {time.perf_counter() - start:.2f} s; "
-                f"logs: {app.save_dir / 'logs' / 'training.log'}",
-                flush=True,
-            )
+        with viewport_patch:
+            with ApplicationEntry("unitree_go1_isaac_cuda_headless_train_test") as app:
+                print(
+                    "Starting camera-free PPO training; "
+                    f"disable_viewport_updates={args.disable_viewport_updates}.",
+                    flush=True,
+                )
+                app.train()
+                if app.stage_manager.continue_training:
+                    raise RuntimeError("PPO stage did not complete its first update.")
+                print_timings(timings)
+                print(
+                    f"CAMERA-FREE TRAINING PASSED in {time.perf_counter() - start:.2f} s; "
+                    f"logs: {app.save_dir / 'logs' / 'training.log'}",
+                    flush=True,
+                )
     finally:
         for owner, method_name, original in reversed(originals):
             setattr(owner, method_name, original)

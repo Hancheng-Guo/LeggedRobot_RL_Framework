@@ -74,9 +74,7 @@ def main() -> None:
 
     viewport_patch = nullcontext()
     if args.disable_viewport_updates:
-        import isaacsim.simulation_app as simulation_app_module
-
-        original_simulation_app = simulation_app_module.SimulationApp
+        from isaacsim.simulation_app import SimulationApp as original_simulation_app
 
         def create_simulation_app(config):
             if not config.get("headless", False):
@@ -85,10 +83,9 @@ def main() -> None:
                 {**config, "disable_viewport_updates": True}
             )
 
-        viewport_patch = patch.object(
-            simulation_app_module,
-            "SimulationApp",
-            create_simulation_app,
+        viewport_patch = patch.dict(
+            sys.modules,
+            {"isaacsim.simulation_app.SimulationApp": create_simulation_app},
         )
 
     start = time.perf_counter()

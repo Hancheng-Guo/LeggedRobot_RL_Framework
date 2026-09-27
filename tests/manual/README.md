@@ -9,6 +9,7 @@
 | `isaac_shutdown_diagnostic.py` | Isaac Sim | 分阶段复现 Isaac Sim 启动、场景构建与关闭时的问题。 |
 | `verify_isaac_simulation_app_restart.py` | Isaac Sim | 验证同一 Python 进程能否连续启动和关闭 `SimulationApp`。 |
 | `verify_isaac_camera_activation.py` | Isaac Sim | 验证同一个 `SimulationApp` 中，物理步进后再创建相机并读取图像。 |
+| `verify_isaac_go1_camera_activation.py` | Isaac Sim | 真实 Go1 训练后，在同一个应用和环境中启用相机并调用 `ApplicationEntry.play()`。 |
 | `profile_isaac_sim_runtime.py` | Isaac Sim | 测量项目运行时的初始化、物理步进、状态读取与可选的相机渲染。 |
 
 ## MuJoCo 性能分析
@@ -88,3 +89,13 @@ python tests/manual/verify_isaac_camera_activation.py *> isaac_camera_activation
 ```
 
 出现 `ISAAC CAMERA ACTIVATION PASSED` 且 `CLEANUP: SimulationApp closed` 才表示相机切换与清理均完成。若卡住或报错，请提供完整日志。此测试不加载机器人或 PPO checkpoint；通过后仍需验证项目训练环境的相同切换。
+
+## Go1 训练后同应用播放
+
+下面的脚本使用已有的 `unitree_go1_isaac_cuda_headless_train_test` 配置完成一次 PPO 训练，然后在原来的 World 中创建相机，使用原来的 `ApplicationEntry.play()` 生成 GIF；运行期间不关闭或重启 `SimulationApp`：
+
+```powershell
+python tests/manual/verify_isaac_go1_camera_activation.py *> isaac_go1_camera_activation.log
+```
+
+出现 `ISAAC GO1 SAME-APP CAMERA PLAYBACK PASSED` 表示训练、相机启用、播放、GIF 生成和应用关闭均完成。该脚本为验证目的直接访问 Isaac 运行时内部对象，不改变正式训练或播放的行为。若失败，请提供完整日志及最后一条 `PHASE` 输出。

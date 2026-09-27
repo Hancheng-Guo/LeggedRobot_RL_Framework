@@ -8,6 +8,7 @@
 | `benchmark_mujoco_step_threads.py` | MuJoCo | 比较不同环境数和工作线程数的仿真步进吞吐量。 |
 | `isaac_shutdown_diagnostic.py` | Isaac Sim | 分阶段复现 Isaac Sim 启动、场景构建与关闭时的问题。 |
 | `verify_isaac_simulation_app_restart.py` | Isaac Sim | 验证同一 Python 进程能否连续启动和关闭 `SimulationApp`。 |
+| `verify_isaac_camera_activation.py` | Isaac Sim | 验证同一个 `SimulationApp` 中，物理步进后再创建相机并读取图像。 |
 | `profile_isaac_sim_runtime.py` | Isaac Sim | 测量项目运行时的初始化、物理步进、状态读取与可选的相机渲染。 |
 
 ## MuJoCo 性能分析
@@ -77,3 +78,13 @@ python tests/manual/verify_isaac_simulation_app_restart.py *> isaac_simulation_a
 ```
 
 脚本在同一个 Python 进程中连续两次启动、更新、关闭 `SimulationApp`，每步输出时间和阶段。出现 `ISAAC SIMULATIONAPP SAME-PROCESS RESTART PASSED` 表示最小生命周期测试通过；若卡住或崩溃，请保留完整日志和进程退出码。通过此测试仍不能证明 World、相机和项目环境能在同一进程内重建，后续需分别验证。
+
+## Isaac Sim 运行中启用相机
+
+此测试只启动一次 `SimulationApp`。它先在 headless、关闭 viewport 更新且不创建相机的 World 中步进，再启用 Fabric 变换和速度输出，在现有 World 中创建相机并读取图像：
+
+```powershell
+python tests/manual/verify_isaac_camera_activation.py *> isaac_camera_activation.log
+```
+
+出现 `ISAAC CAMERA ACTIVATION PASSED` 且 `CLEANUP: SimulationApp closed` 才表示相机切换与清理均完成。若卡住或报错，请提供完整日志。此测试不加载机器人或 PPO checkpoint；通过后仍需验证项目训练环境的相同切换。

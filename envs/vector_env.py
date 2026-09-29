@@ -89,12 +89,12 @@ class VectorEnv(BaseEnv):
             num_envs=num_envs,
             max_episode_steps=max_episode_steps,
         )
+        self._build_simulator(component=component)
         self.current_episode_steps = torch.zeros(
             self.num_envs,
             dtype=torch.long,
             device=self.context.device,
         )
-        self._build_simulator(component=component)
         model_context = self.simulator.model_context
         self._build_task(
             component=component,

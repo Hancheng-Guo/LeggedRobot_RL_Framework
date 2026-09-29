@@ -7,10 +7,16 @@
 | `profile_mujoco_state.py` | MuJoCo | 分析 `MujocoSimulator.get_state()` 及各状态字段的耗时占比。 |
 | `benchmark_mujoco_step_threads.py` | MuJoCo | 比较不同环境数和工作线程数的仿真步进吞吐量。 |
 | `isaac_shutdown_diagnostic.py` | Isaac Sim | 分阶段复现 Isaac Sim 启动、场景构建与关闭时的问题。 |
+| `verify_isaac_shutdown_exit.py` | Isaac Sim | 在独立进程中对比正常/快速关闭及 Python 错误的最终退出码。 |
 | `verify_isaac_simulation_app_restart.py` | Isaac Sim | 验证同一 Python 进程能否连续启动和关闭 `SimulationApp`。 |
 | `verify_isaac_camera_activation.py` | Isaac Sim | 验证同一个 `SimulationApp` 中，物理步进后再创建相机并读取图像。 |
 | `verify_isaac_go1_camera_activation.py` | Isaac Sim | 真实 Go1 训练后，在同一个应用和环境中启用相机并调用 `ApplicationEntry.play()`。 |
+| `verify_isaac_go1_shutdown_exit.py` | Isaac Sim | 验证完整 Go1 流程经逐扩展关闭后显式退出，并检查播放异常的退出码。 |
+| `diagnose_isaac_go1_playback.py` | Isaac Sim | 为 Go1 训练、播放及 Isaac 关闭过程增加阶段标记与定时调用栈。 |
 | `profile_isaac_sim_runtime.py` | Isaac Sim | 测量项目运行时的初始化、物理步进、状态读取与可选的相机渲染。 |
+| `diagnose_isaac_runtime_shutdown.py` | Isaac Sim | 在运行时性能入口外记录 `IsaacSimRuntime.close()` 的前后标记，隔离 Runner/PPO。 |
+| `diagnose_isaac_simulator_shutdown.py` | Isaac Sim | 单独构建并关闭 `IsaacSimSimulator`，隔离 `VectorEnv` 与 Runner。 |
+| `diagnose_isaac_vector_env_shutdown.py` | Isaac Sim | 单独构建 `VectorEnv` 与 Isaac simulator，跳过任务、Runner 和 ApplicationEntry。 |
 
 ## MuJoCo 性能分析
 
@@ -22,6 +28,28 @@ python tests/manual/benchmark_mujoco_step_threads.py --num-envs 16,32,64 --worke
 两个脚本都输出 CSV 格式的计时结果。前者可用 `--warmup` 调整预热次数；后者可用 `--frame-skip`、`--warmup-steps`、`--measured-steps` 和 `--repeats` 调整基准测试。运行 `python <脚本路径> --help` 可查看完整参数。
 
 ## Isaac Sim 关闭诊断
+
+先用下面的退出码矩阵确认这台设备的关闭行为。每个场景运行两次，脚本自动创建 `temp/isaac_shutdown_exit_时间戳/`，分别保存标准输出、错误输出和 `summary.json`。父脚本自身返回 0 仅表示矩阵执行完毕，**不能代表所有子进程都成功**；应查看汇总中的 `exit_code`、`timed_out` 和最后一条 `MARK`。单个子进程最长运行 360 秒，可用 `--timeout` 调整。
+
+```powershell
+python -u tests/manual/verify_isaac_shutdown_exit.py
+```
+
+六种场景依次为：`graceful-success`（逐扩展关闭）、`graceful-explicit-exit-success` 和 `graceful-explicit-exit-error`（逐扩展关闭返回后分别以 0 和 23 显式退出）、`fast-success`（快速关闭）、`fast-error-default`（故意抛错后以默认退出码快速关闭）、`fast-error-preserved`（故意抛错后显式要求退出码 23）。`fast-error-default` 若最终为 0，说明快速关闭会掩盖 Python 错误；两个 `*-error` 显式退出场景应为 23。`fast-*` 场景可能直接终止进程，因此缺少 `CLOSE_RETURNED` 标记是预期行为。`graceful-success` 若有 `CLOSE_RETURNED` 和 `CHILD_FINISHED`，但退出码为 `-1073741819`（`0xC0000005`），则故障发生在 `close()` 返回后的原生/解释器退出阶段。显式退出场景仅用于定位问题，不能直接代替项目的通用 `close()` 语义。
+
+需要单独重跑某个场景时：
+
+```powershell
+python -u tests/manual/verify_isaac_shutdown_exit.py --cases graceful-success --repeats 1
+```
+
+如需对照 Windows 故障模块，可在运行后查看最近的 Application Error 事件（事件 ID 1000），按 `summary.json` 中的 PID 和时间匹配：
+
+```powershell
+Get-WinEvent -FilterHashtable @{LogName='Application'; Id=1000; StartTime=(Get-Date).AddHours(-2)} | Select-Object -First 10 TimeCreated, Message
+```
+
+确认这些结果后，再决定是否修改正式关闭路径，并重新运行 Go1 训练及两轮播放。不要只依据快速关闭的退出码 0 判定业务成功，还须检查训练和播放完成标记。
 
 ```powershell
 python tests/manual/isaac_shutdown_diagnostic.py --mode baseline
@@ -51,6 +79,29 @@ python tests/manual/profile_isaac_sim_runtime.py --num-envs 16 --steps 5 *> isaa
 ```
 
 之后用 `Get-Content isaac_profile.log -Tail 80` 查看末尾，或直接提供日志文件。
+
+定位运行时本身的关闭时点时，可运行不含 Runner/PPO 的 128 环境对照，并检查 `RUNTIME SHUTDOWN: close returned`、`script finished` 与最终退出码：
+
+```powershell
+python -u tests/manual/diagnose_isaac_runtime_shutdown.py --num-envs 128 --warmup 0 --steps 5 --disable-fabric-output 1> temp/isaac_runtime_shutdown_stdout.log 2> temp/isaac_runtime_shutdown_stderr.log
+$LASTEXITCODE
+python -u tests/manual/diagnose_isaac_runtime_shutdown.py --import-application-entry --num-envs 128 --warmup 0 --steps 5 --disable-fabric-output 1> temp/isaac_runtime_with_app_import_stdout.log 2> temp/isaac_runtime_with_app_import_stderr.log
+$LASTEXITCODE
+python -u tests/manual/diagnose_isaac_simulator_shutdown.py --num-envs 128 1> temp/isaac_simulator_shutdown_stdout.log 2> temp/isaac_simulator_shutdown_stderr.log
+$LASTEXITCODE
+python -u tests/manual/diagnose_isaac_simulator_shutdown.py --num-envs 128 --preallocate-cuda-tensor 1> temp/isaac_simulator_preallocated_stdout.log 2> temp/isaac_simulator_preallocated_stderr.log
+$LASTEXITCODE
+python -u tests/manual/diagnose_isaac_vector_env_shutdown.py 1> temp/isaac_vector_env_shutdown_stdout.log 2> temp/isaac_vector_env_shutdown_stderr.log
+$LASTEXITCODE
+python -u tests/manual/diagnose_isaac_vector_env_shutdown.py --defer-cuda-buffer 1> temp/isaac_vector_env_deferred_stdout.log 2> temp/isaac_vector_env_deferred_stderr.log
+$LASTEXITCODE
+python -u tests/manual/diagnose_isaac_vector_env_shutdown.py --use-runtime-context-factory 1> temp/isaac_vector_env_runtime_context_stdout.log 2> temp/isaac_vector_env_runtime_context_stderr.log
+$LASTEXITCODE
+```
+
+进一步比较 `RuntimeContext` 初始化路径时，可对同一脚本组合使用 `--use-runtime-context-factory`、`--indexed-runtime-device`、`--fixed-runtime-seed`，或在直接构造路径使用 `--probe-device`、`--initialize-seed`、`--threads-before-seed`、`--unindexed-cuda`。这些选项只用于隔离设备表示、种子和初始化顺序，不修改正式配置。记录 `close begin`、`close returned`、`script finished` 及退出码；即使 `close()` 返回，进程仍可能以 `0xC0000005` 退出。当前设备上，工厂路径加 `cuda:0`、固定种子 0 的两次相同运行均在 `close begin` 后访问冲突；直接构造路径即使执行设备检查、设种子和先设线程数，也能让 `close()` 返回，但退出阶段仍访问冲突。这说明关闭阶段位置受初始化路径影响，尚不能归因于单一配置项。
+
+`--trace-close-steps` 会标记 `World.stop`、`World.clear`、`SimulationApp.close` 及 SimulationManager 的卸载步骤。当前设备上，`SimulationManager._shutdown()` 和原生接口释放都已返回，随后 Kit 卸载仍发生 `0xC0000005`；Windows 应用事件指向 `isaacsim.core.simulation_manager.plugin.dll` 的 `0x1c5fe`。`--skip-native-release` 仅用于隔离故障：它使 `SimulationApp.close()` 返回，但进程退出时仍访问冲突，不可作为正式清理策略。现阶段不要因看到 `close returned` 就判定关闭问题已修复。
 
 ## Isaac Sim 无相机训练验证
 
@@ -95,10 +146,46 @@ python tests/manual/verify_isaac_camera_activation.py *> isaac_camera_activation
 下面的脚本使用 `unitree_go1_isaac_cuda_headless_train_test` 测试配置完成一次 PPO 训练，然后连续两次调用 `ApplicationEntry.play()`；每次播放都会在原来的 World 中启用相机并生成 GIF，结束后销毁相机、恢复 Fabric 设置，期间不关闭或重启 `SimulationApp`：
 
 ```powershell
-python tests/manual/verify_isaac_go1_camera_activation.py *> isaac_go1_camera_activation.log
+New-Item -ItemType Directory -Force temp | Out-Null
+python tests/manual/verify_isaac_go1_camera_activation.py *> temp/isaac_go1_camera_activation.log
+$LASTEXITCODE
 ```
 
-出现 `ISAAC GO1 SAME-APP CAMERA PLAYBACK PASSED` 表示训练、相机启用、播放、GIF 生成和应用关闭均完成。若失败，请提供完整日志及最后一条 `PHASE` 输出。
+出现 `ISAAC GO1 SAME-APP CAMERA PLAYBACK PASSED` 表示训练、相机启用、播放和 GIF 生成已完成；还需确认退出码为 `0`。原生扩展可能在该标记打印后、进程退出前崩溃。若失败，请提供完整日志、退出码及最后一条 `PHASE` 输出。
+
+若初始化或关闭长时间没有新日志，可运行带阶段标记的同一流程。它会在模型转换、场景克隆、`World.reset()` 等步骤前后打印 `DIAG`，并在超过两分钟时输出 Python 调用栈：
+
+```powershell
+python -u tests/manual/diagnose_isaac_go1_playback.py 1> temp/go1_diagnostic.log 2> temp/go1_diagnostic_error.log
+$LASTEXITCODE
+```
+
+查看两份日志的末尾以定位最后完成的阶段。`Timeout (0:02:00)!` 是诊断调用栈的标记，并不单独表示脚本失败；仍须以退出码判断进程是否正常结束。
+
+若最小关闭矩阵显示崩溃只发生在 `close()` 返回后的进程收尾阶段，可用下面的诊断入口验证完整业务流程。它沿用现有的 `fast_shutdown=False` 和 Go1 测试，待 `ApplicationEntry` 完成清理并返回后，显式结束这个独立进程。`--train-only` 用来区分训练清理与播放清理；`--inject-playback-error` 在训练后、首次播放前故意抛错。各次执行分别保存日志；请检查两轮 GIF 标记、`ISAAC GO1 SAME-APP CAMERA PLAYBACK PASSED`、`SHUTDOWN DIAG` 标记和退出码。如果崩溃发生在 `SimulationApp.close()` 内部，就不会出现显式退出标记，此时该办法不能解决问题。该入口仅用于诊断，不能代替通用 `close()` 方法。
+
+```powershell
+python -u tests/manual/verify_isaac_go1_shutdown_exit.py 1> temp/go1_graceful_exit_success.log 2> temp/go1_graceful_exit_success_error.log
+$LASTEXITCODE
+python -u tests/manual/verify_isaac_go1_shutdown_exit.py --train-only 1> temp/go1_graceful_exit_train_only.log 2> temp/go1_graceful_exit_train_only_error.log
+$LASTEXITCODE
+python -u tests/manual/verify_isaac_go1_shutdown_exit.py --train-only --without-tensorboard 1> temp/go1_graceful_exit_no_tensorboard.log 2> temp/go1_graceful_exit_no_tensorboard_error.log
+$LASTEXITCODE
+python -u tests/manual/verify_isaac_go1_shutdown_exit.py --train-only --algorithm-first 1> temp/go1_graceful_exit_algorithm_first.log 2> temp/go1_graceful_exit_algorithm_first_error.log
+$LASTEXITCODE
+python -u tests/manual/verify_isaac_go1_shutdown_exit.py --stop-before-runner-train 1> temp/go1_graceful_exit_runner_built.log 2> temp/go1_graceful_exit_runner_built_error.log
+$LASTEXITCODE
+python -u tests/manual/verify_isaac_go1_shutdown_exit.py --skip-runner-train 1> temp/go1_graceful_exit_runner_built_no_error.log 2> temp/go1_graceful_exit_runner_built_no_error_stderr.log
+$LASTEXITCODE
+python -u tests/manual/verify_isaac_go1_shutdown_exit.py --skip-algorithm-build 1> temp/go1_graceful_exit_no_algorithm.log 2> temp/go1_graceful_exit_no_algorithm_stderr.log
+$LASTEXITCODE
+python -u tests/manual/verify_isaac_go1_shutdown_exit.py --build-environment-only 1> temp/go1_graceful_exit_environment_only.log 2> temp/go1_graceful_exit_environment_only_stderr.log
+$LASTEXITCODE
+python -u tests/manual/verify_isaac_go1_shutdown_exit.py --build-simulator-only 1> temp/go1_graceful_exit_simulator_only.log 2> temp/go1_graceful_exit_simulator_only_stderr.log
+$LASTEXITCODE
+python -u tests/manual/verify_isaac_go1_shutdown_exit.py --inject-playback-error 1> temp/go1_graceful_exit_failure.log 2> temp/go1_graceful_exit_failure_error.log
+$LASTEXITCODE
+```
 
 ## 无相机训练的 viewport 性能对比
 

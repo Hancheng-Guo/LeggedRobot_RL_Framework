@@ -14,7 +14,7 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from typing import Generic, TypeVar
 
-from envs.simulators.base import BaseSimulator, _FOOT_CONTACT_FORCE_THRESHOLD
+from envs.simulators.base import BaseSimulator
 from envs.simulators.utils.context import ModelContext
 from envs.simulators.utils.state import SimulatorState
 from utils.component import Component
@@ -60,7 +60,7 @@ class MujocoSimulator(BaseSimulator):
         self.step_workers: int = 1
         self.foot_geom_names: tuple[str, ...]
         self.floor_geom_names: tuple[str, ...]
-        self.foot_contact_force_threshold: float = _FOOT_CONTACT_FORCE_THRESHOLD
+        self.foot_contact_force_threshold: float = self.FOOT_CONTACT_FORCE_THRESHOLD
         self.render_mode: str | None = None
         self.reset_keyframe: str | None = None
         self.reset_keyframe_id: int = -1

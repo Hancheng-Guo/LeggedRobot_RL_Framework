@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import torch
 import numpy as np
 from typing import Any
@@ -25,9 +27,25 @@ class BaseEnv(ABC):
 
 
     @property
+    @abstractmethod
     def render_mode(self) -> str | None:
         """Rendering mode used by this environment, if any."""
-        return None
+        raise NotImplementedError
+
+
+    def has_playback_render_mode(self) -> bool:
+        """Whether playback has a configured render mode."""
+        return self.render_mode is not None
+
+    @abstractmethod
+    def prepare_playback(self) -> None:
+        """Activate the environment used for playback."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def terminate_playback(self) -> None:
+        """Release playback resources and restore normal environment calls."""
+        raise NotImplementedError
 
 
     @property

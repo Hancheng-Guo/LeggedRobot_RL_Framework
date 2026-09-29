@@ -23,9 +23,14 @@ class TrackingEnvironment(BaseEnv):
     instances: list["TrackingEnvironment"] = []
     SUPPORTS_CONCURRENT_INSTANCES: bool = True
 
+    @property
+    def render_mode(self) -> str:
+        return "human"
+
     def __init__(self, context: RuntimeContext) -> None:
         super().__init__(context)
         self.closed = False
+        self._playback_environment: TrackingEnvironment | None = None
         self.instances.append(self)
 
     def config_update(
@@ -35,6 +40,22 @@ class TrackingEnvironment(BaseEnv):
         **kwargs: Any,
     ) -> None:
         self.num_envs = num_envs
+        self._component = component
+
+    def prepare_playback(self) -> None:
+        if not self.supports_concurrent_instances:
+            return
+        temporary = type(self)(self.context)
+        temporary.config_update(self._component, num_envs=1)
+        self._playback_environment = temporary
+        self._training_num_envs = self.num_envs
+        self.num_envs = temporary.num_envs
+
+    def terminate_playback(self) -> None:
+        if self._playback_environment is not None:
+            self._playback_environment.close()
+            self._playback_environment = None
+            self.num_envs = self._training_num_envs
 
     def reset(self) -> torch.Tensor:
         return torch.zeros(self.num_envs, 1)
@@ -310,7 +331,7 @@ def test_play_restores_original_environment_after_failure(
         frame_saver: Any,
     ) -> None:
         assert callable(frame_saver)
-        assert runner.environment is not None
+        assert runner.environment is original_environment
         assert runner.environment.num_envs == 1
         raise RuntimeError("play failed")
 
@@ -394,7 +415,11 @@ def test_play_records_requested_number_of_plays(
     runner.algorithm = MinimalAlgorithm(runtime_context)
     recordings: list[int] = []
 
-    def record_playback(num_steps: int, formats: Any, frame_saver: Any) -> bool:
+    def record_playback(
+        num_steps: int,
+        formats: Any,
+        frame_saver: Any,
+    ) -> bool:
         recordings.append(num_steps)
         return True
 
@@ -516,3 +541,52 @@ def test_play_warms_up_renderer_before_progress_callbacks(
         "render:3",
         "play.start",
     ]
+
+
+def test_human_playback_does_not_wait_for_rgb_frames(
+    runtime_context: RuntimeContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class HumanEnvironment(TrackingEnvironment):
+        def __init__(self, context: RuntimeContext) -> None:
+            super().__init__(context)
+            self.num_envs = 1
+            self.render_calls = 0
+
+        def step(self, action: torch.Tensor):
+            obs = torch.zeros(1, 1)
+            done = torch.zeros(1, dtype=torch.bool)
+            return obs, obs, torch.zeros(1), done, done, {}
+
+        def render(self) -> None:
+            self.render_calls += 1
+
+    environment = HumanEnvironment(runtime_context)
+    runner = OnPolicyRunner(context=runtime_context)
+    runner.environment = environment
+    runner.callbacks = []
+    runner.algorithm = MinimalAlgorithm(runtime_context)
+    runner.algorithm.set_eval_mode = lambda: None
+    monkeypatch.setattr(
+        runner.algorithm,
+        "act",
+        lambda obs, deterministic=False: PolicyOutput(
+            action=torch.zeros(1, 1),
+            log_prob=torch.zeros(1),
+            value=torch.zeros(1),
+        ),
+    )
+    saved_frames: list[int] = []
+
+    def save_frames(frames: list[np.ndarray], **kwargs: Any) -> list[Path]:
+        saved_frames.append(len(frames))
+        return []
+
+    runner._play_steps(
+        num_steps=2,
+        formats="gif",
+        frame_saver=save_frames,
+    )
+
+    assert environment.render_calls == 3
+    assert saved_frames == []

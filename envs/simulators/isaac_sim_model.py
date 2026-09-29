@@ -195,7 +195,7 @@ class IsaacSimModelConverter:
         )
 
     def _repair_virtual_body_mass(self, output_path: Path) -> None:
-        from pxr import Gf, Usd, UsdPhysics  # pyright: ignore[reportMissingImports]
+        from pxr import Gf, Usd, UsdPhysics
 
         stage = Usd.Stage.Open(str(output_path))
         if stage is None:

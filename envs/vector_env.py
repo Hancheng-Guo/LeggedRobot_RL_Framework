@@ -15,7 +15,51 @@ from utils.config import load_yaml
 from utils.param import update_attributes
 
 
+_PLAYBACK_LOCAL_ATTRIBUTES = frozenset({
+    "_playback_environment",
+    "prepare_playback",
+    "terminate_playback",
+})
+
+
 class VectorEnv(BaseEnv):
+
+    def __getattribute__(self, name: str) -> Any:
+        """Route environment access to the temporary playback instance."""
+        if name in _PLAYBACK_LOCAL_ATTRIBUTES:
+            return object.__getattribute__(self, name)
+
+        try:
+            temporary = object.__getattribute__(self, "_playback_environment")
+        except AttributeError:
+            temporary = None
+        if temporary is not None:
+            return getattr(temporary, name)
+        return object.__getattribute__(self, name)
+
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        playback = object.__getattribute__(self, "__dict__").get(
+            "_playback_environment"
+        )
+        if playback is not None and name != "_playback_environment":
+            raise RuntimeError(
+                "Cannot modify the original environment during playback."
+            )
+        object.__setattr__(self, name, value)
+
+
+    def __delattr__(self, name: str) -> None:
+        playback = object.__getattribute__(self, "__dict__").get(
+            "_playback_environment"
+        )
+        if playback is not None:
+            raise RuntimeError(
+                "Cannot delete attributes of the original environment "
+                "during playback."
+            )
+        object.__delattr__(self, name)
+
 
     def __init__(
         self,
@@ -25,6 +69,8 @@ class VectorEnv(BaseEnv):
         self.context = context
         self.simulator: BaseSimulator
         self.task: BaseTaskLogic
+        self._playback_environment: BaseEnv | None = None
+        self._component: Component | None = None
 
         self.num_envs: int
         self.max_episode_steps: int
@@ -43,16 +89,25 @@ class VectorEnv(BaseEnv):
             num_envs=num_envs,
             max_episode_steps=max_episode_steps,
         )
+        self._build_simulator(component=component)
         self.current_episode_steps = torch.zeros(
             self.num_envs,
             dtype=torch.long,
             device=self.context.device,
         )
-        self._build_simulator(component=component)
         model_context = self.simulator.model_context
         self._build_task(
             component=component,
             model_context=model_context,
+        )
+        previous = self._component
+        self._component = component if previous is None else Component(
+            runner=component.runner or previous.runner,
+            algorithm=component.algorithm or previous.algorithm,
+            policy=component.policy or previous.policy,
+            environment=component.environment or previous.environment,
+            simulator=component.simulator or previous.simulator,
+            task=component.task or previous.task,
         )
 
 
@@ -63,7 +118,50 @@ class VectorEnv(BaseEnv):
 
     @property
     def render_mode(self) -> str | None:
-        return self.simulator.render_mode
+        return self.simulator.active_render_mode
+
+
+    def has_playback_render_mode(self) -> bool:
+        return self.simulator.has_playback_render_mode()
+
+
+    def prepare_playback(self) -> None:
+        if self._playback_environment is not None:
+            raise RuntimeError("Playback is already prepared.")
+        if self.supports_concurrent_instances:
+            self._playback_environment = self._create_playback_environment()
+        try:
+            self.simulator.prepare_playback()
+        except BaseException:
+            if self._playback_environment is not None:
+                self.terminate_playback()
+            raise
+
+
+    def _create_playback_environment(self) -> BaseEnv:
+        if self._component is None:
+            raise RuntimeError("Playback configuration is unavailable.")
+        temporary = type(self)(context=self.context)
+        try:
+            temporary.config_update(
+                component=self._component,
+                num_envs=1,
+                max_episode_steps=self.max_episode_steps,
+            )
+        except BaseException:
+            temporary.close()
+            raise
+        return temporary
+
+
+    def terminate_playback(self) -> None:
+        try:
+            self.simulator.terminate_playback()
+        finally:
+            temporary = self._playback_environment
+            self._playback_environment = None
+            if temporary is not None:
+                temporary.close()
 
 
     @property

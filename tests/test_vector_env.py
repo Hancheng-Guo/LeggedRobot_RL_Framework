@@ -1,5 +1,6 @@
 import pytest
 import torch
+from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
@@ -8,9 +9,12 @@ from envs.simulators.utils.state import SimulatorState
 from envs.tasks.base import BaseTaskLogic
 from envs.tasks.utils.context import TaskContext, TaskStepResult
 from envs.vector_env import VectorEnv
+from utils.component import Component, ComponentInfo
 
 
 class FakeSimulator:
+
+    SUPPORTS_CONCURRENT_INSTANCES = True
 
     def __init__(self, num_envs: int) -> None:
         self.state = torch.zeros(num_envs, 1)
@@ -162,12 +166,110 @@ class FakeTask:
 
 def make_env(max_episode_steps: int = 10) -> VectorEnv:
     env = VectorEnv.__new__(VectorEnv)
+    env._playback_environment = None
+    env._component = None
     env.num_envs = 2
     env.max_episode_steps = max_episode_steps
     env.current_episode_steps = torch.zeros(2, dtype=torch.long)
     env.simulator = cast(BaseSimulator, FakeSimulator(2))
     env.task = cast(BaseTaskLogic, FakeTask(2))
     return env
+
+
+def test_environment_keeps_merged_component_for_playback(
+    monkeypatch: pytest.MonkeyPatch,
+    runtime_context,
+) -> None:
+    env = make_env()
+    env.context = runtime_context
+    monkeypatch.setattr(env.simulator, "model_context", None, raising=False)
+    monkeypatch.setattr(env, "_build_simulator", lambda component: None)
+    monkeypatch.setattr(env, "_build_task", lambda **kwargs: None)
+    environment_info = ComponentInfo("vector", Path("environment.yaml"))
+    simulator_info = ComponentInfo("mujoco", Path("simulator.yaml"))
+    task_info = ComponentInfo("task", Path("task.yaml"))
+    first = Component(None, None, None, environment_info, simulator_info, task_info)
+    updated_task = ComponentInfo("task", Path("updated-task.yaml"))
+    second = Component(None, None, None, None, None, updated_task)
+
+    env.config_update(first)
+    env.config_update(second)
+
+    assert env._component == Component(
+        None, None, None, environment_info, simulator_info, updated_task
+    )
+
+
+def test_playback_delegates_without_replacing_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env = make_env()
+    closed: list[bool] = []
+    lifecycle: list[str] = []
+    playback_obs = torch.ones(1, 3)
+    original_marker = object()
+    playback_marker = object()
+    env.marker = original_marker
+    temporary = SimpleNamespace(
+        num_envs=1,
+        marker=playback_marker,
+        simulator=SimpleNamespace(
+            prepare_playback=lambda: lifecycle.append("prepare"),
+            terminate_playback=lambda: lifecycle.append("terminate"),
+        ),
+        render_mode="rgb_array",
+        playback_env_index=0,
+        render_fps=50.0,
+        reset=lambda: playback_obs,
+        render=lambda: None,
+        close=lambda: closed.append(True),
+    )
+    monkeypatch.setattr(env, "_create_playback_environment", lambda: temporary)
+
+    env.prepare_playback()
+    assert lifecycle == ["prepare"]
+    assert env.num_envs == 1
+    assert env.reset() is playback_obs
+    assert env.marker is playback_marker
+    with pytest.raises(RuntimeError, match="Cannot modify"):
+        env.marker = object()
+    with pytest.raises(RuntimeError, match="Cannot delete"):
+        del env.marker
+    assert env.render_mode == "rgb_array"
+    assert env.render_fps == 50.0
+
+    env.terminate_playback()
+    assert lifecycle == ["prepare", "terminate"]
+    assert closed == [True]
+    assert env.num_envs == 2
+    assert env.marker is original_marker
+
+
+def test_playback_prepare_failure_clears_temporary_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env = make_env()
+    lifecycle: list[str] = []
+
+    def fail_prepare() -> None:
+        raise RuntimeError("prepare failed")
+
+    temporary = SimpleNamespace(
+        num_envs=1,
+        simulator=SimpleNamespace(
+            prepare_playback=fail_prepare,
+            terminate_playback=lambda: lifecycle.append("terminate"),
+        ),
+        close=lambda: lifecycle.append("close"),
+    )
+    monkeypatch.setattr(env, "_create_playback_environment", lambda: temporary)
+
+    with pytest.raises(RuntimeError, match="prepare failed"):
+        env.prepare_playback()
+
+    assert lifecycle == ["terminate", "close"]
+    assert env._playback_environment is None
+    assert env.num_envs == 2
 
 
 def test_step_uses_old_command_for_reward_and_new_command_for_observation():

@@ -9,13 +9,11 @@ from envs.simulators.utils.state import SimulatorState
 from app.utils.context import RuntimeContext
 
 
-_FOOT_CONTACT_FORCE_THRESHOLD: float = 15.0
-
-
 class BaseSimulator(ABC):
 
     SUPPORTED_RENDER_MODES = frozenset(("human", "rgb_array"))
     SUPPORTS_CONCURRENT_INSTANCES = True
+    FOOT_CONTACT_FORCE_THRESHOLD: float = 15.0
 
     def __init__(
         self,
@@ -61,6 +59,23 @@ class BaseSimulator(ABC):
     @property
     def playback_env_index(self) -> int:
         return 0
+
+
+    @property
+    def active_render_mode(self) -> str | None:
+        return self.render_mode
+
+
+    def has_playback_render_mode(self) -> bool:
+        return self.render_mode is not None
+
+
+    def prepare_playback(self) -> None:
+        """Prepare simulator-specific playback resources, if needed."""
+
+
+    def terminate_playback(self) -> None:
+        """Release simulator-specific playback resources, if any."""
 
 
     def _tensor(

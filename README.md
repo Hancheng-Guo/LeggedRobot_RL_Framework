@@ -483,6 +483,12 @@ reset_state:
 
 `model_path` 支持 `.usd`、`.usda`、`.usdc`、`.urdf`、MJCF `.xml`。`robot_prim_path`、body path 会被规范为以 `/` 开头的相对机器人路径；`floor_prim_paths` 则必须是完整绝对路径。
 
+#### Isaac Sim 退出异常与训练产物
+
+在 Windows、Isaac Sim 6.1.0.0 的当前测试环境中，`SimulationApp.close()` 返回后，Python 进程仍可能在原生插件的退出清理阶段以 `0xC0000005`（PowerShell 中通常显示为 `-1073741819`）结束。最小化的 `SimulationApp` 脚本也能复现；原生转储将故障定位到 `isaacsim.core.simulation_manager.plugin.dll + 0x1c5fe`。这属于尚未解决的退出异常，**不能将非零退出码当作正常成功**，也不能仅凭退出码断定训练阶段没有完成。诊断过程见 [手动测试说明](tests/manual/README.md#isaac-sim-关闭诊断)。
+
+判断一次训练是否已经留下可用产物，应检查同一次运行的 `checkpoints/<app_name>_<time>/`：`logs/<file_name>` 中出现 `All training stages completed.`，对应 `checkpoints/stage_<index>/` 中存在 `stage_completed` 和 `latest.pt`，且 `configs/` 有本次配置快照。阶段完成时项目会先保存检查点，再写入 `stage_completed` 标记。若只是达到最大迭代数或被回调停止，不能把日志中已运行的迭代数当作阶段完成；若需要确认检查点可用于继续训练，应在受信任的本地产物上实际执行一次续训加载。播放结果另看 `videos/` 下生成的文件和播放脚本的完成标记。即使这些检查都通过，退出码异常仍须单独记录，自动化任务也应将该进程视为退出失败。
+
 ## 9. locomotion 任务配置
 
 任务文件必须提供以下八个顶层字段。`event_manager_config` 和 `randomization_manager_config` 当前为预留项，尚未构建对应 Manager，写 `{}` 即可。

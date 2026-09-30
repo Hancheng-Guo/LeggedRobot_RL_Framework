@@ -1,28 +1,16 @@
-from dataclasses import dataclass
+import torch
 from typing import Any
 from pathlib import Path
 
-import torch
-
 from app.utils.device import resolve_device
 from app.utils.seed import set_seed
+from utils.runtime import RuntimeContext
 
 
 DTYPE_MAP: dict[str, torch.dtype] = {
     "float32": torch.float32,
     "float64": torch.float64,
 }
-
-
-@dataclass(frozen=True)
-class RuntimeContext:
-    device: torch.device
-    dtype: torch.dtype
-    num_threads: int
-    seed: int
-    deterministic_ops: bool
-    load_dir: Path
-    save_dir: Path
 
 
 def create_runtime_context(

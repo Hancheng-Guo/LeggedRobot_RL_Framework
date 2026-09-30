@@ -44,7 +44,7 @@ python -m pip install -r requirements-isaacsim.txt
 python -m pip install -r requirements/dev.txt -c requirements/constraints/dev.txt
 ```
 
-在 `main.py` 中把 `ApplicationEntry` 的名称改为 `configs/` 下某个顶层 YAML 的文件名（不带 `.yaml`），然后运行：
+`main.py` 默认使用 `unitree_go1_isaac_cuda_velocity`。按所用仿真环境，将 `app_name` 改为 `configs/` 下的顶层 YAML 文件名（不带 `.yaml`），然后运行：
 
 ```powershell
 python main.py
@@ -61,7 +61,7 @@ with ApplicationEntry("unitree_go1_mujoco_cuda_velocity") as application:
     application.play(num_steps=500, formats="gif")
 ```
 
-> 当前 `main.py` 写的是 `unitree_go1_mujoco`，但仓库中没有同名配置。可改为现有的 `unitree_go1_mujoco_cpu_velocity`、`unitree_go1_mujoco_cuda_velocity`、`unitree_go1_isaac_cuda_velocity` 或 `unitree_go1_isaac_cuda_test`。
+现有示例包括 `unitree_go1_mujoco_cpu_velocity`、`unitree_go1_mujoco_cuda_velocity`、`unitree_go1_isaac_cuda_velocity` 和 `unitree_go1_isaac_cuda_test`。`main.py` 中的 `train_time = None` 表示新训练；运行历史实验时填入目录名末尾的时间。
 
 常用方法：
 
@@ -72,26 +72,41 @@ application.save()                          # 保存 latest.pt
 application.play(num_steps=500, formats="gif")
 ```
 
-载入历史训练（目录时间格式必须为 `YYYY-MM-DD_HH-MM-SS`）：
+### 从历史检查点续训
+
+`train_time` 是 `checkpoints/<app_name>_<time>/` 目录名中的 `<time>`，格式为 `YYYY-MM-DD_HH-MM-SS`。历史目录需要包含 `configs/<app_name>.yaml`、所引用的组件配置以及可读取的检查点。默认 `resume_mode="fork"`：调用 `train()` 时创建新的时间目录，复制选定检查点为新目录的 `checkpoints/resume.pt`，归档本次使用的配置，并在新目录写入训练日志和后续检查点；原目录不会被续训写入。
 
 ```python
 with ApplicationEntry(
     "unitree_go1_mujoco_cuda_velocity",
     train_time="2026-09-15_23-11-41",
     device="cuda",                         # 可选：仅覆盖本次运行设备
+    checkpoint="stage_000/checkpoint_00000100.pt",  # 可选：指定检查点
 ) as application:
-    application.train()                     # 从最新 stage 检查点续训
+    application.train()
 ```
+
+`checkpoint` 可写成相对 `checkpoints/` 的路径（如上例）、相对运行目录且以 `checkpoints/` 开头的路径，或该运行目录 `checkpoints/` 内的绝对路径；指定它时必须同时指定 `train_time`。省略时依次选择：编号最大的 `stage_XXX/latest.pt`、运行级 `checkpoints/latest.pt`、`checkpoints/resume.pt`。`XXX` 必须是三位数字；选择时会读取检查点内的阶段编号，确认它在配置阶段范围内，且与 `stage_XXX` 目录编号一致。指定的文件不存在或内容不合要求会报错，不会改选其他文件。
+
+需要写回历史运行目录时，传 `resume_mode="inplace"`。fork 产生的目录仍按 `<app_name>_<time>` 命名，因此把新目录的时间再次作为 `train_time` 即可续训：设为 `inplace` 就在该目录继续写入，保持默认 `fork` 则再创建一个独立运行。只有调用 `train()` 才会创建 fork；单独调用 `test()` 或 `play()` 不会创建新目录。若新目录名或其准备目录已存在，fork 会报错。
+
+阶段是否完成由检查点中保存的 `StageCallback.stop_training` 状态判断；旧检查点若含 `runner.stage_completed` 字段，也会读取该字段。目录中的 `stage_completed` 标记不参与判断。fork 的 `resume_manifest.json` 记录来源检查点和创建信息，仅供查看，不参与检查点选择或恢复校验。`device` 覆盖只影响本次运行，不改写已归档的配置；运行仍需相应项目代码、仿真资源和外部依赖。
+
+`RuntimeContext` 位于 `utils/runtime.py`；`app/utils/run_workspace.py` 的 `select_checkpoint()` 负责选取文件，`inspect_checkpoint_metadata()` 从 PyTorch 检查点读取阶段元数据。runner 的 `RestoreMode.RESUME / ADVANCE_STAGE / EVALUATE` 分别用于续训、阶段推进与评估；阶段条件通过 `config_update(transition=...)` 传入，`train()` 返回 `TrainResult`。新检查点的阶段完成状态保存在阶段回调状态中，不再另存顶层 `stage_completed` 或 `checkpoint_version`。
 
 输出位于：
 
 ```text
 checkpoints/<app_name>_<time>/
-├─ configs/                 # 本次运行使用的完整配置快照
+├─ configs/                      # 本次运行使用的配置快照
 ├─ logs/<file_name>
-├─ tensorboard/
+├─ tensorboard/                  # 启用 TensorBoard 时
+├─ resume_manifest.json          # 仅 fork 运行生成，记录来源
 └─ checkpoints/
-   └─ stage_<index>/latest.pt
+   ├─ resume.pt                   # 仅 fork 运行生成，归档选定的起始检查点
+   └─ stage_000/
+      ├─ latest.pt
+      └─ checkpoint_00000100.pt  # 达到定期保存条件时
 ```
 
 ## 3. 顶层实验配置
@@ -487,7 +502,7 @@ reset_state:
 
 在 Windows、Isaac Sim 6.1.0.0 的当前测试环境中，`SimulationApp.close()` 返回后，Python 进程仍可能在原生插件的退出清理阶段以 `0xC0000005`（PowerShell 中通常显示为 `-1073741819`）结束。最小化的 `SimulationApp` 脚本也能复现；原生转储将故障定位到 `isaacsim.core.simulation_manager.plugin.dll + 0x1c5fe`。这属于尚未解决的退出异常，**不能将非零退出码当作正常成功**，也不能仅凭退出码断定训练阶段没有完成。诊断过程见 [手动测试说明](tests/manual/README.md#isaac-sim-关闭诊断)。
 
-判断一次训练是否已经留下可用产物，应检查同一次运行的 `checkpoints/<app_name>_<time>/`：`logs/<file_name>` 中出现 `All training stages completed.`，对应 `checkpoints/stage_<index>/` 中存在 `stage_completed` 和 `latest.pt`，且 `configs/` 有本次配置快照。阶段完成时项目会先保存检查点，再写入 `stage_completed` 标记。若只是达到最大迭代数或被回调停止，不能把日志中已运行的迭代数当作阶段完成；若需要确认检查点可用于继续训练，应在受信任的本地产物上实际执行一次续训加载。播放结果另看 `videos/` 下生成的文件和播放脚本的完成标记。即使这些检查都通过，退出码异常仍须单独记录，自动化任务也应将该进程视为退出失败。
+判断一次训练是否已经留下可用产物，应检查同一次运行的 `checkpoints/<app_name>_<time>/`：`logs/<file_name>` 中出现 `All training stages completed.`，对应 `checkpoints/stage_XXX/latest.pt` 中的阶段回调状态记录完成，且 `configs/` 有本次配置快照。阶段完成时项目会保存包含回调状态的检查点；目录中的 `stage_completed` 标记不参与恢复判断。若只是达到最大迭代数或被回调停止，不能把日志中已运行的迭代数当作阶段完成；若需要确认检查点可用于继续训练，应在受信任的本地产物上实际执行一次续训加载。播放结果另看 `videos/` 下生成的文件和播放脚本的完成标记。即使这些检查都通过，退出码异常仍须单独记录，自动化任务也应将该进程视为退出失败。
 
 ## 9. locomotion 任务配置
 
@@ -698,7 +713,7 @@ curriculum_manager_config:
 - 站立任务：`configs/tasks/locomotion_unitree_go1_standing.yaml`
 - 速度跟踪任务：`configs/tasks/locomotion_unitree_go1_velocity.yaml`
 
-> 当前工作树正在重命名一批组件配置，而四个顶层示例仍引用部分旧名称（如 `rl_unitree_go1`、`ppo_unitree_go1_stage1`、`actor_critic_unitree_go1_velocity`）。运行前需把它们分别改为现有的 runner、PPO、policy、environment 配置名，例如 `mujoco_rollout_256`/`isaac_rollout_64`、`ppo_num_batch_8`、`actor_critic_`，并按机器规模选择一个 `vector_env_<数量>`。README 中第 3 节的组合示例使用的是新名称。
+顶层示例中的 `component` 字段展示了各组件配置的组合方式。调整环境数量时，也应选择相应的 `vector_env_<数量>` 配置，并按资源情况调整 runner 的 rollout 长度和 PPO 的 batch 数。
 
 新增实验的一般流程：
 
@@ -723,7 +738,7 @@ pytest -q
 - **CUDA 不可用**：`runtime.device: cuda` 会严格检查 `torch.cuda.is_available()`，不会自动回退 CPU。
 - **确定性算法报错**：部分 CUDA/Isaac 操作不支持确定性实现，可将 `deterministic_ops` 设为 `false`。
 - **录制失败**：使用 `render_mode: rgb_array`，并确保所选仿真后端已配置相机或能返回 RGB 帧。
-- **续训失败**：历史目录必须含配置快照和 `checkpoints/stage_*/latest.pt`；不要只复制权重文件。
+- **续训失败**：确认历史目录有 `configs/<app_name>.yaml` 及所引用的组件配置，并检查 `checkpoints/stage_XXX/latest.pt`、`checkpoints/latest.pt` 或 `checkpoints/resume.pt`。检查点须是包含 `runner.stage_index` 等训练状态的框架产物，单独的模型权重文件不足以恢复训练；如指定了 `checkpoint`，还要检查路径及文件内的阶段编号。
 
 ## 12. 扩展注册表
 

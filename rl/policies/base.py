@@ -5,7 +5,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
-from app.utils.context import RuntimeContext
+from utils.runtime import RuntimeContext
 from utils.component import Component
 
 

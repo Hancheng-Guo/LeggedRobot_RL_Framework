@@ -2,19 +2,20 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime, tzinfo
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pytest
 import torch
 import yaml
 
-from app.utils.context import RuntimeContext
+from utils.runtime import RuntimeContext
 from envs.base import BaseEnv
 from envs.registry import ENV_TYPE_MAP
 from rl.algorithms.base import OnPolicyAlgorithm, PolicyOutput
 from runners.callbacks.base import BaseCallback
 from runners.on_policy import OnPolicyRunner
+from runners.types import RestoreMode
 from runners import on_policy as on_policy_module
 from utils.component import Component, ComponentInfo
 
@@ -209,6 +210,37 @@ def test_load_rejects_invalid_checkpoint_iteration(
 
     with pytest.raises(ValueError, match="current_iteration"):
         runner.load()
+
+
+def test_stage_change_and_evaluation_clear_pending_callback_history(
+    runtime_context: RuntimeContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner = OnPolicyRunner(runtime_context)
+    runner.stage_index = 0
+    runner._pending_callback_states = [{"type": "StageCallback", "state": {}}]
+    monkeypatch.setattr(runner, "_build_environment", lambda **kwargs: None)
+    monkeypatch.setattr(runner, "_build_algorithm", lambda **kwargs: None)
+    runner.config_update(
+        Component(None, None, None, None, None, None),
+        max_iterations=1, rollout_length=1, stage_index=1,
+    )
+    assert runner._pending_callback_states is None
+
+    runner._pending_callback_states = [{"type": "StageCallback", "state": {}}]
+    runner.environment = cast(BaseEnv, SimpleNamespace(reset=lambda: None))
+    runner.algorithm = cast(OnPolicyAlgorithm, SimpleNamespace(set_eval_mode=lambda: None))
+    runner.callbacks = cast(
+        list[BaseCallback], [SimpleNamespace(_on_test_start=lambda **kwargs: False)]
+    )
+    runner.test(num_episodes=1)
+    assert runner._pending_callback_states is None
+
+
+def test_load_rejects_unknown_restore_mode(runtime_context: RuntimeContext) -> None:
+    runner = OnPolicyRunner(runtime_context)
+    with pytest.raises(TypeError, match="RestoreMode"):
+        runner.load(mode="resume")  # type: ignore[arg-type]
 
 
 def test_runner_reports_recent_rollout_length_mean(

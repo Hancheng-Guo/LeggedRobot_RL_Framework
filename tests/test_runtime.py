@@ -3,7 +3,8 @@ import pytest
 from typing import Any
 from pathlib import Path
 
-from app.utils.context import RuntimeContext, create_runtime_context
+from app.utils.context import create_runtime_context
+from utils.runtime import RuntimeContext
 
 
 def test_create_runtime_context():

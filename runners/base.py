@@ -5,11 +5,11 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from app.utils.context import RuntimeContext
+from utils.runtime import RuntimeContext
 from envs.base import BaseEnv
 from rl.algorithms.base import OnPolicyAlgorithm
 from runners.callbacks.base import BaseCallback
-from runners.callbacks.stage import StageCallback
+from runners.types import RestoreMode, TrainResult
 from utils.component import Component
 
 
@@ -46,19 +46,13 @@ class BaseRunner(ABC):
         rollout_length_history_size: int | None = None,
         callbacks: Sequence[str | Mapping[str, Any]] | None = None,
         stage_index: int | None = None,
+        transition: Sequence[Mapping[str, Any]] | None = None,
         *args, **kwargs
     ) -> None:
         raise NotImplementedError
 
     @abstractmethod
-    def stage_update(
-        self,
-        stage_callback: StageCallback | None,
-    ):
-        raise NotImplementedError
-
-    @abstractmethod
-    def train(self) -> None:
+    def train(self) -> TrainResult:
         raise NotImplementedError
 
 
@@ -99,10 +93,11 @@ class BaseRunner(ABC):
         raise NotImplementedError(
             f"{type(self).__name__} does not support checkpoint loading."
         )
-
-
     @abstractmethod
-    def load(self, load_optimizer: bool = False) -> None:
+    def load(
+        self,
+        mode: RestoreMode = RestoreMode.RESUME
+    ) -> None:
         """Restore checkpoint state after runner configuration."""
         raise NotImplementedError(
             f"{type(self).__name__} does not support checkpoint loading."

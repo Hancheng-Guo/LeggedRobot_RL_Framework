@@ -1,7 +1,7 @@
 import torch
 from typing import Any
 
-from app.utils.context import RuntimeContext
+from utils.runtime import RuntimeContext
 from envs.tasks.base import BaseTaskLogic
 from envs.tasks.managers.command.base import CommandManager
 from envs.tasks.managers.curriculum.base import CurriculumManager

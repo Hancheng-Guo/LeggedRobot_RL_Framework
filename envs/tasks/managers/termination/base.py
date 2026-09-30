@@ -2,7 +2,7 @@ from typing import Any
 
 import torch
 
-from app.utils.context import RuntimeContext
+from utils.runtime import RuntimeContext
 from envs.simulators.utils.context import ModelContext
 from envs.tasks.managers.termination.terms.base import BaseTerminationTerm
 from envs.tasks.managers.termination.terms.registry import (

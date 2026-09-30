@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from app.utils.context import RuntimeContext
+from utils.runtime import RuntimeContext
 from envs.simulators.utils.context import ModelContext
 
 

@@ -5,11 +5,12 @@ import pytest
 import torch
 
 import app.stage_manager as stage_manager_module
-from app.utils.context import RuntimeContext
+from utils.runtime import RuntimeContext
 from app.stage_manager import StageManager, StageTrainResult
 from runners.callbacks.base import BaseCallback
 from runners.callbacks.stage import StageCallback
 from runners.on_policy import OnPolicyRunner
+from runners.types import TrainResult, TrainStopReason
 from utils.component import Component, ComponentInfo
 
 
@@ -243,32 +244,16 @@ def test_stage_manager_distinguishes_stop_callback(
     )
     monkeypatch.setattr(
         manager,
-        "_build_current_stage_callback",
-        lambda: stage_callback,
-    )
-    monkeypatch.setattr(
-        manager,
         "_build_runner",
         lambda **kwargs: None,
     )
-    monkeypatch.setattr(manager.runner, "train", lambda: None)
-
-    stage_callback.stop_training = True
-    manager.runner.stop_callback = [stage_callback]
-    assert manager._train_current() is (
-        StageTrainResult.STAGE_COMPLETED
-    )
-
-    stage_callback.stop_training = False
-    manager.runner.stop_callback = [OtherStoppingCallback()]
-    assert manager._train_current() is (
-        StageTrainResult.STOPPED_BY_CALLBACK
-    )
-
-    manager.runner.stop_callback = []
-    assert manager._train_current() is (
-        StageTrainResult.MAX_ITERATIONS_REACHED
-    )
+    for reason, expected in (
+        (TrainStopReason.STAGE_COMPLETED, StageTrainResult.STAGE_COMPLETED),
+        (TrainStopReason.CALLBACK_STOPPED, StageTrainResult.STOPPED_BY_CALLBACK),
+        (TrainStopReason.MAX_ITERATIONS_REACHED, StageTrainResult.MAX_ITERATIONS_REACHED),
+    ):
+        monkeypatch.setattr(manager.runner, "train", lambda reason=reason: TrainResult(reason, 0))
+        assert manager._train_current() is expected
 
 
 def test_stage_manager_applies_stage_max_iterations(
@@ -295,7 +280,7 @@ def test_stage_manager_applies_stage_max_iterations(
     captured: dict[str, int] = {}
 
     monkeypatch.setattr(manager, "_get_current_component", lambda: component)
-    monkeypatch.setattr(manager.runner, "train", lambda: None)
+    monkeypatch.setattr(manager.runner, "train", lambda: TrainResult(TrainStopReason.MAX_ITERATIONS_REACHED, 0))
 
     def build_runner(**kwargs) -> None:
         captured["max_iterations"] = kwargs["max_iterations"]
@@ -319,9 +304,6 @@ def test_stage_manager_injects_stage_max_iterations(
 
         def config_update(self, **kwargs) -> None:
             captured.update(kwargs)
-
-        def stage_update(self, stage_callback) -> None:
-            captured["stage_callback"] = stage_callback
 
     manager = StageManager.__new__(StageManager)
     manager.context = runtime_context
@@ -366,7 +348,7 @@ def test_stage_manager_uses_last_stage_after_completion() -> None:
     assert manager._get_effective_stage() == 1
 
 
-def test_evaluation_checkpoint_is_required_for_historical_run(
+def test_evaluation_without_resume_selection_returns_none(
     runtime_context: RuntimeContext,
     tmp_path: Path,
 ) -> None:
@@ -382,10 +364,10 @@ def test_evaluation_checkpoint_is_required_for_historical_run(
         save_dir=tmp_path,
     )
     manager.load_dir = tmp_path
+    manager.resume_selection = None
     manager.stage_detail = [{"stage": {}}]
 
-    with pytest.raises(FileNotFoundError, match="No evaluation checkpoint"):
-        manager._prepare_evaluation_stage()
+    assert manager._prepare_evaluation_stage() is None
 
 @pytest.mark.parametrize("current_stage", [-1, 3])
 def test_stage_manager_rejects_invalid_stage_index(
@@ -413,6 +395,6 @@ def test_runner_removes_stage_callback() -> None:
     other_callback = OtherStoppingCallback()
     runner.callbacks = [other_callback, make_callback()]
 
-    runner.stage_update(None)
+    runner._set_stage_transition(None)
 
     assert runner.callbacks == [other_callback]

@@ -18,7 +18,7 @@ from envs.simulators.base import BaseSimulator
 from envs.simulators.utils.context import ModelContext
 from envs.simulators.utils.state import SimulatorState
 from utils.component import Component
-from app.utils.context import RuntimeContext
+from utils.runtime import RuntimeContext
 from utils.param import update_attributes
 
 

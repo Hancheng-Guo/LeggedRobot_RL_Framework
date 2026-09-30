@@ -2,7 +2,7 @@ import torch
 import numpy as np
 from typing import Any
 
-from app.utils.context import RuntimeContext
+from utils.runtime import RuntimeContext
 from envs.base import BaseEnv
 from envs.simulators.base import BaseSimulator
 from envs.simulators.utils.context import ModelContext

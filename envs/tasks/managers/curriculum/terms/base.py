@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 
 import torch
 
-from app.utils.context import RuntimeContext
+from utils.runtime import RuntimeContext
 from envs.simulators.utils.context import ModelContext
 
 

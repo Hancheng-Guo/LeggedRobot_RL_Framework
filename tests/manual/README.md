@@ -12,6 +12,7 @@
 | `verify_isaac_camera_activation.py` | Isaac Sim | 验证同一个 `SimulationApp` 中，物理步进后再创建相机并读取图像。 |
 | `verify_isaac_go1_camera_activation.py` | Isaac Sim | 真实 Go1 训练后，在同一个应用和环境中启用相机并调用 `ApplicationEntry.play()`。 |
 | `verify_isaac_go1_shutdown_exit.py` | Isaac Sim | 验证完整 Go1 流程经逐扩展关闭后显式退出，并检查播放异常的退出码。 |
+| `diagnose_isaac_go1_fast_shutdown.py` | Isaac Sim | 在完整 Go1 训练和播放流程中临时强制 `SimulationApp` 快速关闭，用于对照退出行为。 |
 | `diagnose_isaac_go1_playback.py` | Isaac Sim | 为 Go1 训练、播放及 Isaac 关闭过程增加阶段标记与定时调用栈。 |
 | `profile_isaac_sim_runtime.py` | Isaac Sim | 测量项目运行时的初始化、物理步进、状态读取与可选的相机渲染。 |
 | `diagnose_isaac_runtime_shutdown.py` | Isaac Sim | 在运行时性能入口外记录 `IsaacSimRuntime.close()` 的前后标记，隔离 Runner/PPO。 |
@@ -184,6 +185,13 @@ $LASTEXITCODE
 python -u tests/manual/verify_isaac_go1_shutdown_exit.py --build-simulator-only 1> temp/go1_graceful_exit_simulator_only.log 2> temp/go1_graceful_exit_simulator_only_stderr.log
 $LASTEXITCODE
 python -u tests/manual/verify_isaac_go1_shutdown_exit.py --inject-playback-error 1> temp/go1_graceful_exit_failure.log 2> temp/go1_graceful_exit_failure_error.log
+$LASTEXITCODE
+```
+
+要对照完整 Go1 流程在快速关闭下的行为，可单独运行下列脚本。它仅在当前进程中把 `SimulationApp` 的 `fast_shutdown` 强制设为 `True`；不会修改项目的正式运行时配置。快速关闭可能掩盖 Python 错误，因此需要同时检查训练、播放完成标记、错误日志和进程退出码，不能只看退出码 0。
+
+```powershell
+python -u tests/manual/diagnose_isaac_go1_fast_shutdown.py 1> temp/go1_fast_shutdown_stdout.log 2> temp/go1_fast_shutdown_stderr.log
 $LASTEXITCODE
 ```
 

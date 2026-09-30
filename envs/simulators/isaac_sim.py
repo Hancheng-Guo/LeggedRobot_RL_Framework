@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import cast
 
-from app.utils.context import RuntimeContext
+from utils.runtime import RuntimeContext
 from envs.simulators.base import BaseSimulator
 from envs.simulators.isaac_sim_backend import IsaacSimBackend, IsaacSimResetState
 from envs.simulators.utils.context import ModelContext

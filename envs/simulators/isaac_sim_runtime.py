@@ -13,7 +13,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Any
 
-from app.utils.context import RuntimeContext
+from utils.runtime import RuntimeContext
 from envs.simulators.isaac_sim_backend import IsaacSimModelMetadata, IsaacSimResetState
 from envs.simulators.isaac_sim_model import IsaacSimModelConverter
 from utils.logging import get_logger

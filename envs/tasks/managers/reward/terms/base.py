@@ -1,7 +1,7 @@
 import torch
 from abc import ABC, abstractmethod
 
-from app.utils.context import RuntimeContext
+from utils.runtime import RuntimeContext
 from envs.tasks.utils.context import TaskContext
 
 

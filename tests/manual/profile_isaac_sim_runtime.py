@@ -20,7 +20,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.utils.context import RuntimeContext  # noqa: E402
+from utils.runtime import RuntimeContext  # noqa: E402
 from envs.simulators.isaac_sim_backend import IsaacSimResetState  # noqa: E402
 from envs.simulators.isaac_sim_runtime import IsaacSimRuntime  # noqa: E402
 

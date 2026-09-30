@@ -5,7 +5,7 @@ import pytest
 import torch
 import yaml
 
-from app.utils.context import RuntimeContext
+from utils.runtime import RuntimeContext
 from rl.algorithms.ppo import PPO
 from rl.policies.configurable_actor_critic import ConfigurableActorCritic
 from rl.policies.modules.network import ConfigurableNetwork

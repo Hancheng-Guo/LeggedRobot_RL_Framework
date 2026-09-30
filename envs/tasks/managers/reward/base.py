@@ -1,7 +1,7 @@
 import torch
 from typing import Any
 
-from app.utils.context import RuntimeContext
+from utils.runtime import RuntimeContext
 from envs.simulators.utils.context import ModelContext
 from envs.tasks.utils.context import TaskContext
 from envs.tasks.managers.reward.terms.base import BaseRewardTerm

@@ -6,13 +6,14 @@ from pathlib import Path
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
-from app.utils.context import RuntimeContext
-from runners.callbacks.stage import StageCallback
+from app.utils.run_workspace import CheckpointSelection
+from runners.types import RestoreMode, TrainStopReason
 from runners.base import BaseRunner
 from runners.registry import RUNNER_TYPE_MAP
 from utils.component import create_component, Component
 from utils.config import load_yaml
 from utils.logging import get_logger
+from utils.runtime import RuntimeContext
 
 if TYPE_CHECKING:
     from runners.utils.frames import VideoFormat, VideoFormats
@@ -42,18 +43,37 @@ class StageManager:
         context: RuntimeContext,
         stage_detail: list[dict],
         load_dir: Path,
+        resume_selection: CheckpointSelection | None = None,
     ) -> None:
         
         self.component = component
         self.context = context
         self.stage_detail = stage_detail
         self.load_dir = load_dir
+        self.resume_selection = resume_selection
 
         self.runner: BaseRunner
         self.current_stage: int
         self.max_stage: int
         
         self._setup()
+
+
+    def use_fork_workspace(
+        self,
+        *,
+        component: dict,
+        context: RuntimeContext,
+        load_dir: Path,
+        resume_selection: CheckpointSelection,
+    ) -> None:
+        
+        if hasattr(self, "runner"):
+            raise RuntimeError("Cannot switch fork workspace while a runner is active.")
+        self.component = component
+        self.context = context
+        self.load_dir = load_dir
+        self.resume_selection = resume_selection
 
 
     def _setup(self) -> None:
@@ -139,12 +159,10 @@ class StageManager:
                 continue
 
             if train_result is StageTrainResult.STOPPED_BY_CALLBACK:
-                for callback in self.runner.stop_callback:
-                    logger.warning(
-                        f"Training was stopped by callback "
-                        f"{type(callback).__name__!r} during stage "
-                        f"{self.current_stage}."
-                    )
+                logger.warning(
+                    "Training was stopped by callback during stage %d.",
+                    self.current_stage
+                )
             else:   # StageTrainResult.MAX_ITERATIONS_REACHED
                 logger.warning(f"Stage {self.current_stage} timeout.")
             break
@@ -183,7 +201,7 @@ class StageManager:
             raise RuntimeError("All stages have already been completed.")
 
         current_component = self._get_current_component()
-        current_stage_callback = self._build_current_stage_callback()
+        current_transition = self._get_current_transition()
         checkpoint_path = (
             resume_info.checkpoint_path
             if resume_info is not None
@@ -200,24 +218,27 @@ class StageManager:
 
         self._build_runner(
             component=current_component,
-            stage_callback=current_stage_callback,
+            transition=current_transition,
             max_iterations=self._get_current_max_iterations(),
             stage_index=self.current_stage,
             checkpoint_path=checkpoint_path,
         )
         if checkpoint_path is not None:
-            self.runner.load(load_optimizer=True)
+            self.runner.load(
+                mode=RestoreMode.ADVANCE_STAGE
+                if resume_info is not None and resume_info.stage_completed
+                else RestoreMode.RESUME
+            )
             logger.info(
                 "Restored training checkpoint from %s.",
                 checkpoint_path.as_posix()
             )
             if resume_info is not None and resume_info.stage_completed:
                 return StageTrainResult.STAGE_ALREADY_COMPLETED
-        self.runner.train()
-
-        if current_stage_callback.stop_training:
+        result = self.runner.train()
+        if result.reason is TrainStopReason.STAGE_COMPLETED:
             return StageTrainResult.STAGE_COMPLETED
-        if self.runner.stop_callback:
+        if result.reason is TrainStopReason.CALLBACK_STOPPED:
             return StageTrainResult.STOPPED_BY_CALLBACK
         return StageTrainResult.MAX_ITERATIONS_REACHED
 
@@ -226,54 +247,17 @@ class StageManager:
 
         if hasattr(self, "runner"):
             return None
-        if self.load_dir.resolve() != Path(self.context.save_dir).resolve():
+
+        selection = self.resume_selection
+        if selection is None:
             return None
 
-        checkpoint_root = self.load_dir / "checkpoints"
-        candidates: list[tuple[int, Path]] = []
-        for path in checkpoint_root.glob("stage_*/latest.pt"):
-            try:
-                stage_index = int(path.parent.name.removeprefix("stage_"))
-            except ValueError:
-                continue
-            if 0 <= stage_index < len(self.stage_detail):
-                candidates.append((stage_index, path))
-
-        if not candidates:
-            raise FileNotFoundError(
-                "No training checkpoint was found in "
-                f"{checkpoint_root!s}. Expected stage_*/latest.pt."
-            )
-
-        stage_index, checkpoint_path = max(candidates)
-        self.current_stage = stage_index
-        logger.info(
-            "Found training checkpoint for stage %d: %s.",
-            stage_index,
-            checkpoint_path.as_posix()
-        )
-        return StageResumeInfo(
-            checkpoint_path=checkpoint_path,
-            stage_completed=(
-                checkpoint_path.parent / "stage_completed"
-            ).is_file(),
-        )
+        self.current_stage = selection.stage_index
+        return StageResumeInfo(selection.checkpoint, selection.stage_completed)
 
 
     def _save_completed_stage(self) -> None:
-
         checkpoint_path = self.runner.save()
-        marker_path = checkpoint_path.parent / "stage_completed"
-        temporary_path = marker_path.with_suffix(".tmp")
-        try:
-            temporary_path.write_text(
-                str(self.current_stage),
-                encoding="utf-8",
-            )
-            temporary_path.replace(marker_path)
-        finally:
-            if temporary_path.exists():
-                temporary_path.unlink()
         logger.info(
             "Saved completed stage %d checkpoint to %s.",
             self.current_stage,
@@ -303,14 +287,9 @@ class StageManager:
         return create_component(current_component, self.load_dir)
 
 
-    def _build_current_stage_callback(self) -> StageCallback:
-
-        _, stage_config = self._parse_stage(
-            self.stage_detail[self.current_stage]
-        )
-        return StageCallback(
-            condition=stage_config["transition"]
-        )
+    def _get_current_transition(self) -> list[dict]:
+        _, stage_config = self._parse_stage(self.stage_detail[self.current_stage])
+        return stage_config["transition"]
 
 
     def _get_current_max_iterations(self) -> int:
@@ -324,7 +303,7 @@ class StageManager:
         self,
         component: Component,
         max_iterations: int,
-        stage_callback: StageCallback | None = None,
+        transition: list[dict] | None = None,
         stage_index: int | None = None,
         checkpoint_path: Path | None = None,
     ) -> None:
@@ -338,6 +317,7 @@ class StageManager:
                 component=component,
                 max_iterations=max_iterations,
                 stage_index=stage_index,
+                transition=transition,
             )
 
         else:
@@ -363,12 +343,10 @@ class StageManager:
                 component=component,
                 max_iterations=max_iterations,
                 stage_index=stage_index,
+                transition=transition,
                 **runner_config
             )
 
-        if stage_callback is not None:
-            stage_callback.set_runner(self.runner)
-        self.runner.stage_update(stage_callback)
         
 
     def test(self, num_episodes: int) -> None:
@@ -376,7 +354,6 @@ class StageManager:
         if hasattr(self, "runner"):
             if self.continue_training:
                 logger.warning("Model is not trained completely.")
-            self.runner.stage_update(None)
             self.runner.test(num_episodes=num_episodes)
             return
 
@@ -405,7 +382,6 @@ class StageManager:
         if hasattr(self, "runner"):
             if self.continue_training:
                 logger.warning("Model is not trained completely.")
-            self.runner.stage_update(None)
             self.runner.play(
                 num_steps=num_steps,
                 formats=formats,
@@ -436,39 +412,13 @@ class StageManager:
 
         if hasattr(self, "runner"):
             return None
-        if self.load_dir.resolve() != Path(self.context.save_dir).resolve():
+
+        selection = self.resume_selection
+        if selection is None:
             return None
 
-        checkpoint_root = self.load_dir / "checkpoints"
-        candidates: list[tuple[int, Path]] = []
-        for path in checkpoint_root.glob("stage_*/latest.pt"):
-            try:
-                stage_index = int(path.parent.name.removeprefix("stage_"))
-            except ValueError:
-                continue
-            if 0 <= stage_index < len(self.stage_detail):
-                candidates.append((stage_index, path))
-        if candidates:
-            stage_index, checkpoint_path = max(candidates)
-            self.current_stage = stage_index
-            logger.info(
-                "Using stage %d checkpoint for evaluation: %s.",
-                stage_index,
-                checkpoint_path.as_posix()
-            )
-            return checkpoint_path
-
-        checkpoint_path = checkpoint_root / "latest.pt"
-        if checkpoint_path.is_file():
-            logger.info(
-                "Using checkpoint for evaluation: %s.",
-                checkpoint_path.as_posix()
-            )
-            return checkpoint_path
-        raise FileNotFoundError(
-            "No evaluation checkpoint was found in "
-            f"{checkpoint_root!s}. Expected stage_*/latest.pt or latest.pt."
-        )
+        self.current_stage = selection.stage_index
+        return selection.checkpoint
 
 
     def _load_evaluation_checkpoint(
@@ -477,7 +427,7 @@ class StageManager:
         
         if not hasattr(self, "runner"):
             raise RuntimeError("Runner was not built for checkpoint loading.")
-        self.runner.load(load_optimizer=False)
+        self.runner.load(mode=RestoreMode.EVALUATE)
         logger.info("Restored evaluation checkpoint (optimizer excluded).")
 
 

@@ -6,12 +6,14 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+import torch
 
 import app.application_entry as application_entry_module
 from app.application_entry import ApplicationEntry
 from app.stage_manager import StageManager
-from app.utils.context import RuntimeContext
+from utils.runtime import RuntimeContext
 from runners.base import BaseRunner
+from runners.types import RestoreMode, TrainResult, TrainStopReason
 from runners.callbacks.stage import StageCallback
 from runners.utils.frames import VideoFormat, VideoFormats
 
@@ -60,6 +62,7 @@ def test_application_train_archives_configs_before_training(
     )
     application._closed = False
     application._configs_saved = False
+    application._historical = False
 
     assert application.save() == save_dir / "latest.pt"
     assert not (save_dir / "configs").exists()
@@ -163,6 +166,7 @@ class WorkflowRunner(BaseRunner):
         rollout_length_history_size: int | None = None,
         callbacks: Sequence[str | Mapping[str, Any]] | None = None,
         stage_index: int | None = None,
+        transition: Sequence[Mapping[str, Any]] | None = None,
         *args: Any,
         **kwargs: Any,
     ) -> None:
@@ -170,14 +174,9 @@ class WorkflowRunner(BaseRunner):
         self.max_iterations = max_iterations
         self.stage_index = stage_index
         self.max_iterations_history.append(max_iterations)
+        self.stage_callback = StageCallback(condition=transition) if transition is not None else None
 
-    def stage_update(
-        self,
-        stage_callback: StageCallback | None,
-    ) -> None:
-        self.stage_callback = stage_callback
-
-    def train(self) -> None:
+    def train(self) -> TrainResult:
         callback = self.stage_callback
         assert callback is not None
         callback._on_train_start()
@@ -202,6 +201,9 @@ class WorkflowRunner(BaseRunner):
         self.callback_results.append(results)
         if results[-1] is False:
             self.stop_callback.append(callback)
+        reason = (TrainStopReason.STAGE_COMPLETED if callback.stop_training
+                  else TrainStopReason.MAX_ITERATIONS_REACHED)
+        return TrainResult(reason, self.current_iteration)
 
     def test(self, num_episodes: int) -> None:
         self.test_calls.append(num_episodes)
@@ -232,7 +234,7 @@ class WorkflowRunner(BaseRunner):
     def prepare_checkpoint_load(self, path: Path) -> dict[str, Any]:
         raise NotImplementedError
 
-    def load(self, load_optimizer: bool = False) -> None:
+    def load(self, mode: RestoreMode = RestoreMode.RESUME) -> None:
         raise NotImplementedError
 
 
@@ -302,19 +304,27 @@ def test_training_resume_selects_latest_stage_checkpoint(
     second = tmp_path / "checkpoints" / "stage_001" / "latest.pt"
     first.parent.mkdir(parents=True)
     second.parent.mkdir(parents=True)
-    first.touch()
-    second.touch()
+    torch.save({"runner": {"stage_index": 0, "current_iteration": 0}}, first)
+    torch.save({"runner": {"stage_index": 1, "current_iteration": 0}}, second)
 
+    from app.utils.run_workspace import select_checkpoint
+    manager.resume_selection = select_checkpoint(
+        tmp_path, 2
+    )
     resume_info = manager._prepare_training_stage()
     assert resume_info is not None
-    assert resume_info.checkpoint_path == second
+    assert resume_info.checkpoint_path == second.resolve()
     assert resume_info.stage_completed is False
     assert manager.current_stage == 1
 
-    (second.parent / "stage_completed").touch()
+    torch.save({"runner": {"stage_index": 1, "current_iteration": 0,
+                           "stage_completed": True}}, second)
+    manager.resume_selection = select_checkpoint(
+        tmp_path, 2
+    )
     resume_info = manager._prepare_training_stage()
     assert resume_info is not None
-    assert resume_info.checkpoint_path == second
+    assert resume_info.checkpoint_path == second.resolve()
     assert resume_info.stage_completed is True
 
 
@@ -375,13 +385,13 @@ def test_application_entry_can_test_and_play_after_training(
     application.load_dir = tmp_path
     application.save_dir = tmp_path
     application._configs_saved = False
+    application._historical = False
 
     application.train()
     application.test(num_episodes=7)
     application.play(num_steps=11, formats=["gif", "mp4"], num_plays=3)
 
     assert manager.current_stage == len(manager.stage_detail)
-    assert runner.stage_callback is None
     assert runner.max_iterations_history == [3, 5]
     assert runner.test_calls == [7]
     assert runner.play_calls == [(11, ["gif", "mp4"], 3)]

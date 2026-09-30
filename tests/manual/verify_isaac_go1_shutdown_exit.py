@@ -181,14 +181,14 @@ def main() -> None:
                 def skip_callbacks(self, callbacks):
                     report("omitting Runner callbacks")
 
-                def skip_stage_callback(self, stage_callback):
+                def skip_stage_callback(self, transition):
                     report("omitting stage callback")
 
                 callbacks_patch = patch.object(
                     OnPolicyRunner, "_build_callbacks", skip_callbacks
                 )
                 stage_patch = patch.object(
-                    OnPolicyRunner, "stage_update", skip_stage_callback
+                    OnPolicyRunner, "_set_stage_transition", skip_stage_callback
                 )
 
             task_patch = nullcontext()

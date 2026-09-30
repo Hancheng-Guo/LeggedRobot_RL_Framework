@@ -18,7 +18,8 @@ from runners.callbacks.adaptive_learning_rate import (
 )
 from runners.base import BaseRunner
 from runners.on_policy import OnPolicyRunner
-from app.utils.context import RuntimeContext
+from runners.types import RestoreMode
+from utils.runtime import RuntimeContext
 from utils.logging import configure_logging, get_logger
 
 
@@ -271,7 +272,7 @@ def test_runner_checkpoint_restores_callback_runtime_state(
             "buffer_len": 3,
         },
     }])
-    restored.load(load_optimizer=True)
+    restored.load(mode=RestoreMode.RESUME)
     restored_callback = cast(
         AdaptiveLearningRateCallback,
         restored.callbacks[0],
@@ -281,6 +282,36 @@ def test_runner_checkpoint_restores_callback_runtime_state(
 
     assert list(restored_callback._buffer) == pytest.approx([0.012, 0.013])
     assert restored_callback._hold_current_iters == 0
+
+
+@pytest.mark.parametrize("mode", list(RestoreMode))
+def test_restore_mode_loads_real_optimizer_state(
+    tmp_path: Path, mode: RestoreMode,
+) -> None:
+    source = make_checkpoint_runner(tmp_path, stage_index=0)
+    source_algorithm = cast(DummyAlgorithm, source.algorithm)
+    source_algorithm.policy(torch.ones(1, 2)).sum().backward()
+    source_algorithm.optimizer.step()
+    source_algorithm.optimizer.zero_grad()
+    path = source.save(tmp_path / "optimizer.pt")
+    saved_weights = {
+        key: value.clone() for key, value in source_algorithm.policy.state_dict().items()
+    }
+
+    restored = make_checkpoint_runner(tmp_path, stage_index=0)
+    restored.prepare_checkpoint_load(path)
+    restored.load(mode=mode)
+
+    restored_algorithm = cast(DummyAlgorithm, restored.algorithm)
+    for key, value in restored_algorithm.policy.state_dict().items():
+        assert torch.equal(value, saved_weights[key])
+    optimizer_state = restored_algorithm.optimizer.state
+    if mode is RestoreMode.EVALUATE:
+        assert not optimizer_state
+        assert restored._pending_callback_states is None
+    else:
+        assert optimizer_state
+        assert all("exp_avg" in state and "exp_avg_sq" in state for state in optimizer_state.values())
 
 
 def test_progress_bar_resumes_from_runner_iteration() -> None:
@@ -814,6 +845,7 @@ def test_checkpoint_callback_saves_policy_and_optimizer(
     assert runner_state["current_iteration"] == 0
     assert "global_iteration" not in runner_state
     assert "metrics" not in runner_state
+    assert "checkpoint_version" not in runner_state
     assert "stage_completed" not in runner_state
     assert "policy" in runner_state["algorithm"]
     assert "state_dict" in runner_state["algorithm"]["policy"]

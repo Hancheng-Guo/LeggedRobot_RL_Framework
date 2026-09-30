@@ -3,14 +3,16 @@ from __future__ import annotations
 import warnings
 import torch
 import numpy as np
+from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from collections import deque
 from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
-from app.utils.context import RuntimeContext
+from utils.runtime import RuntimeContext
 from runners.base import BaseRunner
+from runners.types import RestoreMode, TrainResult, TrainStopReason
 from runners.callbacks.base import BaseCallback
 from runners.callbacks.stage import StageCallback
 from runners.callbacks.registry import CALLBACK_TYPE_MAP
@@ -47,6 +49,7 @@ class OnPolicyRunner(BaseRunner):
         self._callback_configs: Sequence[str | Mapping[str, Any]] | None = None
         self._pending_checkpoint_payload: Mapping[str, Any] | None = None
         self._pending_callback_states: Sequence[Mapping[str, Any]] | None = None
+        self._checkpoint_callback_snapshot: list[dict[str, Any]] | None = None
         
         self.current_iteration = -1
 
@@ -70,10 +73,14 @@ class OnPolicyRunner(BaseRunner):
         rollout_length_history_size: int | None = None,
         callbacks: Sequence[str | Mapping[str, Any]] | None = None,
         stage_index: int | None = None,
+        transition: Sequence[Mapping[str, Any]] | None = None,
     ) -> None:
 
         previous_stage_index = self.stage_index
         self.stage_index = stage_index
+        if previous_stage_index != stage_index:
+            self._pending_callback_states = None
+            self._checkpoint_callback_snapshot = None
         if (
             previous_stage_index != stage_index
             and self._pending_checkpoint_payload is None
@@ -89,6 +96,7 @@ class OnPolicyRunner(BaseRunner):
             rollout_length_history_size
         )
         self._build_callbacks(callbacks=callbacks)
+        self._set_stage_transition(transition=transition)
         self._build_environment(component=component)
         self._build_algorithm(component=component)
 
@@ -113,18 +121,19 @@ class OnPolicyRunner(BaseRunner):
         )
 
 
-    def stage_update(
+    def _set_stage_transition(
         self,
-        stage_callback: StageCallback | None,
+        transition: Sequence[Mapping[str, Any]] | None,
     ) -> None:
-        
         self.callbacks = [
             callback
             for callback in self.callbacks
             if not isinstance(callback, StageCallback)
         ]
 
-        if stage_callback is not None:
+        if transition is not None:
+            stage_callback = StageCallback(condition=transition)
+            stage_callback.set_runner(self)
             self.callbacks.append(stage_callback)
 
 
@@ -308,7 +317,7 @@ class OnPolicyRunner(BaseRunner):
         return should_continue
         
 
-    def train(self) -> None:
+    def train(self) -> TrainResult:
 
         if not hasattr(self, "environment"):
             raise RuntimeError("environment is not instantiated.")
@@ -323,6 +332,7 @@ class OnPolicyRunner(BaseRunner):
             raise RuntimeError("'rollout_length' is missing.")
 
         self.algorithm.set_train_mode()
+        self._checkpoint_callback_snapshot = None
         obs = self.environment.reset()
         self.stop_callback.clear()
         self._recent_rollout_lengths = deque(
@@ -337,7 +347,7 @@ class OnPolicyRunner(BaseRunner):
         
         if not self._run_callbacks("_on_train_start"):
             self._run_callbacks("_on_train_end")
-            return
+            return self._train_result()
         self._load_pending_callback_states()
 
         for iteration in range(
@@ -417,6 +427,27 @@ class OnPolicyRunner(BaseRunner):
                 break
 
         self._run_callbacks("_on_train_end")
+        return self._train_result()
+
+
+    def _train_result(self) -> TrainResult:
+
+        sources = tuple(type(callback).__name__ for callback in self.stop_callback)
+        if any(
+            isinstance(callback, StageCallback) and callback.stop_training
+            for callback in self.callbacks
+        ):
+            reason = TrainStopReason.STAGE_COMPLETED
+        elif sources:
+            reason = TrainStopReason.CALLBACK_STOPPED
+        else:
+            reason = TrainStopReason.MAX_ITERATIONS_REACHED
+
+        return TrainResult(
+            reason=reason,
+            current_iteration=self.current_iteration,
+            stop_sources=sources
+        )
 
 
     def _get_info(self) -> dict:
@@ -475,6 +506,10 @@ class OnPolicyRunner(BaseRunner):
         self,
         num_episodes: int,
     ) -> None:
+
+        self._snapshot_callbacks_before_evaluation()
+        self._set_stage_transition(transition=None)
+        self._pending_callback_states = None
 
         if (
             not isinstance(num_episodes, int)
@@ -586,6 +621,10 @@ class OnPolicyRunner(BaseRunner):
         formats: VideoFormat | VideoFormats,
         num_plays: int,
     ) -> None:
+
+        self._snapshot_callbacks_before_evaluation()
+        self._set_stage_transition(transition=None)
+        self._pending_callback_states = None
         
         try:
             from runners.utils.frames import save_frames_to_video
@@ -772,8 +811,32 @@ class OnPolicyRunner(BaseRunner):
         self.algorithm.prepare_checkpoint_load(algorithm_state)
 
 
+    def _callback_state_entries(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "type": type(callback).__name__,
+                "state": callback.checkpoint_state_dict()
+            }
+            for callback in self.callbacks
+        ]
+
+
+    def _snapshot_callbacks_before_evaluation(self) -> None:
+        if (
+            self._checkpoint_callback_snapshot is None
+            and any(
+                isinstance(callback, StageCallback)
+                for callback in self.callbacks
+            )
+        ):
+            self._checkpoint_callback_snapshot = deepcopy(self._callback_state_entries())
+
+
     def close(self) -> None:
 
+        self._pending_checkpoint_payload = None
+        self._pending_callback_states = None
+        self._checkpoint_callback_snapshot = None
         self._run_callbacks("_on_close")
 
         if hasattr(self, "environment"):
@@ -810,20 +873,20 @@ class OnPolicyRunner(BaseRunner):
             "current_iteration": self.current_iteration,
             "stage_index": self.stage_index,
             "algorithm": self.algorithm.checkpoint_state_dict(),
-            "callbacks": [
-                {
-                    "type": type(callback).__name__,
-                    "state": callback.checkpoint_state_dict(),
-                }
-                for callback in self.callbacks
-            ],
+            "callbacks": (
+                deepcopy(self._checkpoint_callback_snapshot)
+                if self._checkpoint_callback_snapshot is not None
+                else self._callback_state_entries()
+            ),
         }
 
 
     def load(
         self,
-        load_optimizer: bool = False
+        mode: RestoreMode = RestoreMode.RESUME,
     ) -> None:
+        if not isinstance(mode, RestoreMode):
+            raise TypeError("mode must be a RestoreMode value.")
         
         if not hasattr(self, "algorithm"):
             raise RuntimeError("Runner must be configured before loading.")
@@ -834,9 +897,12 @@ class OnPolicyRunner(BaseRunner):
                 "prepare_checkpoint_load() must be called before load()."
             )
 
+        self._pending_callback_states = None
         runner_state = payload["runner"]
         loaded_stage_index = runner_state.get("stage_index")
-        if loaded_stage_index != self.stage_index:
+        if loaded_stage_index is None:
+            loaded_stage_index = 0
+        if loaded_stage_index != (self.stage_index if self.stage_index is not None else 0):
             raise RuntimeError(
                 "Checkpoint stage does not match configured stage: "
                 f"{loaded_stage_index!r} != {self.stage_index!r}."
@@ -853,11 +919,16 @@ class OnPolicyRunner(BaseRunner):
             )
         self.algorithm.load_checkpoint_state_dict(
             runner_state["algorithm"],
-            load_optimizer=load_optimizer,
+            load_optimizer=(mode is not RestoreMode.EVALUATE),
         )
         self.current_iteration = current_iteration
         callback_states = runner_state.get("callbacks")
-        if callback_states is not None:
+        self._checkpoint_callback_snapshot = (
+            deepcopy(list(callback_states))
+            if callback_states is not None
+            else None
+        )
+        if mode is RestoreMode.RESUME and callback_states is not None:
             if not isinstance(callback_states, Sequence):
                 raise TypeError("Checkpoint 'callbacks' must be a sequence.")
             self._pending_callback_states = callback_states
@@ -898,4 +969,6 @@ class OnPolicyRunner(BaseRunner):
             weights_only=False,
         )
         self._pending_checkpoint_payload = payload
+        self._pending_callback_states = None
+        self._checkpoint_callback_snapshot = None
         return payload

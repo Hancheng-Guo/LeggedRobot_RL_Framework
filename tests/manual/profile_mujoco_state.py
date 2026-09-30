@@ -9,7 +9,7 @@ import torch
 PROJECT_ROOT = Path(__file__).parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.utils.context import RuntimeContext
+from utils.runtime import RuntimeContext
 from envs.simulators.mujoco import MujocoSimulator
 from utils.component import Component
 

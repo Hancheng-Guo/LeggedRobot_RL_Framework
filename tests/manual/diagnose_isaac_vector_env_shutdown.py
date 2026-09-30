@@ -16,7 +16,8 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.utils.context import RuntimeContext, create_runtime_context
+from app.utils.context import create_runtime_context
+from utils.runtime import RuntimeContext
 from app.utils.device import resolve_device
 from app.utils.seed import set_seed
 from envs.vector_env import VectorEnv

@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Any
 
-from app.utils.context import RuntimeContext
+from utils.runtime import RuntimeContext
 from runners.base import BaseRunner
 from runners.callbacks.base import BaseCallback
 

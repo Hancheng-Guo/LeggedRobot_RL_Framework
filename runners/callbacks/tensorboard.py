@@ -213,10 +213,29 @@ class TensorboardCallback(BaseCallback):
                         str(self.max_reload_threads),
                     )
                 )
-                logger.info(
-                    "Waiting for TensorBoard to load existing event data."
+                console_handler = next(
+                    (
+                        handler
+                        for handler in logging.getLogger("rl_framework").handlers
+                        if isinstance(handler, logging.StreamHandler)
+                        and not isinstance(handler, logging.FileHandler)
+                        and getattr(handler.stream, "isatty", lambda: False)()
+                    ),
+                    None,
                 )
-                url = self._launch_after_initial_load()
+                if console_handler is not None:
+                    original_terminator = console_handler.terminator
+                    console_handler.terminator = ""
+                try:
+                    logger.info(
+                        "Waiting for TensorBoard to load existing event data. "
+                        if console_handler is not None
+                        else "Waiting for TensorBoard to load existing event data."
+                    )
+                finally:
+                    if console_handler is not None:
+                        console_handler.terminator = original_terminator
+                url = self._launch_after_initial_load(console_handler)
                 self._SERVER_URLS[self.tensorboard_root_dir] = url
             self.tensorboard_url = self._SERVER_URLS[self.tensorboard_root_dir]
             self._server_started = True
@@ -226,7 +245,10 @@ class TensorboardCallback(BaseCallback):
         return True
 
 
-    def _launch_after_initial_load(self) -> str:
+    def _launch_after_initial_load(
+        self,
+        console_handler: logging.StreamHandler | None = None,
+    ) -> str:
 
         completed = threading.Event()
         handler = _TensorboardLoadHandler(completed)
@@ -234,6 +256,31 @@ class TensorboardCallback(BaseCallback):
         previous_level = tensorboard_logger.level
         tensorboard_logger.setLevel(logging.INFO)
         tensorboard_logger.addHandler(handler)
+        stop_spinner = threading.Event()
+        spinner: threading.Thread | None = None
+        if console_handler is not None:
+            def animate() -> None:
+                while not stop_spinner.is_set():
+                    for frame in "-/|\\":
+                        if stop_spinner.is_set():
+                            break
+                        console_handler.acquire()
+                        try:
+                            console_handler.stream.write(frame)
+                            console_handler.flush()
+                        finally:
+                            console_handler.release()
+                        stop_spinner.wait(0.15)
+                        console_handler.acquire()
+                        try:
+                            console_handler.stream.write("\b ")
+                            console_handler.stream.write("\b")
+                            console_handler.flush()
+                        finally:
+                            console_handler.release()
+
+            spinner = threading.Thread(target=animate, daemon=True)
+            spinner.start()
         try:
             url = self._tensorboard.launch()
             if not completed.wait(self.initial_load_timeout):
@@ -243,6 +290,15 @@ class TensorboardCallback(BaseCallback):
                 )
             return url
         finally:
+            stop_spinner.set()
+            if spinner is not None:
+                spinner.join()
+                console_handler.acquire()
+                try:
+                    console_handler.stream.write("\n")
+                    console_handler.flush()
+                finally:
+                    console_handler.release()
             tensorboard_logger.removeHandler(handler)
             tensorboard_logger.setLevel(previous_level)
 

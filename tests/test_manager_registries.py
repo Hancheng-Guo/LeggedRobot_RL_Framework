@@ -1,15 +1,15 @@
-from envs.tasks.managers.action.terms.registry import ACTION_CLASS_MAP
-from envs.tasks.managers.observation.terms.registry import (
+from envs.tasks.managers.action.terms import ACTION_CLASS_MAP
+from envs.tasks.managers.observation.terms import (
     OBSERVATION_CLASS_MAP,
 )
-from envs.tasks.managers.reward.terms.registry import REWARD_CLASS_MAP
-from envs.tasks.managers.termination.terms.registry import (
+from envs.tasks.managers.reward.terms import REWARD_CLASS_MAP
+from envs.tasks.managers.termination.terms import (
     TERMINATION_CLASS_MAP,
 )
-from envs.tasks.managers.curriculum.terms.registry import (
+from envs.tasks.managers.curriculum.terms import (
     CURRICULUM_CLASS_MAP,
 )
-from utils.string import camel_to_snake
+from utils import camel_to_snake
 
 
 def test_camel_to_snake_handles_terms_and_acronyms():

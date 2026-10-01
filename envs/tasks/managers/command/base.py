@@ -1,16 +1,15 @@
 import torch
 from typing import Any
 
-from utils.runtime import RuntimeContext
-from envs.simulators.utils.context import ModelContext
-from envs.tasks.utils.context import TaskContext
-from envs.tasks.managers.command.terms.base import BaseCommandTerm
-from envs.tasks.managers.command.terms.registry import get_command_class
-from envs.tasks.managers.command.constraints import CommandConstraintSet
-from envs.tasks.managers.curriculum.types import (
+from .terms import BaseCommandTerm, get_command_class
+from .constraints import CommandConstraintSet
+from envs.simulators.utils import ModelContext
+from envs.tasks.utils import TaskContext
+from envs.tasks.managers.curriculum import (
     CommandCurriculumSampler,
     CurriculumTermProvider,
 )
+from utils import RuntimeContext
 
 
 class CommandManager:
@@ -217,4 +216,3 @@ class CommandManager:
                     self.command[name][env_ids]
                 )
                 self.command[name][env_ids].copy_(value)
-        

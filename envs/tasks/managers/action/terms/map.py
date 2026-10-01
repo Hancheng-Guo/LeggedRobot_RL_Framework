@@ -1,8 +1,8 @@
 import torch
 
-from envs.tasks.managers.action.terms.base import BaseActionTerm
-from envs.tasks.managers.action.terms.registry import register_action
-from envs.simulators.utils.context import ModelContext
+from .base import BaseActionTerm
+from .registry import register_action
+from envs.simulators.utils import ModelContext
 
 
 @register_action

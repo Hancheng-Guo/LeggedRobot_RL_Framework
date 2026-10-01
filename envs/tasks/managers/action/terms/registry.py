@@ -1,7 +1,7 @@
 from typing import TypeVar
 
-from envs.tasks.managers.action.terms.base import BaseActionTerm
-from utils.string import camel_to_snake
+from .base import BaseActionTerm
+from utils import camel_to_snake
 
 
 ACTION_CLASS_MAP: dict[str, type[BaseActionTerm]] = {}

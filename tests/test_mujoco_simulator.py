@@ -1,13 +1,12 @@
-from pathlib import Path
-
 import mujoco
-import numpy as np
 import pytest
 import torch
+import numpy as np
+from pathlib import Path
 
 from envs.simulators.mujoco import MujocoSimulator
-from envs.simulators.utils.state import SimulatorState
-from utils.component import Component
+from envs.simulators.utils import SimulatorState
+from utils import Component
 
 
 pytestmark = pytest.mark.mujoco

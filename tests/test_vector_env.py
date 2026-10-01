@@ -4,12 +4,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
-from envs.simulators.base import BaseSimulator
-from envs.simulators.utils.state import SimulatorState
-from envs.tasks.base import BaseTaskLogic
-from envs.tasks.utils.context import TaskContext, TaskStepResult
-from envs.vector_env import VectorEnv
-from utils.component import Component, ComponentInfo
+from envs import VectorEnv
+from envs.simulators import BaseSimulator
+from envs.simulators.utils import SimulatorState
+from envs.tasks import BaseTaskLogic
+from envs.tasks.utils import TaskContext, TaskStepResult
+from utils import Component, ComponentInfo
 
 
 class FakeSimulator:

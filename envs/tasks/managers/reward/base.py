@@ -1,11 +1,10 @@
 import torch
 from typing import Any
 
-from utils.runtime import RuntimeContext
-from envs.simulators.utils.context import ModelContext
-from envs.tasks.utils.context import TaskContext
-from envs.tasks.managers.reward.terms.base import BaseRewardTerm
-from envs.tasks.managers.reward.terms.registry import get_reward_class
+from envs.simulators.utils import ModelContext
+from envs.tasks.managers.reward.terms import BaseRewardTerm, get_reward_class
+from envs.tasks.utils import TaskContext
+from utils import RuntimeContext
 
 
 class RewardManager:

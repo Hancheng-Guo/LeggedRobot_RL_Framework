@@ -1,11 +1,11 @@
 import torch
 from collections.abc import Sequence
 
-from envs.simulators.utils.context import ModelContext
-from envs.tasks.managers.reward.terms.base import BaseRewardTerm
-from envs.tasks.managers.reward.terms.registry import register_reward
-from envs.tasks.managers.reward.terms.utils import command_vector
-from envs.tasks.utils.context import TaskContext
+from .base import BaseRewardTerm
+from .registry import register_reward
+from .utils import command_vector
+from envs.simulators.utils import ModelContext
+from envs.tasks.utils import TaskContext
 
 
 _FOOT_PHASE_REAL_NAME = "foot_phase_real"

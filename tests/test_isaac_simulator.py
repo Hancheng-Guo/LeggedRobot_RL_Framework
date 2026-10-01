@@ -1,11 +1,10 @@
-from pathlib import Path
-import subprocess
-import sys
-from typing import Any
-
-import numpy as np
 import pytest
 import torch
+import subprocess
+import sys
+import numpy as np
+from pathlib import Path
+from typing import Any
 
 from envs.simulators.isaac_sim import IsaacSimSimulator
 from envs.simulators.isaac_sim_backend import (
@@ -14,7 +13,7 @@ from envs.simulators.isaac_sim_backend import (
 )
 from envs.simulators.isaac_sim_runtime import IsaacSimRuntime
 from envs.simulators.registry import SIM_TYPE_MAP
-from utils.component import Component
+from utils import Component
 
 
 pytestmark = pytest.mark.isaacsim

@@ -1,8 +1,6 @@
 import pytest
 import yaml
-from pathlib import Path
-from utils.config import load_yaml
-from utils.config import get_yaml_value
+from utils import get_yaml_value, load_yaml
 
 
 def test_load_yaml_success(tmp_path):

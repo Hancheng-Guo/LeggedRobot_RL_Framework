@@ -4,9 +4,8 @@ from pathlib import Path
 from typing import Any
 from abc import ABC, abstractmethod
 
-from envs.simulators.utils.context import ModelContext
-from envs.simulators.utils.state import SimulatorState
-from utils.runtime import RuntimeContext
+from .utils import ModelContext, SimulatorState
+from utils import RuntimeContext
 
 
 class BaseSimulator(ABC):

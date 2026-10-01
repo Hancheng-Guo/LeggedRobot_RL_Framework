@@ -9,11 +9,9 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any
 
-from utils.runtime import RuntimeContext
-from runners.base import BaseRunner
-from runners.callbacks.base import BaseCallback
-from utils.logging import get_logger
-from utils.scalar import scalar_metrics
+from .base import BaseCallback
+from runners import BaseRunner
+from utils import RuntimeContext, get_logger, scalar_metrics
 
 
 logger = get_logger(__name__)

@@ -1,10 +1,9 @@
+import pytest
+import torch
 import logging
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
-
-import pytest
-import torch
 
 from runners.callbacks.checkpoint import CheckpointCallback
 from runners.callbacks.early_stopping import EarlystoppingCallback
@@ -19,8 +18,7 @@ from runners.callbacks.adaptive_learning_rate import (
 from runners.base import BaseRunner
 from runners.on_policy import OnPolicyRunner
 from runners.types import RestoreMode
-from utils.runtime import RuntimeContext
-from utils.logging import configure_logging, get_logger
+from utils import RuntimeContext, configure_logging, get_logger
 
 
 class DummyAlgorithm:

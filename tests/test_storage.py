@@ -1,11 +1,8 @@
 import math
-
 import pytest
 import torch
 
-from rl.utils.gae import compute_gae
-from rl.utils.metrics import explained_variance
-from rl.utils.storage import RolloutStorage
+from rl.utils import RolloutStorage, compute_gae, explained_variance
 
 
 def test_explained_variance_for_perfect_values() -> None:

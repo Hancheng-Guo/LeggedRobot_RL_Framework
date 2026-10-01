@@ -1,7 +1,7 @@
 import torch
 from dataclasses import dataclass
 
-from envs.simulators.utils.state import SimulatorState
+from envs.simulators.utils import SimulatorState
 
 
 @dataclass

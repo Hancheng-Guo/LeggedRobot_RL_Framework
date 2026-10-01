@@ -2,9 +2,9 @@ import torch
 import pytest
 from typing import cast
 
-from envs.tasks.managers.command.base import CommandManager
+from envs.tasks.managers.command import CommandManager
 # from envs.tasks.managers.command.terms.curriculum import LrpcSampleOnReset
-from envs.tasks.managers.curriculum.base import CurriculumManager
+from envs.tasks.managers.curriculum import CurriculumManager
 from envs.tasks.managers.curriculum.terms.command import (
     LpacCommandReward,
     # LrpcCommandReward,

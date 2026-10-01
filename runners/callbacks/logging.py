@@ -1,9 +1,8 @@
 from typing import Any
 
-from runners.base import BaseRunner
-from runners.callbacks.base import BaseCallback
-from utils.logging import get_logger
-from utils.scalar import scalar_metrics
+from .base import BaseCallback
+from runners import BaseRunner
+from utils import get_logger, scalar_metrics
 
 
 class LoggingCallback(BaseCallback):

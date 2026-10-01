@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Any
 from pathlib import Path
 
-from utils.path import fill_path
+from .path import fill_path
 
 
 COMPONENT_CONFIG_DIR_MAP: dict[str, str] = {

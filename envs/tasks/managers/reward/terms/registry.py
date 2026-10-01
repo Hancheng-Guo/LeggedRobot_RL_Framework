@@ -1,7 +1,7 @@
 from typing import TypeVar
 
-from envs.tasks.managers.reward.terms.base import BaseRewardTerm
-from utils.string import camel_to_snake
+from .base import BaseRewardTerm
+from utils import camel_to_snake
 
 
 REWARD_CLASS_MAP: dict[str, type[BaseRewardTerm]] = {}

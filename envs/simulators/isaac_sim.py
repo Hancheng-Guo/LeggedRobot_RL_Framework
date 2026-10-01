@@ -6,13 +6,10 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import cast
 
-from utils.runtime import RuntimeContext
-from envs.simulators.base import BaseSimulator
-from envs.simulators.isaac_sim_backend import IsaacSimBackend, IsaacSimResetState
-from envs.simulators.utils.context import ModelContext
-from envs.simulators.utils.state import SimulatorState
-from utils.component import Component
-from utils.param import update_attributes
+from .base import BaseSimulator
+from .isaac_sim_backend import IsaacSimBackend, IsaacSimResetState
+from .utils import ModelContext, SimulatorState
+from utils import Component, RuntimeContext, update_attributes
 
 
 def _default_backend_factory(context: RuntimeContext) -> IsaacSimBackend:

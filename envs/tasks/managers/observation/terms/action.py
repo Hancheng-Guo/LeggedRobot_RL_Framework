@@ -1,8 +1,8 @@
 import torch
 
-from envs.tasks.managers.observation.terms.base import BaseObservationTerm
-from envs.tasks.managers.observation.terms.registry import register_observation
-from envs.tasks.utils.context import TaskContext
+from .base import BaseObservationTerm
+from .registry import register_observation
+from envs.tasks.utils import TaskContext
 
 
 @register_observation

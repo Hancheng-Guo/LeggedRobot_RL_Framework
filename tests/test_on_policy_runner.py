@@ -1,23 +1,20 @@
+import pytest
+import torch
+import yaml
+import numpy as np
 from collections.abc import Mapping, Sequence
 from datetime import datetime, tzinfo
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
-import numpy as np
-import pytest
-import torch
-import yaml
-
-from utils.runtime import RuntimeContext
-from envs.base import BaseEnv
+from envs import BaseEnv
 from envs.registry import ENV_TYPE_MAP
-from rl.algorithms.base import OnPolicyAlgorithm, PolicyOutput
-from runners.callbacks.base import BaseCallback
-from runners.on_policy import OnPolicyRunner
-from runners.types import RestoreMode
+from rl.algorithms import OnPolicyAlgorithm, PolicyOutput
+from runners import OnPolicyRunner, RestoreMode
+from runners.callbacks import BaseCallback
 from runners import on_policy as on_policy_module
-from utils.component import Component, ComponentInfo
+from utils import Component, ComponentInfo, RuntimeContext
 
 
 class TrackingEnvironment(BaseEnv):

@@ -2,17 +2,12 @@ import torch
 import numpy as np
 from typing import Any
 
-from utils.runtime import RuntimeContext
-from envs.base import BaseEnv
-from envs.simulators.base import BaseSimulator
-from envs.simulators.utils.context import ModelContext
-from envs.simulators.registry import SIM_TYPE_MAP
-from envs.tasks.base import BaseTaskLogic
-from envs.tasks.utils.context import TaskStepResult
-from envs.tasks.registry import TASK_TYPE_MAP
-from utils.component import Component
-from utils.config import load_yaml
-from utils.param import update_attributes
+from .base import BaseEnv
+from envs.simulators import SIM_TYPE_MAP, BaseSimulator
+from envs.simulators.utils import ModelContext
+from envs.tasks import TASK_TYPE_MAP, BaseTaskLogic
+from envs.tasks.utils import TaskStepResult
+from utils import Component, RuntimeContext, load_yaml, update_attributes
 
 
 _PLAYBACK_LOCAL_ATTRIBUTES = frozenset({

@@ -3,9 +3,9 @@ import sys
 from importlib import import_module
 from typing import Any
 
-from runners.base import BaseRunner
-from runners.callbacks.base import BaseCallback
-from utils.logging import get_logger
+from .base import BaseCallback
+from runners import BaseRunner
+from utils import get_logger
 
 
 logger = get_logger(__name__)

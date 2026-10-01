@@ -14,12 +14,9 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from typing import Generic, TypeVar
 
-from envs.simulators.base import BaseSimulator
-from envs.simulators.utils.context import ModelContext
-from envs.simulators.utils.state import SimulatorState
-from utils.component import Component
-from utils.runtime import RuntimeContext
-from utils.param import update_attributes
+from .base import BaseSimulator
+from .utils import ModelContext, SimulatorState
+from utils import Component, RuntimeContext, update_attributes
 
 
 BufferType = TypeVar("BufferType", np.ndarray, torch.Tensor)

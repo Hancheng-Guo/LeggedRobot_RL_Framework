@@ -5,23 +5,23 @@ from __future__ import annotations
 import argparse
 import faulthandler
 import sys
+import torch
 from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import patch
-
-import torch
 
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.utils.context import create_runtime_context
-from utils.runtime import RuntimeContext
-from app.utils.device import resolve_device
-from app.utils.seed import set_seed
+from app.utils import (
+    create_runtime_context,
+    resolve_device,
+    set_seed,
+)
 from envs.vector_env import VectorEnv
-from utils.component import Component, ComponentInfo
+from utils import Component, ComponentInfo, RuntimeContext
 
 
 def report(message: str) -> None:

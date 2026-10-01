@@ -1,9 +1,9 @@
 from pathlib import Path
 from typing import Any
 
-from utils.runtime import RuntimeContext
-from runners.base import BaseRunner
-from runners.callbacks.base import BaseCallback
+from .base import BaseCallback
+from utils import RuntimeContext
+from runners import BaseRunner
 
 
 def _stage_directory_name(

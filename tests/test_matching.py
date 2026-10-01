@@ -1,6 +1,6 @@
 import pytest
 
-from utils.matching import resolve_metric_name
+from utils import resolve_metric_name
 
 
 def test_resolve_metric_name_requires_match_by_default() -> None:

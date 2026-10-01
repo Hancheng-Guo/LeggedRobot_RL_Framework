@@ -4,7 +4,7 @@ from typing import Any
 from pathlib import Path
 
 from app.utils.context import create_runtime_context
-from utils.runtime import RuntimeContext
+from utils import RuntimeContext
 
 
 def test_create_runtime_context():

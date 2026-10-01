@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import logging
-
 import pytest
 from colorama import Back, Fore, Style
 
-from utils.logging import ColoredFormatter, LOG_FORMAT
+from utils import LOG_FORMAT, ColoredFormatter
 
 
 pytestmark = pytest.mark.core

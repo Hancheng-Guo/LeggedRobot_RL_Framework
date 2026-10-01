@@ -1,7 +1,7 @@
 from typing import TypeVar
 
-from envs.tasks.managers.termination.terms.base import BaseTerminationTerm
-from utils.string import camel_to_snake
+from .base import BaseTerminationTerm
+from utils import camel_to_snake
 
 
 TERMINATION_CLASS_MAP: dict[str, type[BaseTerminationTerm]] = {}

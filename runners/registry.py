@@ -1,4 +1,4 @@
-from runners.on_policy import OnPolicyRunner
+from .on_policy import OnPolicyRunner
 # from runners.off_policy import OffPolicyRunner
 
 RUNNER_TYPE_MAP: dict[str, type[OnPolicyRunner]] = {

@@ -2,15 +2,15 @@ import pytest
 import torch
 from dataclasses import replace
 
-from envs.simulators.utils.state import SimulatorState
-from envs.tasks.managers.observation.base import ObservationManager
-from envs.tasks.managers.observation.terms.base import BaseObservationTerm
+from envs.simulators.utils import SimulatorState
+from envs.tasks.managers.observation import ObservationManager
+from envs.tasks.managers.observation.terms import BaseObservationTerm
 from envs.tasks.managers.observation.terms.action import LastAction
 from envs.tasks.managers.observation.terms.foot import FootDurationTanh
-from envs.tasks.managers.observation.terms.registry import (
+from envs.tasks.managers.observation.terms import (
     OBSERVATION_CLASS_MAP,
 )
-from envs.tasks.utils.context import TaskContext
+from envs.tasks.utils import TaskContext
 
 
 def make_simulator_state(

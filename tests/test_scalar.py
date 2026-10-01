@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from utils.scalar import scalar_metrics, scalar_value
+from utils import scalar_metrics, scalar_value
 
 
 def test_scalar_metrics_converts_numeric_scalars() -> None:

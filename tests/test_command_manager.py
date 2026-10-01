@@ -1,9 +1,7 @@
 import pytest
 import torch
 
-# Importing the task module establishes the existing TaskContext import order.
-from envs.tasks import base as task_base
-from envs.tasks.managers.command.base import CommandManager
+from envs.tasks.managers.command import CommandManager
 
 
 def make_manager(runtime_context, model_context):

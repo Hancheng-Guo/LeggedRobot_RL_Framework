@@ -10,21 +10,19 @@ from collections import deque
 from collections.abc import Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
-from utils.runtime import RuntimeContext
-from runners.base import BaseRunner
-from runners.types import RestoreMode, TrainResult, TrainStopReason
-from runners.callbacks.base import BaseCallback
-from runners.callbacks.stage import StageCallback
-from runners.callbacks.registry import CALLBACK_TYPE_MAP
-from utils.save import atomic_save
-from envs.base import BaseEnv
-from envs.registry import ENV_TYPE_MAP
-from rl.algorithms.base import OnPolicyAlgorithm
-from rl.algorithms.registry import ALG_TYPE_MAP
-from utils.component import Component
-from utils.config import load_yaml
-from utils.logging import get_logger
-from utils.param import update_attributes
+from .base import BaseRunner
+from .types import RestoreMode, TrainResult, TrainStopReason
+from .callbacks import CALLBACK_TYPE_MAP, BaseCallback, StageCallback
+from envs import ENV_TYPE_MAP, BaseEnv
+from rl.algorithms import ALG_TYPE_MAP, OnPolicyAlgorithm
+from utils import (
+    Component,
+    RuntimeContext,
+    atomic_save,
+    get_logger,
+    load_yaml,
+    update_attributes,
+)
 
 
 if TYPE_CHECKING:

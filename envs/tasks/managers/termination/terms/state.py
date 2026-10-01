@@ -1,9 +1,9 @@
 import torch
 
-from envs.simulators.utils.context import ModelContext
-from envs.tasks.managers.termination.terms.base import BaseTerminationTerm
-from envs.tasks.managers.termination.terms.registry import register_termination
-from envs.tasks.utils.context import TaskContext
+from .base import BaseTerminationTerm
+from .registry import register_termination
+from envs.simulators.utils import ModelContext
+from envs.tasks.utils import TaskContext
 
 
 @register_termination

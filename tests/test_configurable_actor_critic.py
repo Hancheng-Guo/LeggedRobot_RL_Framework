@@ -1,20 +1,18 @@
-from pathlib import Path
-from typing import Any
-
 import pytest
 import torch
 import yaml
+from pathlib import Path
+from typing import Any
 
-from utils.runtime import RuntimeContext
 from rl.algorithms.ppo import PPO
 from rl.policies.configurable_actor_critic import ConfigurableActorCritic
 from rl.policies.modules.network import ConfigurableNetwork
 from rl.policies.modules.operators import Add
-from rl.policies.modules.registry import build_module
+from rl.policies.modules import build_module
 from rl.policies.modules.recurrent import StatefulGRU
-from rl.policies.registry import POLICY_TYPE_MAP
-from rl.utils.storage import RolloutStorage
-from utils.component import Component, ComponentInfo
+from rl.policies import POLICY_TYPE_MAP
+from rl.utils import RolloutStorage
+from utils import Component, ComponentInfo, RuntimeContext
 
 
 ACTOR_CONFIG: list[dict[str, Any]] = [

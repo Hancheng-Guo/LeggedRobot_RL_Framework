@@ -2,16 +2,14 @@ import argparse
 import statistics
 import sys
 import time
-from pathlib import Path
-
 import torch
+from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from utils.runtime import RuntimeContext
 from envs.simulators.mujoco import MujocoSimulator
-from utils.component import Component
+from utils import Component, RuntimeContext
 
 
 MODEL_PATH = PROJECT_ROOT / "assets" / "unitree_go1" / "MJCF" / "scene.xml"

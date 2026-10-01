@@ -1,11 +1,11 @@
-from runners.callbacks.base import BaseCallback
-from runners.callbacks.progress_bar import ProgressBarCallback
-from runners.callbacks.checkpoint import CheckpointCallback
-from runners.callbacks.tensorboard import TensorboardCallback
-from runners.callbacks.early_stopping import EarlystoppingCallback
-from runners.callbacks.logging import LoggingCallback
-from runners.callbacks.keyboard_interrupt import KeyboardInterruptCallback
-from runners.callbacks.adaptive_learning_rate import AdaptiveLearningRateCallback
+from .base import BaseCallback
+from .progress_bar import ProgressBarCallback
+from .checkpoint import CheckpointCallback
+from .tensorboard import TensorboardCallback
+from .early_stopping import EarlystoppingCallback
+from .logging import LoggingCallback
+from .keyboard_interrupt import KeyboardInterruptCallback
+from .adaptive_learning_rate import AdaptiveLearningRateCallback
 
 
 CALLBACK_TYPE_MAP: dict[str, type[BaseCallback]] = {

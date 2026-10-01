@@ -1,6 +1,6 @@
 import torch
 
-from envs.tasks.managers.action.base import ActionManager
+from envs.tasks.managers.action import ActionManager
 
 
 def test_action_manager_processes_terms_in_pipeline_order(

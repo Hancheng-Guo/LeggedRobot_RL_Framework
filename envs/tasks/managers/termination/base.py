@@ -1,14 +1,13 @@
+import torch
 from typing import Any
 
-import torch
-
-from utils.runtime import RuntimeContext
-from envs.simulators.utils.context import ModelContext
-from envs.tasks.managers.termination.terms.base import BaseTerminationTerm
-from envs.tasks.managers.termination.terms.registry import (
+from envs.simulators.utils import ModelContext
+from envs.tasks.managers.termination.terms import (
+    BaseTerminationTerm,
     get_termination_class,
 )
-from envs.tasks.utils.context import TaskContext
+from envs.tasks.utils import TaskContext
+from utils import RuntimeContext
 
 
 class TerminationManager:

@@ -1,8 +1,8 @@
 from typing import Any
 from time import monotonic
 
-from runners.base import BaseRunner
-from runners.callbacks.base import BaseCallback
+from .base import BaseCallback
+from runners import BaseRunner
 
 
 class ProgressBarCallback(BaseCallback):

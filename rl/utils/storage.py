@@ -2,8 +2,8 @@ import torch
 from dataclasses import dataclass
 from typing import Iterator
 
-from utils.runtime import RuntimeContext
-from rl.policies.base import RecurrentState
+from rl.policies import RecurrentState
+from utils import RuntimeContext
 
 
 @dataclass(slots=True)

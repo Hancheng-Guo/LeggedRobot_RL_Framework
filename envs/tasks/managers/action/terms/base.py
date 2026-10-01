@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 import torch
 
-from utils.runtime import RuntimeContext
+from utils import RuntimeContext
 
 
 class BaseActionTerm(ABC):

@@ -1,8 +1,8 @@
 import torch
 from abc import ABC, abstractmethod
 
-from utils.runtime import RuntimeContext
-from envs.tasks.utils.context import TaskContext
+from envs.tasks.utils import TaskContext
+from utils import RuntimeContext
 
 
 class BaseRewardTerm(ABC):

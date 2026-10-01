@@ -1,11 +1,13 @@
 import torch
 from typing import Any
 
-from utils.runtime import RuntimeContext
-from envs.simulators.utils.context import ModelContext
-from envs.tasks.managers.observation.terms.base import BaseObservationTerm
-from envs.tasks.managers.observation.terms.registry import get_observation_class
-from envs.tasks.utils.context import TaskContext
+from envs.simulators.utils import ModelContext
+from envs.tasks.managers.observation.terms import (
+    BaseObservationTerm,
+    get_observation_class,
+)
+from envs.tasks.utils import TaskContext
+from utils import RuntimeContext
 
 
 class ObservationManager:

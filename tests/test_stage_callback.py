@@ -1,17 +1,14 @@
+import pytest
+import torch
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-import torch
-
 import app.stage_manager as stage_manager_module
-from utils.runtime import RuntimeContext
 from app.stage_manager import StageManager, StageTrainResult
-from runners.callbacks.base import BaseCallback
-from runners.callbacks.stage import StageCallback
+from runners.callbacks import BaseCallback, StageCallback
 from runners.on_policy import OnPolicyRunner
 from runners.types import TrainResult, TrainStopReason
-from utils.component import Component, ComponentInfo
+from utils import Component, ComponentInfo, RuntimeContext
 
 
 class OtherStoppingCallback(BaseCallback):

@@ -2,9 +2,10 @@ import torch
 from typing import Any
 from pathlib import Path
 
-from app.utils.device import resolve_device
-from app.utils.seed import set_seed
-from utils.runtime import RuntimeContext
+from utils import RuntimeContext
+
+from .device import resolve_device
+from .seed import set_seed
 
 
 DTYPE_MAP: dict[str, torch.dtype] = {

@@ -5,9 +5,9 @@ from pathlib import Path
 from typing import Any
 from torch import Tensor
 
-from utils.runtime import RuntimeContext
-from rl.policies.base import BasePolicy, RecurrentPolicy
-from rl.utils.storage import RolloutStorage
+from rl.policies import BasePolicy, RecurrentPolicy
+from rl.utils import RolloutStorage
+from utils import RuntimeContext
 
 
 @dataclass(slots=True)

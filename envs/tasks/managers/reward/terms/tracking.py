@@ -2,10 +2,10 @@ import math
 import torch
 from collections.abc import Sequence
 
-from envs.tasks.managers.reward.terms.base import BaseRewardTerm
-from envs.tasks.managers.reward.terms.registry import register_reward
-from envs.tasks.managers.reward.terms.utils import command_vector
-from envs.tasks.utils.context import TaskContext
+from .base import BaseRewardTerm
+from .registry import register_reward
+from .utils import command_vector
+from envs.tasks.utils import TaskContext
 
 
 def _command_target_check(

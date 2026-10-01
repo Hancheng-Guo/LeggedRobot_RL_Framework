@@ -1,10 +1,9 @@
+import pytest
+import torch
 from dataclasses import replace
 from typing import cast
 
-import pytest
-import torch
-
-from envs.tasks.managers.reward.base import RewardManager
+from envs.tasks.managers.reward import RewardManager
 from envs.tasks.managers.reward.terms.foot import (
     FootLiftHeightDiffCommandGatedL2,
     FootLiftHeightDiffCommandWeightedExp,
@@ -23,8 +22,8 @@ from envs.tasks.managers.reward.terms.tracking import (
     TrackLinearVelocityXErrorIntegralL2,
     TrackLinearVelocityYErrorIntegralL2,
 )
-from envs.tasks.utils.context import TaskContext
-from envs.simulators.utils.state import SimulatorState
+from envs.tasks.utils import TaskContext
+from envs.simulators.utils import SimulatorState
 
 
 def make_simulator_state(

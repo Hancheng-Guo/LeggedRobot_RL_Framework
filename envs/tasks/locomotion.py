@@ -1,11 +1,13 @@
 import torch
 from typing import Any
 
-from utils.runtime import RuntimeContext
-from envs.tasks.base import BaseTaskLogic
-from envs.tasks.managers.command.base import CommandManager
-from envs.tasks.managers.curriculum.base import CurriculumManager
-from envs.tasks.utils.context import TaskContext, TaskStepResult
+from .base import BaseTaskLogic
+from .managers import (
+    CommandManager,
+    CurriculumManager,
+    RandomizationManager,
+)
+from .utils import TaskContext, TaskStepResult
 
 
 class LocomotionTaskLogic(BaseTaskLogic):

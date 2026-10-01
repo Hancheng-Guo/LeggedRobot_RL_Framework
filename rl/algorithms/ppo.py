@@ -2,16 +2,25 @@ import torch
 from collections.abc import Mapping
 from typing import Any
 
-from utils.runtime import RuntimeContext
-from rl.algorithms.base import OnPolicyAlgorithm, PolicyOutput
-from rl.policies.base import BasePolicy, RecurrentPolicy, RecurrentState
-from rl.policies.registry import POLICY_TYPE_MAP
-from rl.utils.gae import compute_gae
-from rl.utils.metrics import explained_variance
-from rl.utils.storage import RolloutBatch, RolloutStorage
-from utils.param import update_attributes
-from utils.component import Component, ComponentInfo
-from utils.config import load_yaml
+from .base import OnPolicyAlgorithm, PolicyOutput
+from rl.policies import (
+    POLICY_TYPE_MAP,
+    BasePolicy,
+    RecurrentPolicy,
+    RecurrentState,
+)
+from rl.utils import (
+    RolloutBatch,
+    RolloutStorage,
+    compute_gae,
+    explained_variance,
+)
+from utils import (
+    Component,
+    ComponentInfo,
+    load_yaml,
+    update_attributes,
+)
 
 
 class PPO(OnPolicyAlgorithm):

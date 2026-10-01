@@ -1,7 +1,7 @@
 from typing import TypeVar
 
-from envs.tasks.managers.curriculum.terms.base import BaseCurriculumTerm
-from utils.string import camel_to_snake
+from .base import BaseCurriculumTerm
+from utils import camel_to_snake
 
 
 CURRICULUM_CLASS_MAP: dict[str, type[BaseCurriculumTerm]] = {}

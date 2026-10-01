@@ -1,10 +1,10 @@
 import torch
 
-from envs.simulators.utils.context import ModelContext
-from envs.tasks.managers.reward.terms.base import BaseRewardTerm
-from envs.tasks.managers.reward.terms.registry import register_reward
-from envs.tasks.managers.reward.terms.utils import geom_ids_from_names
-from envs.tasks.utils.context import TaskContext
+from .base import BaseRewardTerm
+from .registry import register_reward
+from .utils import geom_ids_from_names
+from envs.simulators.utils import ModelContext
+from envs.tasks.utils import TaskContext
 
 
 @register_reward

@@ -1,21 +1,18 @@
 """Public lifecycle contracts that must survive app/runner refactoring."""
-
+import pytest
+import torch
 import ast
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
-import pytest
-import torch
-
 from runners.on_policy import OnPolicyRunner
 from runners.types import RestoreMode, TrainStopReason
 from app.utils.run_workspace import inspect_checkpoint_metadata
-from envs.base import BaseEnv
-from rl.algorithms.base import OnPolicyAlgorithm
-from utils.component import Component
-from utils.runtime import RuntimeContext
+from envs import BaseEnv
+from rl.algorithms import OnPolicyAlgorithm
+from utils import Component, RuntimeContext
 
 
 def test_training_layers_do_not_import_application() -> None:

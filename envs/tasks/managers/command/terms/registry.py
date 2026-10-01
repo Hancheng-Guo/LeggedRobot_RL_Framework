@@ -1,6 +1,6 @@
 from typing import TypeVar
 
-from envs.tasks.managers.command.terms.base import BaseCommandTerm
+from .base import BaseCommandTerm
 
 
 COMMAND_CLASS_MAP: dict[str, type[BaseCommandTerm]] = {}

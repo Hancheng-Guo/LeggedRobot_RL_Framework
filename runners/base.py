@@ -5,12 +5,11 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from utils.runtime import RuntimeContext
-from envs.base import BaseEnv
-from rl.algorithms.base import OnPolicyAlgorithm
-from runners.callbacks.base import BaseCallback
-from runners.types import RestoreMode, TrainResult
-from utils.component import Component
+from .types import RestoreMode, TrainResult
+from .callbacks import BaseCallback
+from envs import BaseEnv
+from rl.algorithms import OnPolicyAlgorithm
+from utils import Component, RuntimeContext
 
 
 if TYPE_CHECKING:

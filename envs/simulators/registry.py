@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterator, Mapping
 from importlib import import_module
 
-from envs.simulators.base import BaseSimulator
+from .base import BaseSimulator
 
 
 class SimulatorRegistry(Mapping[str, type[BaseSimulator]]):

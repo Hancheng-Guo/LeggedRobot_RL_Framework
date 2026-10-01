@@ -1,12 +1,12 @@
 import torch
 from abc import abstractmethod
 
-from utils.runtime import RuntimeContext
-from rl.policies.base import (
+from .base import (
     BasePolicy,
     PolicyActionOutput,
     PolicyEvaluation,
 )
+from utils import RuntimeContext
 
 
 class ActorCritic(BasePolicy):

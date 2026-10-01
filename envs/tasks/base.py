@@ -1,17 +1,16 @@
 import torch
 from abc import ABC, abstractmethod
 
-from utils.runtime import RuntimeContext
-from envs.simulators.utils.context import ModelContext
-from envs.tasks.utils.context import TaskContext, TaskStepResult
-from envs.simulators.utils.state import SimulatorState
-from envs.tasks.managers.action.base import ActionManager
-from envs.tasks.managers.command.base import CommandManager
-from envs.tasks.managers.observation.base import ObservationManager
-from envs.tasks.managers.reward.base import RewardManager
-from envs.tasks.managers.termination.base import TerminationManager
-from utils.component import Component
-from utils.param import update_attributes
+from .managers import (
+    ActionManager,
+    CommandManager,
+    ObservationManager,
+    RewardManager,
+    TerminationManager,
+)
+from .utils import TaskContext, TaskStepResult
+from envs.simulators.utils import ModelContext, SimulatorState
+from utils import Component, RuntimeContext, update_attributes
 
 
 class BaseTaskLogic(ABC):

@@ -1,8 +1,7 @@
+import torch
 from typing import cast
 
-import torch
-
-from envs.tasks.managers.curriculum.base import CurriculumManager
+from envs.tasks.managers.curriculum import CurriculumManager
 from envs.tasks.managers.curriculum.terms.command import (
     FastLpacCommandReward,
     LpacCommandReward,

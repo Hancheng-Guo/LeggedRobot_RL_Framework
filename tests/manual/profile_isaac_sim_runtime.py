@@ -10,19 +10,18 @@ import logging
 import statistics
 import sys
 import time
-from pathlib import Path
-
 import torch
 import yaml
+from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from utils.runtime import RuntimeContext  # noqa: E402
 from envs.simulators.isaac_sim_backend import IsaacSimResetState  # noqa: E402
 from envs.simulators.isaac_sim_runtime import IsaacSimRuntime  # noqa: E402
+from utils import RuntimeContext  # noqa: E402
 
 
 LOGGER = logging.getLogger("profile_isaac_sim_runtime")

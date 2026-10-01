@@ -5,19 +5,17 @@ from __future__ import annotations
 import argparse
 import faulthandler
 import sys
-from pathlib import Path
-
 import torch
 import yaml
+from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from utils.runtime import RuntimeContext
 from envs.simulators.isaac_sim import IsaacSimSimulator
-from utils.component import Component
+from utils import Component, RuntimeContext
 
 
 def report(message: str) -> None:

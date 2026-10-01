@@ -1,10 +1,9 @@
 import torch
 from typing import Any
 
-from utils.runtime import RuntimeContext
-from envs.simulators.utils.context import ModelContext
-from envs.tasks.managers.action.terms.base import BaseActionTerm
-from envs.tasks.managers.action.terms.registry import get_action_class
+from envs.simulators.utils import ModelContext
+from envs.tasks.managers.action.terms import BaseActionTerm, get_action_class
+from utils import RuntimeContext
 
 
 class ActionManager:

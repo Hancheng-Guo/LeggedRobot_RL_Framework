@@ -1,7 +1,7 @@
 import pytest
 from pathlib import Path
 
-from utils.path import fill_path
+from utils import fill_path
 
 
 def test_fill_path_with_name_only():

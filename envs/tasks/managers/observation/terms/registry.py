@@ -1,7 +1,7 @@
 from typing import TypeVar
 
-from envs.tasks.managers.observation.terms.base import BaseObservationTerm
-from utils.string import camel_to_snake
+from .base import BaseObservationTerm
+from utils import camel_to_snake
 
 
 OBSERVATION_CLASS_MAP: dict[str, type[BaseObservationTerm]] = {}

@@ -1,6 +1,6 @@
 import pytest
 
-from utils.param import update_attributes
+from utils import update_attributes
 
 
 class DummyInstance:

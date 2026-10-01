@@ -1,3 +1,5 @@
+import pytest
+import torch
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime
@@ -5,17 +7,14 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
-import pytest
-import torch
-
 import app.application_entry as application_entry_module
 from app.application_entry import ApplicationEntry
 from app.stage_manager import StageManager
-from utils.runtime import RuntimeContext
 from runners.base import BaseRunner
 from runners.types import RestoreMode, TrainResult, TrainStopReason
 from runners.callbacks.stage import StageCallback
 from runners.utils.frames import VideoFormat, VideoFormats
+from utils import RuntimeContext
 
 
 def test_application_train_archives_configs_before_training(

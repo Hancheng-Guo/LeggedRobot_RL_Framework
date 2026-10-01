@@ -1,9 +1,8 @@
+import torch
 from abc import ABC, abstractmethod
 
-import torch
-
-from utils.runtime import RuntimeContext
-from envs.simulators.utils.context import ModelContext
+from envs.simulators.utils import ModelContext
+from utils import RuntimeContext
 
 
 class BaseCurriculumTerm(ABC):

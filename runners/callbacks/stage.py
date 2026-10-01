@@ -8,8 +8,8 @@ from numbers import Real
 from typing import Any
 
 
-from runners.callbacks.base import BaseCallback
-from utils.matching import resolve_metric_name
+from .base import BaseCallback
+from utils import resolve_metric_name
 
 
 AGGREGATION_MAP: dict[

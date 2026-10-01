@@ -1,5 +1,5 @@
-from envs.tasks.base import BaseTaskLogic
-from envs.tasks.locomotion import LocomotionTaskLogic
+from .base import BaseTaskLogic
+from .locomotion import LocomotionTaskLogic
 
 
 TASK_TYPE_MAP: dict[str, type[BaseTaskLogic] | type[LocomotionTaskLogic]] = {

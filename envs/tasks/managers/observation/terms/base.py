@@ -1,10 +1,9 @@
+import torch
 from abc import ABC, abstractmethod
 
-import torch
 
-from utils.runtime import RuntimeContext
-from envs.simulators.utils.context import ModelContext
-from envs.tasks.utils.context import TaskContext
+from envs.tasks.utils import TaskContext
+from utils import RuntimeContext
 
 
 class BaseObservationTerm(ABC):

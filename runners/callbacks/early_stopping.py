@@ -2,10 +2,9 @@ import math
 from collections.abc import Mapping
 from typing import Any, Literal
 
-from runners.base import BaseRunner
-from runners.callbacks.base import BaseCallback
-from utils.matching import resolve_metric_name
-from utils.scalar import scalar_value
+from .base import BaseCallback
+from runners import BaseRunner
+from utils import resolve_metric_name, scalar_value
 
 
 class EarlystoppingCallback(BaseCallback):

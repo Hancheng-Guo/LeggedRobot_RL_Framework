@@ -1,10 +1,9 @@
-from pathlib import Path
-
 import pytest
 import torch
+from pathlib import Path
 
-from utils.runtime import RuntimeContext
-from envs.simulators.utils.context import ModelContext
+from envs.simulators.utils import ModelContext
+from utils import RuntimeContext
 
 
 BACKEND_MARKERS = {"mujoco", "isaacsim"}

@@ -5,11 +5,10 @@ from enum import Enum, auto
 from numbers import Real
 from typing import Any
 
-from rl.algorithms.base import BaseAlgorithm
-from runners.base import BaseRunner
-from runners.callbacks.base import BaseCallback
-from utils.matching import resolve_metric_name
-from utils.scalar import scalar_value
+from .base import BaseCallback
+from rl.algorithms import BaseAlgorithm
+from runners import BaseRunner
+from utils import resolve_metric_name, scalar_value
 
 
 class LearningRateAdjustment(Enum):

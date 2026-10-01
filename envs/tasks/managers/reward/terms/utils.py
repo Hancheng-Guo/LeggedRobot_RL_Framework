@@ -1,8 +1,8 @@
 import torch
 from collections.abc import Sequence
 
-from envs.simulators.utils.context import ModelContext
-from envs.tasks.utils.context import TaskContext
+from envs.simulators.utils import ModelContext
+from envs.tasks.utils import TaskContext
 
 
 def geom_ids_from_names(

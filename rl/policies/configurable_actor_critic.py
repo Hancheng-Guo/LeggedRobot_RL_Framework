@@ -3,16 +3,14 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from utils.runtime import RuntimeContext
-from rl.policies.actor_critic import ActorCritic
-from rl.policies.base import PolicyEvaluation, RecurrentState
-from rl.policies.distributions import (
+from .base import PolicyEvaluation, RecurrentState
+from .actor_critic import ActorCritic
+from .distributions import (
     BaseActionDistribution,
     build_action_distribution,
 )
-from rl.policies.modules.network import ConfigurableNetwork
-from utils.component import Component
-from utils.save import atomic_save
+from .modules import ConfigurableNetwork
+from utils import Component, RuntimeContext, atomic_save
 
 
 class ConfigurableActorCritic(ActorCritic):

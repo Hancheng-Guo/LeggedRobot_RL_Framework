@@ -1,6 +1,6 @@
 import torch
 
-from envs.simulators.utils.state import SimulatorState
+from envs.simulators.utils import SimulatorState
 
 
 def make_state() -> SimulatorState:

@@ -1,13 +1,13 @@
 import torch
+import re
 from collections import OrderedDict
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
-import re
 from typing import Any
 
-from rl.policies.modules.recurrent import StatefulGRU
-from rl.policies.modules.registry import build_module
+from .recurrent import StatefulGRU
+from .registry import build_module
 
 
 @dataclass(frozen=True, slots=True)

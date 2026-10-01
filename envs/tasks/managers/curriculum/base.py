@@ -1,11 +1,12 @@
+import torch
 from typing import Any
 
-import torch
-
-from utils.runtime import RuntimeContext
-from envs.simulators.utils.context import ModelContext
-from envs.tasks.managers.curriculum.terms.base import BaseCurriculumTerm
-from envs.tasks.managers.curriculum.terms.registry import get_curriculum_class
+from envs.simulators.utils import ModelContext
+from envs.tasks.managers.curriculum.terms import (
+    BaseCurriculumTerm,
+    get_curriculum_class,
+)
+from utils import RuntimeContext
 
 
 class CurriculumManager:

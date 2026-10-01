@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from utils.component import create_component
+from utils import create_component
 
 
 def test_create_component():

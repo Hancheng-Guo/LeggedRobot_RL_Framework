@@ -3,10 +3,10 @@ from abc import ABC, abstractmethod
 from typing import Any
 from dataclasses import dataclass
 
-from envs.tasks.managers.command.constraints import CommandConstraintSet
-from envs.tasks.managers.command.terms.registry import get_command_class
-from envs.tasks.managers.curriculum.terms.base import BaseCurriculumTerm
-from envs.tasks.managers.curriculum.terms.registry import register_curriculum
+from .base import BaseCurriculumTerm
+from .registry import register_curriculum
+from envs.tasks.managers.command import CommandConstraintSet
+from envs.tasks.managers.command.terms import get_command_class
 
 
 @dataclass

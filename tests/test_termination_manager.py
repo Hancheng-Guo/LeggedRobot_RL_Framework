@@ -1,13 +1,13 @@
 import pytest
 import torch
 
-from envs.simulators.utils.state import SimulatorState
-from envs.tasks.managers.termination.base import TerminationManager
-from envs.tasks.managers.termination.terms.base import BaseTerminationTerm
-from envs.tasks.managers.termination.terms.registry import (
+from envs.simulators.utils import SimulatorState
+from envs.tasks.managers.termination import TerminationManager
+from envs.tasks.managers.termination.terms import BaseTerminationTerm
+from envs.tasks.managers.termination.terms import (
     TERMINATION_CLASS_MAP,
 )
-from envs.tasks.utils.context import TaskContext
+from envs.tasks.utils import TaskContext
 
 
 def make_simulator_state(**overrides: torch.Tensor) -> SimulatorState:

@@ -1,17 +1,15 @@
+import torch
 from collections.abc import Mapping
 from typing import Any
 
-import torch
-
-from utils.runtime import RuntimeContext
-from rl.algorithms.base import (
+from rl.algorithms import (
     OnPolicyAlgorithm,
     PolicyOutput,
 )
 from rl.algorithms.ppo import PPO
-from rl.policies.base import BasePolicy, PolicyActionOutput, PolicyEvaluation
-from rl.utils.storage import RolloutStorage
-from utils.component import Component
+from rl.policies import BasePolicy, PolicyActionOutput, PolicyEvaluation
+from rl.utils import RolloutStorage
+from utils import Component, RuntimeContext
 
 
 class FakePPOPolicy(BasePolicy):

@@ -949,8 +949,13 @@ def test_progress_bar_reports_completed_iteration(
     assert "[" not in cleared_output
     assert callback._completed_iterations == 1
 
+    callback._cursor_position = 0
+    callback._completed_steps = callback.total_steps
+    callback._render_train(now=0.0)
+    assert "[>###]" in capsys.readouterr().out
 
-def test_progress_bar_cursor_wraps_and_can_be_hidden() -> None:
+
+def test_progress_bar_cursor_wraps_and_overwrites_filled_cells() -> None:
     callback = ProgressBarCallback(
         runner=make_runner(),
         max_iterations=7,
@@ -960,14 +965,15 @@ def test_progress_bar_cursor_wraps_and_can_be_hidden() -> None:
     )
 
     callback._cursor_position = 7
-    assert callback._build_bar(filled=2) == "##----->------"
+    assert callback._build_moving_bar(filled=2) == "##----->------"
 
     callback._advance_cursor()
-    assert callback._build_bar(filled=2) == "##------>-----"
+    assert callback._build_moving_bar(filled=2) == "##------>-----"
 
     callback._cursor_position = 13
     callback._advance_cursor()
-    assert callback._build_bar(filled=2) == "##------------"
+    assert callback._build_moving_bar(filled=2) == ">#------------"
+    assert callback._build_moving_bar(filled=14) == ">#############"
 
 
 def test_progress_bar_tracks_play_steps(

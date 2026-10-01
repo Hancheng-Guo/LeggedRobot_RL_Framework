@@ -223,17 +223,18 @@ class TensorboardCallback(BaseCallback):
                     ),
                     None,
                 )
-                if console_handler is not None:
+                if console_handler is None:
+                    logger.info(
+                        "Waiting for TensorBoard to load existing event data."
+                    )
+                else:
                     original_terminator = console_handler.terminator
                     console_handler.terminator = ""
-                try:
-                    logger.info(
-                        "Waiting for TensorBoard to load existing event data. "
-                        if console_handler is not None
-                        else "Waiting for TensorBoard to load existing event data."
-                    )
-                finally:
-                    if console_handler is not None:
+                    try:
+                        logger.info(
+                            "Waiting for TensorBoard to load existing event data. "
+                        )
+                    finally:
                         console_handler.terminator = original_terminator
                 url = self._launch_after_initial_load(console_handler)
                 self._SERVER_URLS[self.tensorboard_root_dir] = url
@@ -291,7 +292,7 @@ class TensorboardCallback(BaseCallback):
             return url
         finally:
             stop_spinner.set()
-            if spinner is not None:
+            if spinner is not None and console_handler is not None:
                 spinner.join()
                 console_handler.acquire()
                 try:

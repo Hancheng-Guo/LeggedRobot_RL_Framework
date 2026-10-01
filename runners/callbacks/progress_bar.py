@@ -177,7 +177,7 @@ class ProgressBarCallback(BaseCallback):
         )
         fraction = min(self._completed_steps, self.total_steps) / self.total_steps
         filled = round(self.width * fraction)
-        bar = self._build_bar(filled)
+        bar = self._build_moving_bar(filled)
         message = (
             f"\r[{bar}] {completed}/{self.max_iterations} iterations "
             f"({fraction:6.2%})"
@@ -239,21 +239,6 @@ class ProgressBarCallback(BaseCallback):
         self._cursor_position = (
             self._cursor_position + 1
         ) % self.width
-
-
-    def _build_bar(
-        self,
-        filled: int
-    ) -> str:
-        
-        bar_parts = [
-            "#" if index < filled else "-"
-            for index in range(self.width)
-        ]
-        if self._cursor_position >= filled:
-            bar_parts[self._cursor_position] = ">"
-
-        return "".join(bar_parts)
 
 
     def _build_moving_bar(self, filled: int) -> str:

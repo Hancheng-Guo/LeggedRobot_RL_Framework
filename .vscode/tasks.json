@@ -2,7 +2,65 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "Test: Core + MuJoCo",
+            "label": "Run: Main",
+            "icon": { "id": "play" },
+            "type": "process",
+            "command": "${command:python.interpreterPath}",
+            "args": [
+                "${workspaceFolder}/main.py"
+            ],
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "focus": true
+            },
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "windows": {
+                "type": "shell",
+                "command": "&",
+                "args": [
+                    "'${command:python.interpreterPath}'",
+                    "'${workspaceFolder}/main.py'"
+                ],
+                "options": {
+                    "cwd": "${workspaceFolder}",
+                    "shell": {
+                        "executable": "powershell.exe",
+                        "args": [
+                            "-NoProfile",
+                            "-Command"
+                        ]
+                    }
+                }
+            }
+        },
+        {
+            "label": "Check: MuJoCo",
+            "icon": { "id": "checklist" },
+            "group": "test",
+            "dependsOrder": "sequence",
+            "dependsOn": [
+                "Pyright: MuJoCo",
+                "Pytest: MuJoCo"
+            ],
+            "problemMatcher": []
+        },
+        {
+            "label": "Check: Isaac Sim",
+            "icon": { "id": "checklist" },
+            "group": "test",
+            "dependsOrder": "sequence",
+            "dependsOn": [
+                "Pyright: Isaac Sim",
+                "Pytest: Isaac Sim"
+            ],
+            "problemMatcher": []
+        },
+        {
+            "label": "Pytest: MuJoCo",
             "icon": { "id": "beaker" },
             "type": "process",
             "command": "'${command:python.interpreterPath}'",
@@ -42,7 +100,7 @@
             }
         },
         {
-            "label": "Test: Core + Isaac Sim",
+            "label": "Pytest: Isaac Sim",
             "icon": { "id": "beaker" },
             "type": "process",
             "command": "'${command:python.interpreterPath}'",
@@ -82,7 +140,7 @@
             }
         },
         {
-            "label": "Type Check: Core + MuJoCo",
+            "label": "Pyright: MuJoCo",
             "icon": { "id": "inspect" },
             "type": "process",
             "command": "${command:python.interpreterPath}",
@@ -113,7 +171,7 @@
             }
         },
         {
-            "label": "Type Check: Core + Isaac Sim",
+            "label": "Pyright: Isaac Sim",
             "icon": { "id": "inspect" },
             "type": "process",
             "command": "${command:python.interpreterPath}",
@@ -139,42 +197,6 @@
                     "shell": {
                         "executable": "powershell.exe",
                         "args": ["-NoProfile", "-Command"]
-                    }
-                }
-            }
-        },
-        {
-            "label": "Run: Main",
-            "icon": { "id": "play" },
-            "type": "process",
-            "command": "${command:python.interpreterPath}",
-            "args": [
-                "${workspaceFolder}/main.py"
-            ],
-            "problemMatcher": [],
-            "presentation": {
-                "reveal": "always",
-                "panel": "dedicated",
-                "focus": true
-            },
-            "options": {
-                "cwd": "${workspaceFolder}"
-            },
-            "windows": {
-                "type": "shell",
-                "command": "&",
-                "args": [
-                    "'${command:python.interpreterPath}'",
-                    "'${workspaceFolder}/main.py'"
-                ],
-                "options": {
-                    "cwd": "${workspaceFolder}",
-                    "shell": {
-                        "executable": "powershell.exe",
-                        "args": [
-                            "-NoProfile",
-                            "-Command"
-                        ]
                     }
                 }
             }

@@ -38,6 +38,31 @@
             }
         },
         {
+            "label": "Run: Select App",
+            "icon": { "id": "play" },
+            "type": "shell",
+            "command": "&",
+            "args": [
+                "'${command:python.interpreterPath}'",
+                "-m",
+                "tools.run_app",
+                "'${input:appConfigName}'"
+            ],
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "focus": true
+            },
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "shell": {
+                    "executable": "powershell.exe",
+                    "args": ["-NoProfile", "-Command"]
+                }
+            }
+        },
+        {
             "label": "Tool: TensorBoard",
             "icon": { "id": "graph-line" },
             "type": "process",
@@ -306,15 +331,50 @@
     ],
     "inputs": [
         {
+            "id": "appConfigName",
+            "type": "command",
+            "command": "extension.commandvariable.pickStringRemember",
+            "args": {
+                "description": "Select app",
+                "key": "selectedAppName",
+                "rememberTransformed": true,
+                "options": [
+                    {
+                        "label": "Last: ${remember:selectedAppName}",
+                        "value": "${remember:selectedAppName}"
+                    },
+                    {
+                        "label": "Choose another...",
+                        "value": "${pickFile:appConfig}"
+                    }
+                ],
+                "remember": {
+                    "selectedAppName": {
+                        "key": "selectedAppName",
+                        "default": "unitree_go1_mujoco_cpu_velocity_only"
+                    }
+                },
+                "pickFile": {
+                    "appConfig": {
+                        "description": "Select config",
+                        "fromFolder": { "fixed": "${workspaceFolder}/configs" },
+                        "include": "*.yaml",
+                        "display": "fileName",
+                        "transform": { "text": "${fileBasenameNoExtension}" }
+                    }
+                }
+            }
+        },
+        {
             "id": "tensorboardLogdir",
             "type": "promptString",
-            "description": "运行目录名或 tensorboard 目录路径；留空选择日期最新的运行",
+            "description": "Run name or log dir (blank: latest)",
             "default": ""
         },
         {
             "id": "playCheckpointDir",
             "type": "promptString",
-            "description": "运行目录名或路径；留空选择日期最新的运行",
+            "description": "Run name or path (blank: latest)",
             "default": ""
         }
     ]

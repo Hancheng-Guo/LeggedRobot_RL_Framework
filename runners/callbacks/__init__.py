@@ -1,10 +1,25 @@
 from importlib import import_module
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .base import BaseCallback
 
+if TYPE_CHECKING:
+    from .registry import CALLBACK_TYPE_MAP
+    from .adaptive_learning_rate import AdaptiveLearningRateCallback, LearningRateAdjustment
+    from .checkpoint import CheckpointCallback
+    from .early_stopping import EarlystoppingCallback
+    from .keyboard_interrupt import KeyboardInterruptCallback
+    from .logging import LoggingCallback
+    from .progress_bar import ProgressBarCallback
+    from .stage import StageCallback
+    from .tensorboard import TensorboardCallback
+
 
 _LAZY_EXPORTS = {
+    "CALLBACK_TYPE_MAP": (
+        "runners.callbacks.registry",
+        "CALLBACK_TYPE_MAP",
+    ),
     "AdaptiveLearningRateCallback": (
         "runners.callbacks.adaptive_learning_rate",
         "AdaptiveLearningRateCallback",
@@ -41,10 +56,6 @@ _LAZY_EXPORTS = {
         "runners.callbacks.tensorboard",
         "TensorboardCallback",
     ),
-    "CALLBACK_TYPE_MAP": (
-        "runners.callbacks.registry",
-        "CALLBACK_TYPE_MAP",
-    ),
 }
 
 
@@ -61,6 +72,23 @@ def __getattr__(name: str) -> Any:
 
 __all__ = (
     "BaseCallback",
-    
-    *_LAZY_EXPORTS,
+
+    "CALLBACK_TYPE_MAP",
+
+    "AdaptiveLearningRateCallback",
+    "LearningRateAdjustment",
+
+    "CheckpointCallback",
+
+    "EarlystoppingCallback",
+
+    "KeyboardInterruptCallback",
+
+    "LoggingCallback",
+
+    "ProgressBarCallback",
+
+    "StageCallback",
+
+    "TensorboardCallback",
 )

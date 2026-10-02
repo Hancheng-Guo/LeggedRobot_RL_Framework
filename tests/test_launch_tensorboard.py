@@ -6,7 +6,7 @@ import pytest
 
 from tools import launch_tensorboard as launcher
 from tools.launch_tensorboard import select_logdir
-from utils.run_directory import select_run_dir
+from utils import select_run_dir
 
 
 def test_select_logdir_uses_latest_timestamp_not_directory_order(

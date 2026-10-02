@@ -38,6 +38,43 @@
             }
         },
         {
+            "label": "Tool: TensorBoard",
+            "icon": { "id": "graph-line" },
+            "type": "process",
+            "command": "${command:python.interpreterPath}",
+            "args": [
+                "-m",
+                "tools.launch_tensorboard",
+                "${input:tensorboardLogdir}"
+            ],
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "focus": true
+            },
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "windows": {
+                "type": "shell",
+                "command": "&",
+                "args": [
+                    "'${env:USERPROFILE}\\.conda\\envs\\quadruped_rl\\python.exe'",
+                    "-m",
+                    "tools.launch_tensorboard",
+                    "'${input:tensorboardLogdir}'"
+                ],
+                "options": {
+                    "cwd": "${workspaceFolder}",
+                    "shell": {
+                        "executable": "powershell.exe",
+                        "args": ["-NoProfile", "-Command"]
+                    }
+                }
+            }
+        },
+        {
             "label": "Check: MuJoCo",
             "icon": { "id": "checklist" },
             "group": "test",
@@ -200,6 +237,14 @@
                     }
                 }
             }
+        }
+    ],
+    "inputs": [
+        {
+            "id": "tensorboardLogdir",
+            "type": "promptString",
+            "description": "运行目录名或 tensorboard 目录路径；留空选择日期最新的运行",
+            "default": ""
         }
     ]
 }

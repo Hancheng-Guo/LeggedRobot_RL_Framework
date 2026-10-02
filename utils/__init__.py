@@ -16,10 +16,12 @@ from .logging import (
 from .matching import resolve_metric_name
 from .param import update_attributes
 from .path import fill_path, fill_paths
+from .run_directory import select_run_dir
 from .runtime import RuntimeContext
 from .save import atomic_save
 from .scalar import scalar_metrics, scalar_value
 from .string import camel_to_snake
+from .tensorboard import launch_tensorboard
 
 
 __all__ = (
@@ -45,6 +47,8 @@ __all__ = (
     "fill_path",
     "fill_paths",
 
+    "select_run_dir",
+
     "RuntimeContext",
 
     "atomic_save",
@@ -53,4 +57,6 @@ __all__ = (
     "scalar_value",
 
     "camel_to_snake",
+
+    "launch_tensorboard",
 )

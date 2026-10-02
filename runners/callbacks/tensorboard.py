@@ -1,5 +1,3 @@
-import logging
-import threading
 import torch
 from dataclasses import dataclass
 from torch.utils.tensorboard import SummaryWriter
@@ -11,7 +9,12 @@ from typing import Any
 
 from .base import BaseCallback
 from runners import BaseRunner
-from utils import RuntimeContext, get_logger, scalar_metrics
+from utils import (
+    RuntimeContext,
+    get_logger,
+    scalar_metrics,
+    launch_tensorboard
+)
 
 
 logger = get_logger(__name__)
@@ -80,27 +83,6 @@ class _HistogramAccumulator:
         self.sum_squares += torch.square(flat_values).sum()
         self.minimum.copy_(torch.minimum(self.minimum, flat_values.min()))
         self.maximum.copy_(torch.maximum(self.maximum, flat_values.max()))
-
-
-class _TensorboardLoadHandler(logging.Handler):
-
-    def __init__(
-        self,
-        completed: threading.Event
-    ) -> None:
-
-        super().__init__()
-
-        self.completed = completed
-
-
-    def emit(
-        self,
-        record: logging.LogRecord
-    ) -> None:
-
-        if record.getMessage().startswith("TensorBoard done reloading."):
-            self.completed.set()
 
 
 class TensorboardCallback(BaseCallback):
@@ -173,7 +155,6 @@ class TensorboardCallback(BaseCallback):
         self.global_iteration = 0
         self._pending_histograms: dict[str, _HistogramAccumulator] = {}
         self.tensorboard_url: str
-        self._tensorboard: TensorBoard
         self._server_started = False
         self._closed = False
 
@@ -197,44 +178,13 @@ class TensorboardCallback(BaseCallback):
 
         if not self._server_started:
             if self.tensorboard_root_dir not in self._SERVER_URLS:
-                self._tensorboard = TensorBoard()
-                self._tensorboard.configure(
-                    argv=(
-                        "tensorboard",
-                        "--logdir",
-                        str((self.tensorboard_root_dir).resolve()),
-                        "--host",
-                        "0.0.0.0",
-                        "--load_fast",
-                        "false",
-                        "--max_reload_threads",
-                        str(self.max_reload_threads),
-                    )
+                url = launch_tensorboard(
+                    self.tensorboard_root_dir,
+                    host="0.0.0.0",
+                    initial_load_timeout=self.initial_load_timeout,
+                    max_reload_threads=self.max_reload_threads,
+                    tensorboard_factory=TensorBoard,
                 )
-                console_handler = next(
-                    (
-                        handler
-                        for handler in logging.getLogger("rl_framework").handlers
-                        if isinstance(handler, logging.StreamHandler)
-                        and not isinstance(handler, logging.FileHandler)
-                        and getattr(handler.stream, "isatty", lambda: False)()
-                    ),
-                    None,
-                )
-                if console_handler is None:
-                    logger.info(
-                        "Waiting for TensorBoard to load existing event data."
-                    )
-                else:
-                    original_terminator = console_handler.terminator
-                    console_handler.terminator = ""
-                    try:
-                        logger.info(
-                            "Waiting for TensorBoard to load existing event data. "
-                        )
-                    finally:
-                        console_handler.terminator = original_terminator
-                url = self._launch_after_initial_load(console_handler)
                 self._SERVER_URLS[self.tensorboard_root_dir] = url
             self.tensorboard_url = self._SERVER_URLS[self.tensorboard_root_dir]
             self._server_started = True
@@ -242,64 +192,6 @@ class TensorboardCallback(BaseCallback):
         logger.info("TensorBoard dir: %s", self.tensorboard_log_dir.as_posix())
         logger.info(f"TensorBoard url: {self.tensorboard_url}")
         return True
-
-
-    def _launch_after_initial_load(
-        self,
-        console_handler: logging.StreamHandler | None = None,
-    ) -> str:
-
-        completed = threading.Event()
-        handler = _TensorboardLoadHandler(completed)
-        tensorboard_logger = logging.getLogger("tensorboard")
-        previous_level = tensorboard_logger.level
-        tensorboard_logger.setLevel(logging.INFO)
-        tensorboard_logger.addHandler(handler)
-        stop_spinner = threading.Event()
-        spinner: threading.Thread | None = None
-        if console_handler is not None:
-            def animate() -> None:
-                while not stop_spinner.is_set():
-                    for frame in "-/|\\":
-                        if stop_spinner.is_set():
-                            break
-                        console_handler.acquire()
-                        try:
-                            console_handler.stream.write(frame)
-                            console_handler.flush()
-                        finally:
-                            console_handler.release()
-                        stop_spinner.wait(0.15)
-                        console_handler.acquire()
-                        try:
-                            console_handler.stream.write("\b ")
-                            console_handler.stream.write("\b")
-                            console_handler.flush()
-                        finally:
-                            console_handler.release()
-
-            spinner = threading.Thread(target=animate, daemon=True)
-            spinner.start()
-        try:
-            url = self._tensorboard.launch()
-            if not completed.wait(self.initial_load_timeout):
-                raise TimeoutError(
-                    "TensorBoard did not finish its initial event-data load "
-                    f"within {self.initial_load_timeout:g} seconds."
-                )
-            return url
-        finally:
-            stop_spinner.set()
-            if spinner is not None and console_handler is not None:
-                spinner.join()
-                console_handler.acquire()
-                try:
-                    console_handler.stream.write("\n")
-                    console_handler.flush()
-                finally:
-                    console_handler.release()
-            tensorboard_logger.removeHandler(handler)
-            tensorboard_logger.setLevel(previous_level)
 
 
     def _on_step_end(

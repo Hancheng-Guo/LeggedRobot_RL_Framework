@@ -1,5 +1,5 @@
 {
-    "include": ["app", "envs", "rl", "runners", "tests", "utils"],
+    "include": ["app", "envs", "rl", "runners", "tests", "tools", "utils"],
     "exclude": [
         "tests/manual",
         "tests/test_isaac_sim_runtime.py",

@@ -143,6 +143,73 @@ class FootStateDurationCubicCommandWeighedExp(BaseRewardTerm):
 
 
 @register_reward
+class FootStateDurationCubicCommandTanhWeighedExp(BaseRewardTerm):
+
+    def __init__(
+        self,
+        num_envs: int,
+        model_context: ModelContext,
+        command_names: Sequence[str] = ("lin_vel_x", "lin_vel_y", "ang_vel_z"),
+        sigma: float = 1.0,
+        *args, **kwargs,
+    ) -> None:
+
+        super().__init__(*args, **kwargs)
+
+        self.foot_geom_ids = model_context.foot_geom_ids
+        self.sigma = sigma
+        self.command_names = command_names
+
+        self.last_foot_state = torch.zeros(
+            (num_envs, self.foot_geom_ids.numel()),
+            dtype=torch.bool,
+            device=self.context.device,
+        )
+        self.duration = torch.zeros(
+            (num_envs,),
+            dtype=self.context.dtype,
+            device=self.context.device,
+        )
+
+
+    def compute(
+        self,
+        task_context: TaskContext
+    ) -> torch.Tensor:
+        
+        landed = task_context.state.foot_ground_contact
+        unchanged = (landed == self.last_foot_state).all(dim=-1)
+        self.duration = torch.where(
+            unchanged,
+            self.duration + task_context.step_dt,
+            torch.zeros_like(self.duration),
+        )
+        self.last_foot_state.copy_(landed)
+
+        command_norm = torch.linalg.norm(
+            command_vector(task_context, self.command_names),
+            dim=-1,
+        )
+        scaled_duration = self.duration / self.sigma
+        return torch.exp(
+            -torch.tanh(command_norm) * scaled_duration ** 3
+        )
+    
+
+    def reset(
+        self,
+        env_ids: torch.Tensor | None = None
+    ) -> None:
+
+        if env_ids is None:
+            self.duration.zero_()
+            self.last_foot_state.zero_()
+        else:
+            self.duration[env_ids] = 0.0
+            self.last_foot_state[env_ids] = False
+
+
+@register_reward
 class FootStateSwitch(BaseRewardTerm):
 
     def __init__(

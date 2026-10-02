@@ -1,0 +1,51 @@
+import sys
+import pytest
+from pathlib import Path
+from types import ModuleType
+
+from tools import play_checkpoint
+
+
+def test_run_identity_parses_app_name_and_time() -> None:
+    run_dir = Path("checkpoints/unitree_go1_mujoco_cpu_velocity_2026-10-01_12-30-05")
+    assert play_checkpoint.run_identity(run_dir) == (
+        "unitree_go1_mujoco_cpu_velocity",
+        "2026-10-01_12-30-05",
+    )
+
+
+@pytest.mark.parametrize("selected", ["", "robot_2026-10-01_12-30-05"])
+def test_main_plays_selected_run_and_closes_on_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    selected: str,
+) -> None:
+    run_dir = tmp_path / "checkpoints" / "robot_2026-10-01_12-30-05"
+    run_dir.mkdir(parents=True)
+    calls: list[object] = []
+
+    class FakeApplication:
+        def __init__(self, app_name: str, train_time: str) -> None:
+            calls.append((app_name, train_time))
+
+        def play(self) -> None:
+            calls.append("play")
+            raise RuntimeError("play failed")
+
+        def close(self) -> None:
+            calls.append("close")
+
+    fake_app = ModuleType("app")
+    fake_app.ApplicationEntry = FakeApplication  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "app", fake_app)
+    monkeypatch.setattr(play_checkpoint, "PROJECT_ROOT", tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(RuntimeError, match="play failed"):
+        play_checkpoint.main([selected])
+
+    assert calls == [
+        ("robot", "2026-10-01_12-30-05"),
+        "play",
+        "close",
+    ]

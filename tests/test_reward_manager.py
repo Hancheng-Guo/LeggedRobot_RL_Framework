@@ -722,9 +722,8 @@ def test_foot_lift_height_diff_command_gated_l2_tracks_height_only_when_moving(
 
     reward = term.compute(task_context)
 
-    # Moving env: stance feet target 0 and swing feet target 0.1 m.
-    # Idle env: all feet target 0, including a raised foot.
-    torch.testing.assert_close(reward, torch.tensor([0.25, 0.25]))
+    # Only the moving environment's swinging feet contribute height error.
+    torch.testing.assert_close(reward, torch.tensor([0.25, 0.0]))
 
 
 @pytest.mark.parametrize("height_std", [0, -0.1, float("inf"), float("nan")])

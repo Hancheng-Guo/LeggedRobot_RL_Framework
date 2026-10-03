@@ -342,17 +342,16 @@ class FootLiftHeightDiffCommandWeightedExp(BaseRewardTerm):
         task_context: TaskContext
     ) -> torch.Tensor:
 
+        foot_height = task_context.state.geom_xpos[:, self.foot_geom_ids, 2]
+        height_reward = torch.exp(
+            -((foot_height - self.target_height) / self.height_std).square()
+        )
         command_norm = torch.linalg.norm(
             command_vector(task_context, self.command_names),
             dim=-1,
         )
-        
-        foot_height = task_context.state.geom_xpos[:, self.foot_geom_ids, 2]
-        swinging = ~task_context.state.foot_ground_contact
-        height_reward = torch.exp(
-            -((foot_height - self.target_height) / self.height_std).square()
-        )
         command_gate = 1.0 - torch.exp(-command_norm / self.command_std)
+        swinging = ~task_context.state.foot_ground_contact
         return (height_reward * command_gate.unsqueeze(-1) * swinging).mean(dim=-1)
 
 
@@ -402,21 +401,23 @@ class FootLiftHeightDiffCommandGatedL2(BaseRewardTerm):
     ) -> torch.Tensor:
 
         foot_height = task_context.state.geom_xpos[:, self.foot_geom_ids, 2]
+        height_diff = foot_height - self.target_height
+        height_diff_norm = height_diff / self.height_std
         command_norm = torch.linalg.norm(
             command_vector(task_context, self.command_names),
             dim=-1,
-        ).unsqueeze(-1)
+        )
         command_gate = torch.where(
             command_norm <= 0.1,
             torch.zeros_like(command_norm),
             torch.ones_like(command_norm)
         )
         swinging = ~task_context.state.foot_ground_contact
-        target_height = self.target_height * command_gate * swinging
-        height_diff = foot_height - target_height
-        height_diff_norm = height_diff / self.height_std
-
-        return height_diff_norm.square().mean(dim=-1)
+        return (
+            height_diff_norm.square() *
+            command_gate.unsqueeze(-1) *
+            swinging
+        ).mean(dim=-1)
 
 
 @register_reward

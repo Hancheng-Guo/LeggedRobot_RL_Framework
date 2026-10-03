@@ -1,7 +1,9 @@
 import mujoco
+from mujoco import viewer
 import pytest
 import torch
 import numpy as np
+from contextlib import nullcontext
 from pathlib import Path
 
 from envs.simulators.mujoco import MujocoSimulator
@@ -51,6 +53,83 @@ def test_mujoco_rejects_unsupported_render_mode(runtime_context):
                 component=Component(None, None, None, None, None, None),
                 render_mode="depth_array",
             )
+    finally:
+        simulator.close()
+
+
+def test_mujoco_viewer_tracks_base_without_changing_view(runtime_context, monkeypatch):
+    simulator = _configure_go1_simulator(runtime_context)
+    camera = mujoco.MjvCamera()  # pyright: ignore[reportAttributeAccessIssue]
+    camera.azimuth = 35.0
+    camera.elevation = -20.0
+    camera.distance = 4.0
+
+    class FakeViewer:
+        cam = camera
+
+        def lock(self):
+            return nullcontext()
+
+        def sync(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(viewer, "launch_passive", lambda *_: FakeViewer())
+
+    try:
+        simulator._human_render()
+        assert camera.type == mujoco.mjtCamera.mjCAMERA_TRACKING  # pyright: ignore[reportAttributeAccessIssue]
+        assert camera.trackbodyid == simulator.model_context.base_id
+        assert (camera.azimuth, camera.elevation, camera.distance) == (
+            35.0, -20.0, 4.0,
+        )
+    finally:
+        simulator.close()
+
+
+def test_mujoco_recording_camera_follows_base(runtime_context, monkeypatch):
+    simulator = _configure_go1_simulator(runtime_context)
+    cameras = []
+
+    class FakeRenderer:
+        def __init__(self, model):
+            self.model = model
+
+        def update_scene(self, data, camera):
+            cameras.append(camera)
+
+        def render(self):
+            return np.zeros((1, 1, 3), dtype=np.uint8)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(mujoco, "Renderer", FakeRenderer)
+
+    try:
+        simulator._rgb_array_render()
+        camera = cameras[0]
+        assert camera.type == mujoco.mjtCamera.mjCAMERA_TRACKING  # pyright: ignore[reportAttributeAccessIssue]
+        assert camera.trackbodyid == simulator.model_context.base_id
+
+        model, data = simulator.models[0], simulator.datas[0]
+        scene = mujoco.MjvScene(model, maxgeom=1000)  # pyright: ignore[reportAttributeAccessIssue]
+        option = mujoco.MjvOption()  # pyright: ignore[reportAttributeAccessIssue]
+
+        def camera_position():
+            mujoco.mjv_updateScene(  # pyright: ignore[reportAttributeAccessIssue]
+                model, data, option, None, camera,
+                mujoco.mjtCatBit.mjCAT_ALL, scene,  # pyright: ignore[reportAttributeAccessIssue]
+            )
+            return scene.camera[0].pos.copy()
+
+        before = camera_position()
+        data.qpos[0] += 2.0
+        mujoco.mj_forward(model, data)  # pyright: ignore[reportAttributeAccessIssue]
+        after = camera_position()
+        assert after[0] > before[0] + 1.5
     finally:
         simulator.close()
 

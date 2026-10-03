@@ -66,6 +66,7 @@ class MujocoSimulator(BaseSimulator):
         self.datas: list[mujoco.MjData] = []    # pyright: ignore[reportAttributeAccessIssue]
         self.viewer = None
         self.renderer = None
+        self._render_camera = None
         self._step_executor: ThreadPoolExecutor | None = None
         self._full_state_numpy_buffers: MujocoFixedStateBuffers[np.ndarray] | None = None
         self._full_state_tensor_buffers: MujocoFixedStateBuffers[torch.Tensor] | None = None
@@ -466,6 +467,9 @@ class MujocoSimulator(BaseSimulator):
                 self.models[0],
                 self.datas[0],
             )
+            with self.viewer.lock():
+                self.viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING  # pyright: ignore[reportAttributeAccessIssue]
+                self.viewer.cam.trackbodyid = self.model_context.base_id
         self.viewer.sync()
 
 
@@ -475,8 +479,14 @@ class MujocoSimulator(BaseSimulator):
             self.renderer = mujoco.Renderer(
                 self.models[0],
             )
+            self._render_camera = mujoco.MjvCamera()  # pyright: ignore[reportAttributeAccessIssue]
+            mujoco.mjv_defaultFreeCamera(  # pyright: ignore[reportAttributeAccessIssue]
+                self.models[0], self._render_camera
+            )
+            self._render_camera.type = mujoco.mjtCamera.mjCAMERA_TRACKING  # pyright: ignore[reportAttributeAccessIssue]
+            self._render_camera.trackbodyid = self.model_context.base_id
 
-        self.renderer.update_scene(self.datas[0])
+        self.renderer.update_scene(self.datas[0], camera=self._render_camera)
         return self.renderer.render()
 
 
@@ -491,6 +501,7 @@ class MujocoSimulator(BaseSimulator):
         if self.renderer is not None:
             self.renderer.close()
             self.renderer = None
+            self._render_camera = None
 
 
     def _shutdown_step_executor(self) -> None:

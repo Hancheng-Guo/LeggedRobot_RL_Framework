@@ -85,7 +85,7 @@
                 "type": "shell",
                 "command": "&",
                 "args": [
-                    "'${env:USERPROFILE}\\.conda\\envs\\quadruped_rl\\python.exe'",
+                    "'${command:python.interpreterPath}'",
                     "-m",
                     "tools.launch_tensorboard",
                     "'${input:tensorboardLogdir}'"
@@ -122,7 +122,7 @@
                 "type": "shell",
                 "command": "&",
                 "args": [
-                    "'${env:USERPROFILE}\\.conda\\envs\\quadruped_rl\\python.exe'",
+                    "'${command:python.interpreterPath}'",
                     "-m",
                     "tools.play_checkpoint",
                     "'${input:playCheckpointDir}'"
@@ -190,7 +190,7 @@
             "label": "Pytest: MuJoCo",
             "icon": { "id": "beaker" },
             "type": "process",
-            "command": "'${command:python.interpreterPath}'",
+            "command": "${command:python.interpreterPath}",
             "args": [
                 "-m",
                 "pytest",
@@ -230,7 +230,7 @@
             "label": "Pytest: Isaac Sim",
             "icon": { "id": "beaker" },
             "type": "process",
-            "command": "'${command:python.interpreterPath}'",
+            "command": "${command:python.interpreterPath}",
             "args": [
                 "-m",
                 "pytest",

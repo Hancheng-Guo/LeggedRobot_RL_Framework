@@ -41,9 +41,21 @@ def main(argv: list[str] | None = None) -> None:
     os.chdir(PROJECT_ROOT)
     from app import ApplicationEntry
 
+    video_dir = run_dir / "videos"
+    existing_videos = set(video_dir.glob("*"))
+    print(f"Playing checkpoint: {run_dir}", flush=True)
     application = ApplicationEntry(app_name, train_time)
     try:
         application.play()
+        new_videos = sorted(
+            path for path in video_dir.glob("*")
+            if path.is_file() and path not in existing_videos
+        )
+        if new_videos:
+            for path in new_videos:
+                print(f"Saved playback: {path}", flush=True)
+        else:
+            print("Playback finished without new video files.", flush=True)
     finally:
         application.close()
 

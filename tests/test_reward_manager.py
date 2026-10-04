@@ -5,9 +5,10 @@ from typing import cast
 
 from envs.tasks.managers.reward import RewardManager
 from envs.tasks.managers.reward.terms.foot import (
+    FootDurationCubicCommandTanhWeightedExp,
     FootLiftHeightDiffCommandGatedL2,
     FootLiftHeightDiffCommandWeightedExp,
-    FootStateDurationCommandWeighedExp,
+    FootStateDurationCommandWeightedExp,
 )
 from envs.tasks.managers.reward.terms.gait import (
     QuadrupedalGaitPhaseL2Exp,
@@ -530,21 +531,21 @@ def test_foot_state_duration_terms_track_joint_contact_state(
         context=runtime_context,
         model_context=quadrupedal_model_context,
         terms={
-            "foot_state_duration_command_weighed_exp": {},
-            "foot_state_duration_cubic_command_weighed_exp": {},
+            "foot_state_duration_command_weighted_exp": {},
+            "foot_state_duration_cubic_command_weighted_exp": {},
         },
     )
     task_context = make_quadrupedal_foot_context()
 
     reward, info = manager.compute(task_context)
     term = cast(
-        FootStateDurationCommandWeighedExp,
-        manager.terms["foot_state_duration_command_weighed_exp"],
+        FootStateDurationCommandWeightedExp,
+        manager.terms["foot_state_duration_command_weighted_exp"],
     )
 
     assert reward.shape == (2,)
-    assert info["reward/foot_state_duration_command_weighed_exp"].shape == (2,)
-    assert info["reward/foot_state_duration_cubic_command_weighed_exp"].shape == (2,)
+    assert info["reward/foot_state_duration_command_weighted_exp"].shape == (2,)
+    assert info["reward/foot_state_duration_cubic_command_weighted_exp"].shape == (2,)
     torch.testing.assert_close(
         term.duration,
         torch.zeros(2),
@@ -554,11 +555,11 @@ def test_foot_state_duration_terms_track_joint_contact_state(
     _, second_info = manager.compute(task_context)
     torch.testing.assert_close(term.duration, torch.full((2,), 0.02))
     torch.testing.assert_close(
-        second_info["reward/foot_state_duration_command_weighed_exp"],
+        second_info["reward/foot_state_duration_command_weighted_exp"],
         torch.exp(torch.full((2,), -0.02)),
     )
     torch.testing.assert_close(
-        second_info["reward/foot_state_duration_cubic_command_weighed_exp"],
+        second_info["reward/foot_state_duration_cubic_command_weighted_exp"],
         torch.exp(torch.full((2,), -(0.02 ** 3))),
     )
 
@@ -589,7 +590,7 @@ def test_foot_state_duration_ignores_low_force_contacts(
         context=runtime_context,
         model_context=quadrupedal_model_context,
         terms={
-            "foot_state_duration_command_weighed_exp": {},
+            "foot_state_duration_command_weighted_exp": {},
         },
     )
     task_context = make_quadrupedal_foot_context()
@@ -598,14 +599,57 @@ def test_foot_state_duration_ignores_low_force_contacts(
 
     manager.compute(task_context)
     term = cast(
-        FootStateDurationCommandWeighedExp,
-        manager.terms["foot_state_duration_command_weighed_exp"],
+        FootStateDurationCommandWeightedExp,
+        manager.terms["foot_state_duration_command_weighted_exp"],
     )
 
     torch.testing.assert_close(
         term.duration,
         torch.full((2,), 0.02),
     )
+
+
+def test_foot_duration_cubic_command_tanh_weighted_exp_tracks_each_foot(
+    runtime_context,
+    model_context,
+):
+    quadrupedal_model_context = replace(
+        model_context,
+        geom_names=("floor", "base", "thigh", "FL", "FR", "RL", "RR"),
+        geom_body_ids=torch.arange(7),
+        foot_geom_ids=torch.tensor([3, 4, 5, 6]),
+    )
+    manager = RewardManager(
+        num_envs=2,
+        context=runtime_context,
+        model_context=quadrupedal_model_context,
+        terms={"foot_duration_cubic_command_tanh_weighted_exp": {}},
+    )
+    task_context = make_quadrupedal_foot_context()
+    task_context.command["lin_vel_x"][:, 0] = torch.tensor([1.0, 2.0])
+
+    reward, _ = manager.compute(task_context)
+    term = manager.terms["foot_duration_cubic_command_tanh_weighted_exp"]
+    assert isinstance(term, FootDurationCubicCommandTanhWeightedExp)
+    assert reward.shape == (2,)
+    torch.testing.assert_close(
+        term.duration,
+        torch.tensor([[0.0, 0.0, 0.02, 0.02], [0.02, 0.02, 0.0, 0.02]]),
+    )
+    expected = torch.exp(
+        -torch.tanh(torch.tensor([1.0, 2.0])).unsqueeze(-1)
+        * term.duration.pow(3)
+    ).mean(dim=-1)
+    torch.testing.assert_close(reward, expected)
+
+    task_context.state.foot_ground_contact[0, 0] = False
+    manager.compute(task_context)
+    torch.testing.assert_close(
+        term.duration[0],
+        torch.tensor([0.0, 0.02, 0.04, 0.04]),
+    )
+    manager.reset(torch.tensor([0]))
+    torch.testing.assert_close(term.duration[0], torch.zeros(4))
 
 
 def test_quadrupedal_foot_velocity_diff_matches_diagonal_feet(

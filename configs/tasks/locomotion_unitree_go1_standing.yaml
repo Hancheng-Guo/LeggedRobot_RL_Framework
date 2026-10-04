@@ -64,7 +64,7 @@ reward_manager_config:
     trot_loop_duration_tanh: {weight: 5.0, params: {growth_rate: 5.0}}
     quadrupedal_foot_velocity_diff_l2: {weight: -0.05}
     foot_state_switch: {weight: -1.0}
-    foot_state_duration_cubic_command_weighed_exp: {weight: 0.2, params: {sigma: 0.5}}
+    foot_state_duration_cubic_command_weighted_exp: {weight: 0.2, params: {sigma: 0.5}}
     foot_sliding_velocity_l2: {weight: -1.0}
     foot_contact_without_command: {weight: 2.0}
     foot_lift_height_diff_command_gated_l2: {weight: -1.0, params: {target_height: *foot_lifted_height}}

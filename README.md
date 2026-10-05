@@ -2,13 +2,14 @@
 
 一个面向四足机器人运动控制的模块化强化学习框架。项目当前提供 PPO、可配置 Actor-Critic、向量化环境、MuJoCo/Isaac Sim 后端、多阶段训练、课程学习、检查点、TensorBoard 日志及视频导出。
 
-本文档以当前代码为准，重点说明配置文件的组织方式、所有可用字段和写法。
+本文档以当前代码为准，说明运行方式、配置组织及常用字段。
 
 ## 1. 项目结构
 
 ```text
 .
 ├─ main.py                 # 当前运行入口
+├─ tools/                  # 运行实验、播放检查点和检查工具
 ├─ app/                    # 应用生命周期、运行时上下文、多阶段训练
 ├─ configs/
 │  ├─ *.yaml               # 顶层实验配置
@@ -23,6 +24,8 @@
 ├─ runners/                # 训练循环和回调
 ├─ assets/                 # 机器人 MJCF、URDF、USD 资源
 ├─ checkpoints/            # 训练输出（运行时自动创建）
+├─ requirements-mujoco.txt # MuJoCo 环境依赖入口
+├─ requirements-isaacsim.txt # Isaac Sim 环境依赖入口
 ├─ requirements/           # 分环境依赖及约束文件
 └─ tests/                  # 自动化测试
 ```
@@ -44,7 +47,7 @@ python -m pip install -r requirements-isaacsim.txt
 python -m pip install -r requirements/dev.txt -c requirements/constraints/dev.txt
 ```
 
-`main.py` 默认使用 `unitree_go1_isaac_cuda_velocity`。按所用仿真环境，将 `app_name` 改为 `configs/` 下的顶层 YAML 文件名（不带 `.yaml`），然后运行：
+`main.py` 当前使用 `unitree_go1_mujoco_cpu_velocity_only`。按所用仿真环境，将 `app_name` 改为 `configs/` 下的顶层 YAML 文件名（不带 `.yaml`），然后运行：
 
 ```powershell
 python main.py
@@ -61,16 +64,26 @@ with ApplicationEntry("unitree_go1_mujoco_cuda_velocity") as application:
     application.play(num_steps=500, formats="gif")
 ```
 
-现有示例包括 `unitree_go1_mujoco_cpu_velocity`、`unitree_go1_mujoco_cuda_velocity`、`unitree_go1_isaac_cuda_velocity` 和 `unitree_go1_isaac_cuda_test`。`main.py` 中的 `train_time = None` 表示新训练；运行历史实验时填入目录名末尾的时间。
+现有示例包括 `unitree_go1_mujoco_cpu_velocity_only`、`unitree_go1_mujoco_cpu_velocity`、`unitree_go1_mujoco_cuda_velocity`、`unitree_go1_isaac_cuda_velocity` 和 `unitree_go1_isaac_cuda_test`。`ApplicationEntry` 未传 `train_time` 时创建新运行；传入历史运行目录名末尾的时间时读取该运行的配置和检查点。
 
 常用方法：
 
 ```python
 application.train()                         # 训练
 application.test(num_episodes=1000)         # 确定性策略测试
-application.save()                          # 保存 latest.pt
-application.play(num_steps=500, formats="gif")
+application.save()                          # 保存当前阶段的 latest.pt
+application.play(num_steps=500, formats="gif", num_plays=3)
 ```
+
+`play()` 默认最多运行 3 段、每段最多 500 步。`formats` 可为 `"gif"`、`"mp4"` 或两者组成的列表或元组；录制需要仿真器的 `render_mode: rgb_array` 和 `requirements/demo.txt` 中的视频依赖。文件保存在运行目录的 `videos/` 下。
+
+播放已有运行的检查点时，可在项目根目录执行：
+
+```powershell
+python -m tools.play_checkpoint unitree_go1_mujoco_cpu_velocity_only_2026-10-04_22-55-48 --num-plays 5 --format mp4
+```
+
+将示例中的目录名替换为实际存在的运行目录。省略运行目录时选择最新的带时间戳运行；`--num-plays` 默认 `3`，`--format` 默认 `gif`，也可选 `mp4`。VS Code 的 `Tool: Play Checkpoint` 任务只提供运行目录选择；需要指定这两个参数时使用终端。`Run: Select App` 任务可通过顶层配置名启动新的训练。
 
 ### 从历史检查点续训
 
@@ -101,6 +114,7 @@ checkpoints/<app_name>_<time>/
 ├─ configs/                      # 本次运行使用的配置快照
 ├─ logs/<file_name>
 ├─ tensorboard/                  # 启用 TensorBoard 时
+├─ videos/                       # 调用 play() 且成功取得 RGB 帧时
 ├─ resume_manifest.json          # 仅 fork 运行生成，记录来源
 └─ checkpoints/
    ├─ resume.pt                   # 仅 fork 运行生成，归档选定的起始检查点
@@ -141,11 +155,11 @@ component:
   algorithm:
     - {type: ppo, config: ppo_num_batch_8}
   policy:
-    - {type: actor_critic, config: actor_critic_}
+    - {type: actor_critic, config: actor_critic_direct_actuation}
   environment:
     - {type: vector_env, config: vector_env_64}
   simulator:
-    - {type: mujoco, config: mujoco_unitree_go1_velocity}
+    - {type: mujoco, config: mujoco_unitree_go1_rgb_array}
   task:
     - {type: locomotion, config: locomotion_unitree_go1_standing}
 ```
@@ -216,6 +230,7 @@ rollout_length: 256                # 必填，单次更新前每个环境采样�
 rollout_length_history_size: 50    # 默认 50，统计平均 episode 长度的历史数量
 callbacks:
   - progress_bar                   # 无参数写法
+  - keyboard_interrupt
   - logging:
       log_interval: 1
   - checkpoint:
@@ -231,6 +246,7 @@ callbacks:
 | 回调 | 参数 |
 |---|---|
 | `progress_bar` | `width=30`，`refresh_interval=0.2` 秒 |
+| `keyboard_interrupt` | 无参数；在交互终端按 Ctrl+X，请求在本次更新结束后停止训练 |
 | `logging` | `log_interval=1` |
 | `checkpoint` | `save_iter_interval=100`，`directory_name="checkpoints"`，`save_on_train_end=false` |
 | `adaptive_learning_rate` | 必填 `monitor`、`allowed_range: [lower, upper]`、`factor`；可选 `min_learning_rate=null`、`max_learning_rate=null`、`buffer_len=10` |
@@ -253,6 +269,28 @@ callbacks:
 ```
 
 `step_metrics` 的键是指标名/通配模式；值支持 `value`、`mean`、`histogram`（具体是否适用取决于指标形状）。
+
+### 4.2 播放时的速度追踪图
+
+Runner 配置中的可选 `playback` 列表定义视频右侧的追踪图，每项把 `info` 中的一个目标指令与一个状态分量对应起来：
+
+```yaml
+playback:
+  - target: "command/lin_vel_x"
+    measured: "state/base_lin_vel_body[0]"
+    label: "X linear velocity (m/s)"
+    limits: [-2.8, 2.8]
+  - target: "command/lin_vel_y"
+    measured: "state/base_lin_vel_body[1]"
+    label: "Y linear velocity (m/s)"
+    limits: [-0.8, 0.8]
+  - target: "command/ang_vel_z"
+    measured: "state/base_ang_vel_body[2]"
+    label: "Z angular velocity (rad/s)"
+    limits: [-2.0, 2.0]
+```
+
+`target` 必须是 `command/` 开头的 `info` 键；`measured` 使用 `state/<name>[index]` 形式。`label` 是图标题，`limits` 是纵轴下限和上限。各图按列表顺序横向排列。曲线分别表示目标值、原始实测值和实测值的滑动平均；图例右侧的 `T +00.00` 显示从视频开始经过的秒数。平滑窗口目前在 `runners/utils/tracking_overlay.py` 的 `SMOOTH_WINDOW` 常量中设置，单位为帧；窗口对应的时间为 `SMOOTH_WINDOW / 视频帧率`。当前窗口为 25 帧，在 50 FPS 下约为 0.5 秒。
 
 ## 5. PPO 算法配置
 
@@ -457,6 +495,7 @@ MuJoCo 会为每个环境建立实例，数量过大会明显增加 CPU/内存�
 model_path: ./assets/unitree_go1/MJCF/scene.xml # 必填
 sim_dt: 0.002                                  # 必填，> 0
 frame_skip: 10                                 # 必填，正整数
+step_workers: 8                                # 可选，并行推进环境的线程数；默认 1
 render_mode: rgb_array                         # null | human | rgb_array
 foot_geom_names: [FR, FL, RR, RL]              # 足端 geom 名称
 floor_geom_names: [floor]                      # 地面 geom 名称
@@ -475,6 +514,7 @@ ros_package_paths:                             # 导入 URDF/MJCF 时可选
 sim_dt: 0.002
 frame_skip: 10
 render_mode: rgb_array                         # null | human | rgb_array
+train_render_mode: null                        # 可选，训练期间的渲染模式
 env_spacing: 2.0                               # > 0
 robot_prim_path: /Robot
 base_body_prim_path: /Geometry/base/trunk
@@ -608,6 +648,7 @@ term 顺序决定最终 observation 的拼接顺序。所有 observation term �
 | `foot_height` | 足端高度 |
 | `foot_contact_normal_force` | 足端法向接触力 |
 | `foot_contact_state` | 足端接触状态 |
+| `foot_duration_tanh` | 每只足的触地状态保持时间经 `tanh(alpha × 时间)` 压缩；触地为正、离地为负，默认 `alpha=1.0` |
 | `command` | 所有命令拼接结果 |
 | `track_linear_velocity_x_error_integral` | 最近 `integral_length` 步的有符号 X 速度误差积分 |
 | `track_linear_velocity_y_error_integral` | 最近 `integral_length` 步的有符号 Y 速度误差积分 |
@@ -647,6 +688,10 @@ reward_manager_config:
 | `projected_gravity_xy_l2` | — |
 | `track_linear_velocity_xy_l2_exp` | `x_std=1.0`、`y_std=1.0`、`command_names=[lin_vel_x, lin_vel_y]` |
 | `track_linear_velocity_xy_l2_exp_and_logcosh` | 上述参数 + `logcosh_weight=0.5` |
+| `track_linear_velocity_x_l2_exp` | `std=1.0`、`command_names=[lin_vel_x]` |
+| `track_linear_velocity_y_l2_exp` | `std=1.0`、`command_names=[lin_vel_y]` |
+| `track_linear_velocity_x_l2_exp_and_logcosh` | `std=1.0`、`command_names=[lin_vel_x]`、`logcosh_weight=0.5` |
+| `track_linear_velocity_y_l2_exp_and_logcosh` | `std=1.0`、`command_names=[lin_vel_y]`、`logcosh_weight=0.5` |
 | `track_linear_velocity_x_error_integral_l2` | 最近 `integral_length` 步的 X 有符号速度误差乘 `step_dt` 后积分，再取平方；默认 `integral_length=100` |
 | `track_linear_velocity_y_error_integral_l2` | 最近 `integral_length` 步的 Y 有符号速度误差乘 `step_dt` 后积分，再取平方；默认 `integral_length=100` |
 | `track_angular_velocity_z_l2_exp` | `std=1.0`、`command_names=[ang_vel_z]` |
@@ -654,10 +699,13 @@ reward_manager_config:
 | `track_angular_velocity_z_error_integral_l2` | 最近 `integral_length` 步的 Z 有符号误差乘 `step_dt` 后积分，再取平方；默认 `integral_length=100`、`command_names=[ang_vel_z]` |
 | `trot_loop_duration_tanh` | `command_names=[lin_vel_x, lin_vel_y, ang_vel_z]`、`growth_rate=1.0`；指令范数低于 `0.1` 时要求四足着地 |
 | `quadrupedal_gait_phase_l2_exp` | 必填 `target_height`；`sigma=1.0` |
-| `foot_state_duration_command_weighed_exp` | 整组足端触地状态保持时间；`command_names=[lin_vel_x, lin_vel_y, ang_vel_z]`、`sigma=1.0` |
-| `foot_state_duration_cubic_command_weighed_exp` | 整组足端触地状态保持时间的三次方版本；参数同上 |
+| `foot_state_duration_command_weighted_exp` | 整组足端触地状态保持时间；`command_names=[lin_vel_x, lin_vel_y, ang_vel_z]`、`sigma=1.0` |
+| `foot_state_duration_cubic_command_weighted_exp` | 整组足端触地状态保持时间的三次方版本；参数同上 |
+| `foot_state_duration_cubic_command_tanh_weighted_exp` | 整组足端触地状态保持时间的三次方版本，指令范数先取 `tanh`；参数同上 |
+| `foot_duration_cubic_command_tanh_weighted_exp` | 分别统计每只足的触地状态保持时间，取三次方并按 `tanh` 指令范数加权后求平均；参数同上 |
+| `foot_state_switch` | `hold_time=0.2`；触地状态在保持时间内切换时返回惩罚值 |
 | `foot_sliding_velocity_l2` | — |
-| `foot_lift_height_command_weighted_exp` | 必填 `target_height`；`height_std=0.03`、`command_std=0.5`、`command_names=[lin_vel_x, lin_vel_y, ang_vel_z]`；零指令时奖励为零 |
+| `foot_lift_height_diff_command_weighted_exp` | 必填 `target_height`；`height_std=0.03`、`command_std=0.5`、`command_names=[lin_vel_x, lin_vel_y, ang_vel_z]`；仅对摆动脚计算高度奖励，零指令时为零 |
 | `foot_lift_height_diff_command_gated_l2` | 必填 `target_height`；`height_std=null` 时使用 `target_height`；命令范数 `<=0.1` 时所有足端目标高度为 0，运动时支撑脚目标为 0、摆动脚目标为 `target_height`；使用负权重作为高度误差惩罚 |
 | `quadrupedal_foot_velocity_diff_l2` | — |
 | `foot_contact_without_command` | `command_names=[lin_vel_x, lin_vel_y, ang_vel_z]` |
@@ -707,6 +755,7 @@ curriculum_manager_config:
 可直接参考：
 
 - MuJoCo CPU：`configs/unitree_go1_mujoco_cpu_velocity.yaml`
+- MuJoCo CPU 单阶段速度任务：`configs/unitree_go1_mujoco_cpu_velocity_only.yaml`
 - MuJoCo CUDA 策略计算：`configs/unitree_go1_mujoco_cuda_velocity.yaml`
 - Isaac Sim CUDA：`configs/unitree_go1_isaac_cuda_velocity.yaml`
 - Isaac Sim 快速测试：`configs/unitree_go1_isaac_cuda_test.yaml`

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 from .base import BaseRunner
 from .types import RestoreMode, TrainResult, TrainStopReason
 from .callbacks import CALLBACK_TYPE_MAP, BaseCallback, StageCallback
+from .utils import TrackingSpec, parse_tracking_specs
 from envs import ENV_TYPE_MAP, BaseEnv
 from rl.algorithms import ALG_TYPE_MAP, OnPolicyAlgorithm
 from utils import (
@@ -48,6 +49,7 @@ class OnPolicyRunner(BaseRunner):
         self._pending_checkpoint_payload: Mapping[str, Any] | None = None
         self._pending_callback_states: Sequence[Mapping[str, Any]] | None = None
         self._checkpoint_callback_snapshot: list[dict[str, Any]] | None = None
+        self.tracking_specs: tuple[TrackingSpec, ...] = ()
         
         self.current_iteration = -1
 
@@ -70,6 +72,7 @@ class OnPolicyRunner(BaseRunner):
         rollout_length: int | None = None,
         rollout_length_history_size: int | None = None,
         callbacks: Sequence[str | Mapping[str, Any]] | None = None,
+        playback: Sequence[Mapping[str, Any]] | None = None,
         stage_index: int | None = None,
         transition: Sequence[Mapping[str, Any]] | None = None,
     ) -> None:
@@ -93,6 +96,8 @@ class OnPolicyRunner(BaseRunner):
         self._update_rollout_length_history_size(
             rollout_length_history_size
         )
+        if playback is not None:
+            self.tracking_specs = parse_tracking_specs(playback)
         self._build_callbacks(callbacks=callbacks)
         self._set_stage_transition(transition=transition)
         self._build_environment(component=component)
@@ -702,6 +707,9 @@ class OnPolicyRunner(BaseRunner):
             return False
 
         frames: list[np.ndarray] = []
+        tracking_specs = self.tracking_specs
+        commands: list[tuple[float, ...]] = []
+        measured: list[tuple[float, ...]] = []
         step = 0
         stopped_by_callback = False
         while step < num_steps:
@@ -716,6 +724,7 @@ class OnPolicyRunner(BaseRunner):
                     deterministic=True,
                 )
 
+            playback_index = self.environment.playback_env_index
             (
                 next_obs,
                 _,
@@ -738,7 +747,22 @@ class OnPolicyRunner(BaseRunner):
 
             frame = self.environment.render()
             if frame is not None:
-                frames.append(frame)
+                frames.append(np.array(frame, copy=True))
+                if (
+                    tracking_specs
+                    and all(
+                        spec.command_key in info and spec.state_key in info
+                        for spec in tracking_specs
+                    )
+                ):
+                    commands.append(tuple(
+                        float(info[spec.command_key][playback_index].item())
+                        for spec in tracking_specs
+                    ))
+                    measured.append(tuple(
+                        float(info[spec.state_key][playback_index, spec.component].item())
+                        for spec in tracking_specs
+                    ))
 
             obs = next_obs
 
@@ -753,7 +777,10 @@ class OnPolicyRunner(BaseRunner):
         if frames:
             video_dir = Path(self.context.save_dir) / "videos"
             output_paths = frame_saver(
-                frames,
+                frames=frames,
+                commands=commands,
+                measured=measured,
+                tracking_specs=tracking_specs,
                 directory=video_dir,
                 fps=self.environment.render_fps,
                 file_name=self._next_playback_file_name(video_dir),

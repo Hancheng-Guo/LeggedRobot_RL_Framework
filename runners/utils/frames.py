@@ -3,8 +3,10 @@ import numpy as np
 import imageio.v2 as imageio
 from datetime import datetime
 from pathlib import Path
-from typing import Literal, Protocol, TypeAlias, cast
+from typing import Iterable, Literal, Protocol, TypeAlias, cast
 from PIL import Image
+
+from .tracking_overlay import TrackingSpec, compose_tracking_frames
 
 
 SUPPORTED_VIDEO_FORMATS = frozenset({"gif", "mp4"})
@@ -25,8 +27,11 @@ def save_frames_to_video(
     fps: float,
     file_name: str | None = None,
     formats: VideoFormat | VideoFormats = "gif",
+    commands: list[tuple[float, ...]] | None = None,
+    measured: list[tuple[float, ...]] | None = None,
+    tracking_specs: tuple[TrackingSpec, ...] | None = None,
 ) -> list[Path]:
-    """Save frames in one format or in every requested format."""
+    """Compose tracking plots with frames, then save each requested format."""
 
     if not frames:
         raise ValueError("Cannot save an empty frame sequence.")
@@ -55,7 +60,7 @@ def save_frames_to_video(
         for format_name in requested_formats
     ):
         raise TypeError("Every video format must be a string.")
-    
+
     normalized_formats = [
         format_name.lower()
         for format_name in requested_formats
@@ -70,16 +75,35 @@ def save_frames_to_video(
         raise ValueError("'formats' cannot contain duplicates.")
 
     normalized_frames = _normalize_frames(frames)
+    if (commands is None) != (measured is None):
+        raise ValueError("'commands' and 'measured' must be provided together.")
+    if commands is not None and measured is not None and (
+        len(commands) != len(normalized_frames)
+        or len(measured) != len(normalized_frames)
+    ):
+        raise ValueError("Tracking data must have one sample per frame.")
+    if commands is not None and measured is not None and tracking_specs is None:
+        raise ValueError("Tracking configuration is required with tracking data.")
+    if commands is not None and measured is not None and tracking_specs is not None and any(
+        len(command) != len(tracking_specs) or len(actual) != len(tracking_specs)
+        for command, actual in zip(commands, measured)
+    ):
+        raise ValueError("Tracking configuration must match the data width.")
     directory.mkdir(parents=True, exist_ok=True)
     output_paths: list[Path] = []
 
     try:
         for format_name in normalized_formats:
             output_path = directory / f"{file_name}.{format_name}"
+            composed_frames = (
+                compose_tracking_frames(normalized_frames, commands, measured, tracking_specs, fps)
+                if commands is not None and measured is not None and tracking_specs is not None
+                else iter(normalized_frames)
+            )
             if format_name == "gif":
-                _save_gif(normalized_frames, output_path, fps)
+                _save_gif(composed_frames, output_path, fps)
             else:
-                _save_mp4(normalized_frames, output_path, fps)
+                _save_mp4(composed_frames, output_path, fps)
             output_paths.append(output_path)
     except Exception:
         for output_path in output_paths:
@@ -109,7 +133,7 @@ def _normalize_frames(
 
 
 def _save_gif(
-    frames: list[np.ndarray],
+    frames: Iterable[np.ndarray],
     output_path: Path,
     fps: float,
 ) -> None:
@@ -132,7 +156,7 @@ def _save_gif(
 
 
 def _save_mp4(
-    frames: list[np.ndarray],
+    frames: Iterable[np.ndarray],
     output_path: Path,
     fps: float,
 ) -> None:

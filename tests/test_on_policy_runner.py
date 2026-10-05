@@ -14,6 +14,7 @@ from rl.algorithms import OnPolicyAlgorithm, PolicyOutput
 from runners import OnPolicyRunner, RestoreMode
 from runners.callbacks import BaseCallback
 from runners import on_policy as on_policy_module
+from runners.utils import parse_tracking_specs
 from utils import Component, ComponentInfo, RuntimeContext
 
 
@@ -485,7 +486,14 @@ def test_play_stops_when_primary_environment_episode_ends(
             self.steps += 1
             done = torch.tensor([False, self.steps == 2])
             obs = torch.zeros(2, 1)
-            return obs, obs, torch.zeros(2), done, torch.zeros(2, dtype=torch.bool), {}
+            info = {
+                "command/lin_vel_x": torch.tensor([0.0, float(self.steps)]),
+                "command/lin_vel_y": torch.tensor([0.0, 0.2]),
+                "command/ang_vel_z": torch.tensor([0.0, 0.3]),
+                "state/base_lin_vel_body": torch.tensor([[0.0, 0.0, 0.0], [0.4, 0.1, 0.0]]),
+                "state/base_ang_vel_body": torch.tensor([[0.0, 0.0, 0.0], [9.0, 0.0, 0.5]]),
+            }
+            return obs, obs, torch.zeros(2), done, torch.zeros(2, dtype=torch.bool), info
 
         def render(self) -> np.ndarray:
             return np.zeros((2, 2, 3), dtype=np.uint8)
@@ -498,6 +506,12 @@ def test_play_stops_when_primary_environment_episode_ends(
     runner = OnPolicyRunner(context=runtime_context)
     runner.environment = environment
     runner.callbacks = []
+    runner.tracking_specs = parse_tracking_specs(
+        yaml.safe_load(
+            (Path(__file__).resolve().parents[1] / "configs/runners/mujoco_rollout_256.yaml")
+            .read_text(encoding="utf-8")
+        )["playback"]
+    )
     runner.algorithm = MinimalAlgorithm(runtime_context)
     runner.algorithm.set_eval_mode = lambda: None
     monkeypatch.setattr(
@@ -511,17 +525,32 @@ def test_play_stops_when_primary_environment_episode_ends(
     )
     runner.algorithm.reset_policy_state = lambda env_ids=None: None
     saved_frame_counts: list[int] = []
+    saved_commands: list[Any] = []
+    saved_measured: list[Any] = []
+    saved_labels: list[str] = []
+
+    def capture_frames(frames: list[np.ndarray], **kwargs: Any) -> list[Path]:
+        saved_frame_counts.append(len(frames))
+        saved_commands.extend(kwargs["commands"])
+        saved_measured.extend(kwargs["measured"])
+        saved_labels.extend(spec.label for spec in kwargs["tracking_specs"])
+        return []
 
     runner._play_steps(
         num_steps=10,
         formats="gif",
-        frame_saver=lambda frames, **kwargs: (
-            saved_frame_counts.append(len(frames)) or []
-        ),
+        frame_saver=capture_frames,
     )
 
     assert environment.steps == 2
     assert saved_frame_counts == [2]
+    assert np.allclose(saved_commands, [(1.0, 0.2, 0.3), (2.0, 0.2, 0.3)])
+    assert np.allclose(saved_measured, [(0.4, 0.1, 0.5), (0.4, 0.1, 0.5)])
+    assert saved_labels == [
+        "X linear velocity (m/s)",
+        "Y linear velocity (m/s)",
+        "Z angular velocity (rad/s)",
+    ]
 
 
 def test_play_warms_up_renderer_before_progress_callbacks(

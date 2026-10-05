@@ -26,3 +26,17 @@ callbacks:
 #       mode: min
 #       max_no_improve_iters: 20
 #       min_delta: 0.0
+playback:
+  - target: "command/lin_vel_x"
+    measured: "state/base_lin_vel_body[0]"
+    label: "X linear velocity (m/s)"
+    limits: [-2.8, 2.8]
+  - target: "command/lin_vel_y"
+    measured: "state/base_lin_vel_body[1]"
+    label: "Y linear velocity (m/s)"
+    limits: [-0.8, 0.8]
+  - target: "command/ang_vel_z"
+    measured: "state/base_ang_vel_body[2]"
+    label: "Z angular velocity (rad/s)"
+    limits: [-2.0, 2.0]
+    

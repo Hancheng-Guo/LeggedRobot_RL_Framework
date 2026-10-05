@@ -6,7 +6,8 @@ import pytest
 from PIL import GifImagePlugin, Image
 
 from runners.utils import frames as frames_module
-from runners.utils.frames import save_frames_to_video
+from runners.utils import save_frames_to_video, parse_tracking_specs
+from utils import load_yaml
 
 
 def test_save_frames_chooses_format_and_suffix(tmp_path: Path) -> None:
@@ -81,6 +82,44 @@ def test_save_frames_writes_every_requested_format(
         tmp_path / "rollout.gif",
     ]
     assert all(path.is_file() for path in output_paths)
+
+
+def test_save_frames_composes_matching_tracking_data(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = [np.zeros((240, 320, 3), dtype=np.uint8) for _ in range(2)]
+    commands = [(0.0, 0.0, 0.0), (1.0, 0.2, -0.5)]
+    measured = [(0.0, 0.0, 0.0), (0.5, 0.1, -0.2)]
+    saved: list[np.ndarray] = []
+
+    def capture_mp4(frames: Any, output_path: Path, fps: float) -> None:
+        saved.extend(frames)
+        output_path.touch()
+
+    monkeypatch.setattr(frames_module, "_save_mp4", capture_mp4)
+    runner_config = load_yaml(
+        Path(__file__).resolve().parents[1] / "configs/runners/mujoco_rollout_256.yaml"
+    )
+    save_frames_to_video(
+        source, tmp_path, fps=30.0, formats="mp4",
+        commands=commands, measured=measured,
+        tracking_specs=parse_tracking_specs(runner_config["playback"]),
+    )
+
+    assert len(saved) == 2
+    assert all(frame.shape == (368, 1728, 3) for frame in saved)
+    assert not np.array_equal(saved[0][:, 480:], saved[1][:, 480:])
+    assert all(frame.shape == (240, 320, 3) for frame in source)
+
+
+def test_save_frames_rejects_misaligned_tracking_data(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="one sample per frame"):
+        save_frames_to_video(
+            [np.zeros((2, 2, 3), dtype=np.uint8)],
+            tmp_path, fps=30.0,
+            commands=[], measured=[],
+        )
 
 
 @pytest.mark.parametrize("formats", [[], ["gif", "gif"], "avi"])

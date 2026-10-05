@@ -29,6 +29,8 @@ def main(argv: list[str] | None = None) -> None:
         default="",
         help="Run directory name/path; empty selects the latest dated run.",
     )
+    parser.add_argument("--num-plays", type=int, default=3)
+    parser.add_argument("--format", choices=("gif", "mp4"), default="gif")
     args = parser.parse_args(argv)
 
     checkpoints_dir = PROJECT_ROOT / "checkpoints"
@@ -46,7 +48,7 @@ def main(argv: list[str] | None = None) -> None:
     print(f"Playing checkpoint: {run_dir}", flush=True)
     application = ApplicationEntry(app_name, train_time)
     try:
-        application.play()
+        application.play(num_plays=args.num_plays, formats=args.format)
         new_videos = sorted(
             path for path in video_dir.glob("*")
             if path.is_file() and path not in existing_videos

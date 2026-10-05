@@ -28,7 +28,8 @@ def test_main_plays_selected_run_and_closes_on_error(
         def __init__(self, app_name: str, train_time: str) -> None:
             calls.append((app_name, train_time))
 
-        def play(self) -> None:
+        def play(self, *, num_plays: int, formats: str) -> None:
+            assert (num_plays, formats) == (3, "gif")
             calls.append("play")
             raise RuntimeError("play failed")
 
@@ -65,7 +66,8 @@ def test_main_prints_each_new_video_without_reporting_existing_files(
         def __init__(self, app_name: str, train_time: str) -> None:
             assert (app_name, train_time) == ("robot", "2026-10-01_12-30-05")
 
-        def play(self) -> None:
+        def play(self, *, num_plays: int, formats: str) -> None:
+            assert (num_plays, formats) == (3, "gif")
             (video_dir / "first.gif").write_bytes(b"gif")
             (video_dir / "second.mp4").write_bytes(b"mp4")
 

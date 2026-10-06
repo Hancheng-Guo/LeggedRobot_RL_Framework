@@ -216,7 +216,10 @@ class QuadrupedalGaitPhaseL2Exp(BaseRewardTerm):
         half_period_steps = torch.round(
             half_period_durations / task_context.step_dt
         ).clamp_min(1.0)
-        target_phase_steps = self._update_phase_steps(half_period_steps)
+        target_phase_steps = self._update_phase_steps(
+            half_period_steps,
+            self._phase_update_mask(task_context),
+        )
         target_phase = torch.pi * torch.sin(
             torch.pi * target_phase_steps / half_period_steps.unsqueeze(-1)
         )
@@ -335,7 +338,8 @@ class QuadrupedalGaitPhaseL2Exp(BaseRewardTerm):
 
     def _update_phase_steps(
         self,
-        half_period_steps: torch.Tensor
+        half_period_steps: torch.Tensor,
+        moving_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
 
         fl_phase = self.foot_phase_steps[:, 0]
@@ -345,6 +349,11 @@ class QuadrupedalGaitPhaseL2Exp(BaseRewardTerm):
         increment_all = phase_gap == half_period_steps
         increment_fr_rl = phase_gap < half_period_steps
         increment_fl_rr = phase_gap > half_period_steps
+
+        if moving_mask is not None:
+            increment_all &= moving_mask
+            increment_fr_rl &= moving_mask
+            increment_fl_rr &= moving_mask
 
         self.foot_phase_steps[:, [0, 3]] += increment_fl_rr.unsqueeze(-1).to(
             self.foot_phase_steps.dtype
@@ -360,3 +369,62 @@ class QuadrupedalGaitPhaseL2Exp(BaseRewardTerm):
         self.foot_phase_steps[:, 2] = self.foot_phase_steps[:, 1]
 
         return self.foot_phase_steps
+
+    def _phase_update_mask(
+        self,
+        task_context: TaskContext,
+    ) -> torch.Tensor | None:
+        return None
+
+
+@register_reward
+class QuadrupedalCommandAdaptiveGaitPhaseL2Exp(QuadrupedalGaitPhaseL2Exp):
+
+    def __init__(
+        self,
+        num_envs: int,
+        model_context: ModelContext,
+        target_height: float,
+        command_names: Sequence[str] = ("lin_vel_x", "lin_vel_y", "ang_vel_z"),
+        alpha: float = 0.5,
+        beta: float = 0.2,
+        sigma: float = 1,
+        *args, **kwargs,
+    ) -> None:
+        
+        super().__init__(
+            num_envs=num_envs,
+            model_context=model_context,
+            target_height=target_height,
+            sigma=sigma,
+            *args, **kwargs
+        )
+
+        self.command_names = command_names
+        self.alpha = alpha
+        self.beta = beta
+
+
+    def _half_period_durations(
+        self,
+        task_context: TaskContext
+    ) -> torch.Tensor:
+
+        command_norm = torch.linalg.norm(
+            command_vector(task_context, self.command_names),
+            dim=-1,
+        )
+        safe_norm = command_norm.clamp_min(_IDLE_SPEED_THRESHOLD)
+        return self.beta * torch.exp(self.alpha / safe_norm)
+
+
+    def _phase_update_mask(
+        self,
+        task_context: TaskContext,
+    ) -> torch.Tensor:
+        
+        command_norm = torch.linalg.norm(
+            command_vector(task_context, self.command_names),
+            dim=-1,
+        )
+        return command_norm >= _IDLE_SPEED_THRESHOLD

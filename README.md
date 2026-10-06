@@ -698,7 +698,8 @@ reward_manager_config:
 | `track_angular_velocity_z_l2_exp_and_logcosh` | `std=1.0`、`command_names=[ang_vel_z]`、`logcosh_weight=0.5` |
 | `track_angular_velocity_z_error_integral_l2` | 最近 `integral_length` 步的 Z 有符号角速度误差取平均后平方；窗口未满时只除以有效步数，reset 后重新累计；默认 `integral_length=100`、`command_names=[ang_vel_z]` |
 | `trot_loop_duration_tanh` | `command_names=[lin_vel_x, lin_vel_y, ang_vel_z]`、`growth_rate=1.0`；指令范数低于 `0.1` 时要求四足着地 |
-| `quadrupedal_gait_phase_l2_exp` | 必填 `target_height`；`sigma=1.0` |
+| `quadrupedal_gait_phase_l2_exp` | 必填 `target_height`；`sigma=1.0`；从命令 `half_period_duration` 读取半周期时长并按 `step_dt` 换算为步数 |
+| `quadrupedal_command_adaptive_gait_phase_l2_exp` | 必填 `target_height`；`sigma=1.0`、`command_names=[lin_vel_x, lin_vel_y, ang_vel_z]`、`alpha=0.5`、`beta=0.2`；半周期时长为 `beta * exp(alpha / max(command_norm, 0.1))`，命令范数低于 `0.1` 时不推进足端相位 |
 | `foot_state_duration_command_weighted_exp` | 整组足端触地状态保持时间；`command_names=[lin_vel_x, lin_vel_y, ang_vel_z]`、`sigma=1.0` |
 | `foot_state_duration_cubic_command_weighted_exp` | 整组足端触地状态保持时间的三次方版本；参数同上 |
 | `foot_state_duration_cubic_command_tanh_weighted_exp` | 整组足端触地状态保持时间的三次方版本，指令范数先取 `tanh`；参数同上 |

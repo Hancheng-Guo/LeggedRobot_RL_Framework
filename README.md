@@ -692,11 +692,11 @@ reward_manager_config:
 | `track_linear_velocity_y_l2_exp` | `std=1.0`、`command_names=[lin_vel_y]` |
 | `track_linear_velocity_x_l2_exp_and_logcosh` | `std=1.0`、`command_names=[lin_vel_x]`、`logcosh_weight=0.5` |
 | `track_linear_velocity_y_l2_exp_and_logcosh` | `std=1.0`、`command_names=[lin_vel_y]`、`logcosh_weight=0.5` |
-| `track_linear_velocity_x_error_integral_l2` | 最近 `integral_length` 步的 X 有符号速度误差乘 `step_dt` 后积分，再取平方；默认 `integral_length=100` |
-| `track_linear_velocity_y_error_integral_l2` | 最近 `integral_length` 步的 Y 有符号速度误差乘 `step_dt` 后积分，再取平方；默认 `integral_length=100` |
+| `track_linear_velocity_x_error_integral_l2` | 最近 `integral_length` 步的 X 有符号速度误差取平均后平方；窗口未满时只除以有效步数，reset 后重新累计；默认 `integral_length=100` |
+| `track_linear_velocity_y_error_integral_l2` | 最近 `integral_length` 步的 Y 有符号速度误差取平均后平方；窗口未满时只除以有效步数，reset 后重新累计；默认 `integral_length=100` |
 | `track_angular_velocity_z_l2_exp` | `std=1.0`、`command_names=[ang_vel_z]` |
 | `track_angular_velocity_z_l2_exp_and_logcosh` | `std=1.0`、`command_names=[ang_vel_z]`、`logcosh_weight=0.5` |
-| `track_angular_velocity_z_error_integral_l2` | 最近 `integral_length` 步的 Z 有符号误差乘 `step_dt` 后积分，再取平方；默认 `integral_length=100`、`command_names=[ang_vel_z]` |
+| `track_angular_velocity_z_error_integral_l2` | 最近 `integral_length` 步的 Z 有符号角速度误差取平均后平方；窗口未满时只除以有效步数，reset 后重新累计；默认 `integral_length=100`、`command_names=[ang_vel_z]` |
 | `trot_loop_duration_tanh` | `command_names=[lin_vel_x, lin_vel_y, ang_vel_z]`、`growth_rate=1.0`；指令范数低于 `0.1` 时要求四足着地 |
 | `quadrupedal_gait_phase_l2_exp` | 必填 `target_height`；`sigma=1.0` |
 | `foot_state_duration_command_weighted_exp` | 整组足端触地状态保持时间；`command_names=[lin_vel_x, lin_vel_y, ang_vel_z]`、`sigma=1.0` |

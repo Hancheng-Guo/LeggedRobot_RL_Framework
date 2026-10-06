@@ -67,6 +67,11 @@ class _BaseVelocityErrorIntegralL2(_BaseCommandTracking):
             dtype=self.context.dtype,
             device=self.context.device,
         )
+        self.integral_count = torch.zeros(
+            (num_envs,),
+            dtype=torch.long,
+            device=self.context.device,
+        )
 
 
     def _compute_integral(
@@ -79,8 +84,11 @@ class _BaseVelocityErrorIntegralL2(_BaseCommandTracking):
         target = _command_target_check(command, velocity)
         error = target - velocity
         self.error_history = torch.roll(self.error_history, shifts=-1, dims=-1)
-        self.error_history[:, -1] = error.squeeze(-1) * task_context.step_dt
-        return self.error_history.sum(dim=-1).square()
+        # self.error_history[:, -1] = error.squeeze(-1) * task_context.step_dt
+        # return self.error_history.sum(dim=-1).square()
+        self.integral_count.add_(1).clamp_(max=self.integral_length)
+        self.error_history[:, -1] = error.squeeze(-1)
+        return (self.error_history.sum(dim=-1) / self.integral_count).square()
 
 
     def reset(
@@ -90,8 +98,10 @@ class _BaseVelocityErrorIntegralL2(_BaseCommandTracking):
 
         if env_ids is None:
             self.error_history.zero_()
+            self.integral_count.zero_()
         else:
             self.error_history[env_ids] = 0.0
+            self.integral_count[env_ids] = 0
 
 
 @register_reward

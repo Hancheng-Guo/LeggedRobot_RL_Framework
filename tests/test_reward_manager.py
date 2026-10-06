@@ -404,7 +404,7 @@ def test_integral_reward_term_resets_internal_buffer(
     assert not term.error_history[1].any()
 
 
-def test_integral_tracking_terms_use_signed_error_and_step_dt(
+def test_integral_tracking_terms_average_signed_error_over_valid_window(
     runtime_context,
     model_context,
 ):
@@ -434,15 +434,15 @@ def test_integral_tracking_terms_use_signed_error_and_step_dt(
     _, first = manager.compute(context)
     torch.testing.assert_close(
         first["reward/track_linear_velocity_x_error_integral_l2"],
-        torch.full((2,), 0.01),
+        torch.full((2,), 1.0),
     )
     torch.testing.assert_close(
         first["reward/track_linear_velocity_y_error_integral_l2"],
-        torch.full((2,), 0.04),
+        torch.full((2,), 4.0),
     )
     torch.testing.assert_close(
         first["reward/track_angular_velocity_z_error_integral_l2"],
-        torch.full((2,), 0.01),
+        torch.full((2,), 1.0),
     )
 
     context.state.base_lin_vel_body[0, :2] = torch.tensor([1.0, 2.0])
@@ -450,29 +450,29 @@ def test_integral_tracking_terms_use_signed_error_and_step_dt(
     _, second = manager.compute(context)
     torch.testing.assert_close(
         second["reward/track_linear_velocity_x_error_integral_l2"],
-        torch.tensor([0.0, 0.04]),
+        torch.tensor([0.0, 1.0]),
     )
     torch.testing.assert_close(
         second["reward/track_linear_velocity_y_error_integral_l2"],
-        torch.tensor([0.0, 0.16]),
+        torch.tensor([0.0, 4.0]),
     )
     torch.testing.assert_close(
         second["reward/track_angular_velocity_z_error_integral_l2"],
-        torch.tensor([0.0, 0.04]),
+        torch.tensor([0.0, 1.0]),
     )
 
     _, third = manager.compute(context)
     torch.testing.assert_close(
         third["reward/track_linear_velocity_x_error_integral_l2"],
-        torch.full((2,), 0.04),
+        torch.full((2,), 1.0),
     )
     torch.testing.assert_close(
         third["reward/track_linear_velocity_y_error_integral_l2"],
-        torch.full((2,), 0.16),
+        torch.full((2,), 4.0),
     )
     torch.testing.assert_close(
         third["reward/track_angular_velocity_z_error_integral_l2"],
-        torch.full((2,), 0.04),
+        torch.full((2,), 1.0),
     )
 
     manager.reset(torch.tensor([0]))
@@ -494,6 +494,17 @@ def test_integral_tracking_terms_use_signed_error_and_step_dt(
     assert y_term.error_history[1].any()
     assert not z_term.error_history[0].any()
     assert z_term.error_history[1].any()
+    for term in (x_term, y_term, z_term):
+        torch.testing.assert_close(term.integral_count, torch.tensor([0, 2]))
+
+    context.state.base_lin_vel_body[0, 0] = -2.0
+    _, after_reset = manager.compute(context)
+    torch.testing.assert_close(
+        after_reset["reward/track_linear_velocity_x_error_integral_l2"],
+        torch.tensor([4.0, 1.0]),
+    )
+    for term in (x_term, y_term, z_term):
+        torch.testing.assert_close(term.integral_count, torch.tensor([1, 2]))
 
 
 @pytest.mark.parametrize("integral_length", [0, -1, 1.5, True])

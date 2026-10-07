@@ -2,6 +2,7 @@ import torch
 from abc import ABC, abstractmethod
 
 from .managers import (
+    TaskStateManager,
     ActionManager,
     CommandManager,
     ObservationManager,
@@ -24,6 +25,7 @@ class BaseTaskLogic(ABC):
         self.num_envs: int
         self.model_context: ModelContext
 
+        self.task_state_manager: TaskStateManager
         self.action_manager: ActionManager
         self.command_manager: CommandManager
         self.observation_manager: ObservationManager
@@ -54,8 +56,10 @@ class BaseTaskLogic(ABC):
         reward_manager_config: dict,
         termination_manager_config: dict,
         constants: dict,
+        task_state_manager_config: dict | None = None,
     ) -> None:
 
+        self._build_task_state_manager(task_state_manager_config)
         self._build_action_manager(action_manager_config)
         self._build_command_manager(command_manager_config)
         self._build_observation_manager(observation_manager_config)
@@ -86,6 +90,18 @@ class BaseTaskLogic(ABC):
             context=self.context,
             model_context=self.model_context,
             **command_manager_config,
+        )
+
+
+    def _build_task_state_manager(
+        self,
+        task_state_manager_config: dict | None,
+    ) -> None:
+
+        self.task_state_manager = TaskStateManager(
+            num_envs=self.num_envs,
+            context=self.context,
+            **(task_state_manager_config or {}),
         )
 
 
@@ -135,6 +151,7 @@ class BaseTaskLogic(ABC):
         env_ids: torch.Tensor | None = None,
     ) -> None:
 
+        self.task_state_manager.reset(env_ids)
         self.action_manager.reset(env_ids)
         self.command_manager.reset(env_ids)
         self.observation_manager.reset(env_ids)
@@ -180,7 +197,15 @@ class BaseTaskLogic(ABC):
             episode_step=episode_step,
             step_dt=step_dt,
             env_ids=env_ids,
+            task_state=self.task_state_manager.values(env_ids),
         )
+
+
+    def update_task_state(
+        self,
+        task_context: TaskContext
+    ) -> None:
+        self.task_state_manager.update(task_context)
 
     
     def pre_step(

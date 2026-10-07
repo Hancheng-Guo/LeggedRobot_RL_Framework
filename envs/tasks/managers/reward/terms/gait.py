@@ -1,3 +1,4 @@
+import math
 import torch
 from collections.abc import Sequence
 
@@ -13,7 +14,7 @@ _FOOT_PHASE_IMAG_NAME = "foot_phase_imag"
 _HALF_PERIOD_DURATION_NAME = "half_period_duration"
 
 _LANDED_DISTANCE_FACTOR = -1.0
-_LIFTED_DISTANCE_FACTOR = -0.25
+_LIFTED_DISTANCE_FACTOR = -0.5
 
 _IDLE_SPEED_THRESHOLD = 0.1
 _TROT_LOOPS = {
@@ -173,137 +174,281 @@ class TrotLoopDurationTanh(BaseRewardTerm):
             self.gait_phases[env_id] = []
 
 
+# @register_reward
+# class QuadrupedalGaitPhaseL2Exp(BaseRewardTerm):
+
+#     def __init__(
+#         self,
+#         num_envs: int,
+#         model_context: ModelContext,
+#         target_height: float,
+#         sigma: float = 1,
+#         *args, **kwargs,
+#     ) -> None:
+        
+#         super().__init__(*args, **kwargs)
+
+#         self.foot_geom_ids = model_context.foot_geom_ids
+#         if self.foot_geom_ids.numel() != 4:
+#             raise ValueError(
+#                 "QuadrupedalGaitPhaseL2Exp requires exactly four foot geoms."
+#             )
+#         if sigma <= 0.0:
+#             raise ValueError("'sigma' must be positive.")
+
+#         self.base_pos_qpos_ids = model_context.base_pos_qpos_ids
+#         self.base_quat_qpos_ids = model_context.base_quat_qpos_ids
+#         self.target_height = target_height
+#         self.sigma = sigma
+
+#         self.foot_phase_steps = torch.zeros(
+#             (num_envs, 4),
+#             dtype=self.context.dtype,
+#             device=self.context.device,
+#         )
+
+
+#     def compute(
+#         self,
+#         task_context: TaskContext
+#     ) -> torch.Tensor:
+        
+#         half_period_durations = self._half_period_durations(task_context)
+#         half_period_steps = torch.round(
+#             half_period_durations / task_context.step_dt
+#         ).clamp_min(1.0)
+#         phase_shift_real, phase_shift_imag = (
+#             self._check_phase_inputs(task_context)
+#         )
+#         phase_shift = torch.atan2(phase_shift_imag, phase_shift_real)
+#         target_phase = self._target_phase(
+#             task_context,
+#             half_period_steps,
+#             phase_shift,
+#         )
+
+#         foot_height = self._foot_height_from_base_plane(task_context)
+#         foot_phase = 0.5 * torch.pi * (
+#             1.0 + torch.cos(
+#                 torch.pi * (
+#                     (foot_height - _LIFTED_DISTANCE_FACTOR * self.target_height) /
+#                     (
+#                         self.target_height *
+#                         (_LANDED_DISTANCE_FACTOR - _LIFTED_DISTANCE_FACTOR)
+#                     )
+#                 )
+#             )
+#         )
+
+#         phase_error = torch.atan2(
+#             torch.sin(foot_phase - target_phase),
+#             torch.cos(foot_phase - target_phase),
+#         )
+
+#         return torch.mean(
+#             torch.exp(-(phase_error / self.sigma).square()),
+#             dim=-1,
+#         )
+
+
+#     def reset(
+#         self,
+#         env_ids: torch.Tensor | None = None
+#     ) -> None:
+        
+#         if env_ids is None:
+#             self.foot_phase_steps.zero_()
+#         else:
+#             self.foot_phase_steps[env_ids] = 0.0
+
+
+#     def _check_phase_inputs(
+#         self,
+#         task_context: TaskContext
+#     ) -> tuple[torch.Tensor, torch.Tensor]:
+        
+#         phase_real = _named_tensor_squeeze(
+#             task_context,
+#             _FOOT_PHASE_REAL_NAME
+#         )
+#         phase_imag = _named_tensor_squeeze(
+#             task_context,
+#             _FOOT_PHASE_IMAG_NAME
+#         )
+#         if phase_real.shape != self.foot_phase_steps.shape:
+#             raise ValueError(
+#                 f"'{_FOOT_PHASE_REAL_NAME}' must have shape "
+#                 f"{tuple(self.foot_phase_steps.shape)}."
+#             )
+#         if phase_imag.shape != self.foot_phase_steps.shape:
+#             raise ValueError(
+#                 f"'{_FOOT_PHASE_IMAG_NAME}' must have shape "
+#                 f"{tuple(self.foot_phase_steps.shape)}."
+#             )
+
+#         return phase_real, phase_imag
+
+
+#     def _half_period_durations(
+#         self,
+#         task_context: TaskContext
+#     ) -> torch.Tensor:
+        
+#         half_period_duration = _named_tensor_squeeze(
+#             task_context,
+#             _HALF_PERIOD_DURATION_NAME
+#         )
+#         if half_period_duration.ndim != 1:
+#             raise ValueError(
+#                 f"'{_HALF_PERIOD_DURATION_NAME}' must have shape "
+#                 f"({self.foot_phase_steps.shape[0]},)."
+#             )
+
+#         return half_period_duration.clamp_min(0.05)
+
+
+#     def _foot_height_from_base_plane(
+#         self,
+#         task_context: TaskContext,
+#     ) -> torch.Tensor:
+
+#         qpos = task_context.state.qpos
+#         base_pos = qpos[:, self.base_pos_qpos_ids]
+#         quaternion = qpos[:, self.base_quat_qpos_ids]
+#         quaternion = quaternion / quaternion.norm(
+#             dim=-1,
+#             keepdim=True,
+#         ).clamp_min(torch.finfo(quaternion.dtype).eps)
+
+#         foot_pos = task_context.state.geom_xpos[:, self.foot_geom_ids, :]
+
+#         w = quaternion[:, 0:1]
+#         xyz = quaternion[:, 1:4]
+#         local_z = quaternion.new_tensor([0.0, 0.0, 1.0]).expand_as(xyz)
+#         base_plane_normal = (
+#             local_z * (2.0 * w.square() - 1.0)
+#             + 2.0 * w * torch.cross(xyz, local_z, dim=-1)
+#             + 2.0 * xyz * (xyz * local_z).sum(dim=-1, keepdim=True)
+#         )
+
+#         return (
+#             (foot_pos - base_pos.unsqueeze(1))
+#             * base_plane_normal.unsqueeze(1)
+#         ).sum(dim=-1)
+
+
+#     def _update_phase_steps(
+#         self,
+#         half_period_steps: torch.Tensor,
+#         update_mask: torch.Tensor | None = None,
+#     ) -> torch.Tensor:
+
+#         fl_phase = self.foot_phase_steps[:, 0]
+#         fr_phase = self.foot_phase_steps[:, 1]
+#         phase_gap = fr_phase - fl_phase
+
+#         increment_all = phase_gap == half_period_steps
+#         increment_fr_rl = phase_gap < half_period_steps
+#         increment_fl_rr = phase_gap > half_period_steps
+
+#         if update_mask is not None:
+#             increment_all &= update_mask
+#             increment_fr_rl &= update_mask
+#             increment_fl_rr &= update_mask
+
+#         self.foot_phase_steps[:, [0, 3]] += increment_fl_rr.unsqueeze(-1).to(
+#             self.foot_phase_steps.dtype
+#         )
+#         self.foot_phase_steps[:, [1, 2]] += increment_fr_rl.unsqueeze(-1).to(
+#             self.foot_phase_steps.dtype
+#         )
+#         self.foot_phase_steps += increment_all.unsqueeze(-1).to(
+#             self.foot_phase_steps.dtype
+#         )
+
+#         self.foot_phase_steps[:, 3] = self.foot_phase_steps[:, 0]
+#         self.foot_phase_steps[:, 2] = self.foot_phase_steps[:, 1]
+
+#         return self.foot_phase_steps
+
+
+#     def _target_phase(
+#         self,
+#         task_context: TaskContext,
+#         half_period_steps: torch.Tensor,
+#         phase_shift: torch.Tensor,
+#     ) -> torch.Tensor:
+#         target_phase_steps = self._update_phase_steps(
+#             half_period_steps,
+#         )
+#         target_phase = torch.pi * target_phase_steps / half_period_steps.unsqueeze(-1)
+#         return 0.5 * torch.pi * (1.0 + torch.sin(
+#             target_phase + phase_shift - torch.pi / 2
+#         ))
+
+
 @register_reward
-class QuadrupedalGaitPhaseL2Exp(BaseRewardTerm):
+class QuadrupedalCommandAdaptiveGaitPhaseHeightL2(BaseRewardTerm):
 
     def __init__(
         self,
-        num_envs: int,
         model_context: ModelContext,
         target_height: float,
-        sigma: float = 1,
+        height_std: float = 0.2,
         *args, **kwargs,
     ) -> None:
-        
+
         super().__init__(*args, **kwargs)
 
         self.foot_geom_ids = model_context.foot_geom_ids
         if self.foot_geom_ids.numel() != 4:
             raise ValueError(
-                "QuadrupedalGaitPhaseL2Exp requires exactly four foot geoms."
+                "QuadrupedalCommandAdaptiveGaitPhaseHeightL2 requires exactly four foot geoms."
             )
-        if sigma <= 0.0:
-            raise ValueError("'sigma' must be positive.")
+        if not math.isfinite(target_height) or target_height <= 0.0:
+            raise ValueError("'target_height' must be positive and finite.")
+        if not math.isfinite(height_std) or height_std <= 0.0:
+            raise ValueError("'height_std' must be positive and finite.")
 
         self.base_pos_qpos_ids = model_context.base_pos_qpos_ids
         self.base_quat_qpos_ids = model_context.base_quat_qpos_ids
         self.target_height = target_height
-        self.sigma = sigma
-
-        self.foot_phase_steps = torch.zeros(
-            (num_envs, 4),
-            dtype=self.context.dtype,
-            device=self.context.device,
-        )
+        self.height_std = height_std
 
 
     def compute(
         self,
         task_context: TaskContext
     ) -> torch.Tensor:
-        
-        half_period_durations = self._half_period_durations(task_context)
-        half_period_steps = torch.round(
-            half_period_durations / task_context.step_dt
-        ).clamp_min(1.0)
-        target_phase_steps = self._update_phase_steps(
-            half_period_steps,
-            self._phase_update_mask(task_context),
-        )
-        target_phase = torch.pi * torch.sin(
-            torch.pi * target_phase_steps / half_period_steps.unsqueeze(-1)
-        )
 
+        phase = task_context.task_state.get("quadrupedal_gait_phase")
+        if phase is None:
+            raise ValueError(
+                "QuadrupedalCommandAdaptiveGaitPhaseHeightL2 requires task state "
+                "'quadrupedal_gait_phase'."
+            )
+        phase_height = self._get_phase_height(phase)
         foot_height = self._foot_height_from_base_plane(task_context)
-        foot_phase = torch.pi * torch.cos(
-            torch.pi * (
-                (foot_height - _LIFTED_DISTANCE_FACTOR * self.target_height) /
-                (
-                    self.target_height * 
-                    (_LANDED_DISTANCE_FACTOR - _LIFTED_DISTANCE_FACTOR)
-                )
+        height_diff = phase_height - foot_height
+        height_diff_norm = height_diff / self.height_std
+
+        return height_diff_norm.square().sum(dim=-1)
+
+
+    def _get_phase_height(self, phase: torch.Tensor) -> torch.Tensor:
+
+        lifted_phase_height = (
+            self.target_height * (
+                _LANDED_DISTANCE_FACTOR + 
+                torch.sin(phase) * (_LIFTED_DISTANCE_FACTOR - _LANDED_DISTANCE_FACTOR)
             )
         )
-
-        phase_shift_real, phase_shift_imag = (
-            self._check_phase_inputs(task_context)
+        phase_height = torch.where(
+            torch.remainder(phase, 2 * torch.pi) <= torch.pi,
+            lifted_phase_height,
+            torch.full_like(phase, self.target_height * _LANDED_DISTANCE_FACTOR)
         )
-        phase_shift = torch.atan2(phase_shift_imag, phase_shift_real)
-        phase_error = torch.atan2(
-            torch.sin(foot_phase + phase_shift - target_phase),
-            torch.cos(foot_phase + phase_shift - target_phase),
-        )
-
-        return torch.mean(
-            torch.exp(-(phase_error / self.sigma).square()),
-            dim=-1,
-        )
-
-
-    def reset(
-        self,
-        env_ids: torch.Tensor | None = None
-    ) -> None:
-        
-        if env_ids is None:
-            self.foot_phase_steps.zero_()
-        else:
-            self.foot_phase_steps[env_ids] = 0.0
-
-
-    def _check_phase_inputs(
-        self,
-        task_context: TaskContext
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        
-        phase_real = _named_tensor_squeeze(
-            task_context,
-            _FOOT_PHASE_REAL_NAME
-        )
-        phase_imag = _named_tensor_squeeze(
-            task_context,
-            _FOOT_PHASE_IMAG_NAME
-        )
-        if phase_real.shape != self.foot_phase_steps.shape:
-            raise ValueError(
-                f"'{_FOOT_PHASE_REAL_NAME}' must have shape "
-                f"{tuple(self.foot_phase_steps.shape)}."
-            )
-        if phase_imag.shape != self.foot_phase_steps.shape:
-            raise ValueError(
-                f"'{_FOOT_PHASE_IMAG_NAME}' must have shape "
-                f"{tuple(self.foot_phase_steps.shape)}."
-            )
-
-        return phase_real, phase_imag
-
-
-    def _half_period_durations(
-        self,
-        task_context: TaskContext
-    ) -> torch.Tensor:
-        
-        half_period_duration = _named_tensor_squeeze(
-            task_context,
-            _HALF_PERIOD_DURATION_NAME
-        )
-        if half_period_duration.ndim != 1:
-            raise ValueError(
-                f"'{_HALF_PERIOD_DURATION_NAME}' must have shape "
-                f"({self.foot_phase_steps.shape[0]},)."
-            )
-
-        return half_period_duration.clamp_min(0.05)
+        return torch.cat((phase_height, phase_height.flip(-1)), dim=-1)
 
 
     def _foot_height_from_base_plane(
@@ -334,97 +479,3 @@ class QuadrupedalGaitPhaseL2Exp(BaseRewardTerm):
             (foot_pos - base_pos.unsqueeze(1))
             * base_plane_normal.unsqueeze(1)
         ).sum(dim=-1)
-
-
-    def _update_phase_steps(
-        self,
-        half_period_steps: torch.Tensor,
-        moving_mask: torch.Tensor | None = None,
-    ) -> torch.Tensor:
-
-        fl_phase = self.foot_phase_steps[:, 0]
-        fr_phase = self.foot_phase_steps[:, 1]
-        phase_gap = fr_phase - fl_phase
-
-        increment_all = phase_gap == half_period_steps
-        increment_fr_rl = phase_gap < half_period_steps
-        increment_fl_rr = phase_gap > half_period_steps
-
-        if moving_mask is not None:
-            increment_all &= moving_mask
-            increment_fr_rl &= moving_mask
-            increment_fl_rr &= moving_mask
-
-        self.foot_phase_steps[:, [0, 3]] += increment_fl_rr.unsqueeze(-1).to(
-            self.foot_phase_steps.dtype
-        )
-        self.foot_phase_steps[:, [1, 2]] += increment_fr_rl.unsqueeze(-1).to(
-            self.foot_phase_steps.dtype
-        )
-        self.foot_phase_steps += increment_all.unsqueeze(-1).to(
-            self.foot_phase_steps.dtype
-        )
-
-        self.foot_phase_steps[:, 3] = self.foot_phase_steps[:, 0]
-        self.foot_phase_steps[:, 2] = self.foot_phase_steps[:, 1]
-
-        return self.foot_phase_steps
-
-    def _phase_update_mask(
-        self,
-        task_context: TaskContext,
-    ) -> torch.Tensor | None:
-        return None
-
-
-@register_reward
-class QuadrupedalCommandAdaptiveGaitPhaseL2Exp(QuadrupedalGaitPhaseL2Exp):
-
-    def __init__(
-        self,
-        num_envs: int,
-        model_context: ModelContext,
-        target_height: float,
-        command_names: Sequence[str] = ("lin_vel_x", "lin_vel_y", "ang_vel_z"),
-        alpha: float = 0.5,
-        beta: float = 0.2,
-        sigma: float = 1,
-        *args, **kwargs,
-    ) -> None:
-        
-        super().__init__(
-            num_envs=num_envs,
-            model_context=model_context,
-            target_height=target_height,
-            sigma=sigma,
-            *args, **kwargs
-        )
-
-        self.command_names = command_names
-        self.alpha = alpha
-        self.beta = beta
-
-
-    def _half_period_durations(
-        self,
-        task_context: TaskContext
-    ) -> torch.Tensor:
-
-        command_norm = torch.linalg.norm(
-            command_vector(task_context, self.command_names),
-            dim=-1,
-        )
-        safe_norm = command_norm.clamp_min(_IDLE_SPEED_THRESHOLD)
-        return self.beta * torch.exp(self.alpha / safe_norm)
-
-
-    def _phase_update_mask(
-        self,
-        task_context: TaskContext,
-    ) -> torch.Tensor:
-        
-        command_norm = torch.linalg.norm(
-            command_vector(task_context, self.command_names),
-            dim=-1,
-        )
-        return command_norm >= _IDLE_SPEED_THRESHOLD

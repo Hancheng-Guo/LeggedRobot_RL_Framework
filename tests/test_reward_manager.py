@@ -4,6 +4,7 @@ from dataclasses import replace
 from typing import cast
 
 from envs.tasks.managers.reward import RewardManager
+from envs.tasks.managers.task_state import TaskStateManager
 from envs.tasks.managers.reward.terms.foot import (
     FootDurationCubicCommandTanhWeightedExp,
     FootLiftHeightDiffCommandGatedL2,
@@ -11,8 +12,7 @@ from envs.tasks.managers.reward.terms.foot import (
     FootStateDurationCommandWeightedExp,
 )
 from envs.tasks.managers.reward.terms.gait import (
-    QuadrupedalCommandAdaptiveGaitPhaseL2Exp,
-    QuadrupedalGaitPhaseL2Exp,
+    QuadrupedalCommandAdaptiveGaitPhaseHeightL2,
     TrotLoopDurationTanh,
 )
 from envs.tasks.managers.reward.terms.tracking import (
@@ -118,8 +118,7 @@ def make_phase_gait_context() -> TaskContext:
     qpos[:, 1] = 1.0
     qpos[:, 7] = 0.5
     geom_xpos = torch.zeros(2, 7, 3)
-    geom_xpos[:, [3, 6], 2] = 0.7
-    geom_xpos[:, [4, 5], 2] = 0.55
+    geom_xpos[:, [3, 4, 5, 6], 2] = 0.3
 
     return TaskContext(
         state=make_simulator_state(
@@ -127,14 +126,14 @@ def make_phase_gait_context() -> TaskContext:
             geom_xpos=geom_xpos,
         ),
         command={
-            "foot_phase_real": torch.ones(2, 4),
-            "foot_phase_imag": torch.zeros(2, 4),
-            "half_period_duration": torch.full((2,), 0.04),
+            "lin_vel_x": torch.zeros(2, 1),
+            "lin_vel_y": torch.zeros(2, 1),
+            "ang_vel_z": torch.zeros(2, 1),
         },
         last_command={
-            "foot_phase_real": torch.ones(2, 4),
-            "foot_phase_imag": torch.zeros(2, 4),
-            "half_period_duration": torch.full((2,), 0.04),
+            "lin_vel_x": torch.zeros(2, 1),
+            "lin_vel_y": torch.zeros(2, 1),
+            "ang_vel_z": torch.zeros(2, 1),
         },
         action=torch.zeros(2, 2),
         last_action=torch.zeros(2, 2),
@@ -797,7 +796,21 @@ def test_foot_lift_height_diff_command_gated_l2_rejects_invalid_height_std(
         )
 
 
-def test_command_adaptive_gait_phase_stops_below_command_threshold(
+def make_gait_phase_state(
+    runtime_context,
+    task_context: TaskContext,
+    **params,
+) -> TaskStateManager:
+    manager = TaskStateManager(
+        num_envs=2,
+        context=runtime_context,
+        terms={"quadrupedal_gait_phase": params},
+    )
+    task_context.task_state = manager.values()
+    return manager
+
+
+def test_command_adaptive_gait_phase_height_stops_below_command_threshold(
     runtime_context,
     model_context,
 ):
@@ -807,37 +820,207 @@ def test_command_adaptive_gait_phase_stops_below_command_threshold(
         geom_body_ids=torch.arange(7),
         foot_geom_ids=torch.tensor([3, 4, 5, 6]),
     )
-    term = QuadrupedalCommandAdaptiveGaitPhaseL2Exp(
+    term = QuadrupedalCommandAdaptiveGaitPhaseHeightL2(
         context=runtime_context,
         num_envs=2,
         model_context=phase_model_context,
         target_height=0.2,
     )
     task_context = make_phase_gait_context()
+    state_manager = make_gait_phase_state(
+        runtime_context, task_context, omega_min=2.0, omega_max=2.0,
+    )
+    phase = state_manager.terms["quadrupedal_gait_phase"].value
+    task_context.step_dt = 0.1
+    task_context.state.geom_xpos[:, [3, 4, 5, 6], 2] = 0.3
     task_context.command["lin_vel_x"] = torch.tensor([[0.0], [0.2]])
     task_context.command["lin_vel_y"] = torch.zeros(2, 1)
     task_context.command["ang_vel_z"] = torch.zeros(2, 1)
 
     for _ in range(2):
-        assert torch.isfinite(term.compute(task_context)).all()
+        state_manager.update(task_context)
+        reward = term.compute(task_context)
+        assert reward.shape == (2,)
+        assert torch.isfinite(reward).all()
     torch.testing.assert_close(
-        term.foot_phase_steps,
-        torch.tensor([[0.0, 0.0, 0.0, 0.0], [0.0, 2.0, 2.0, 0.0]]),
+        phase,
+        torch.tensor([[0.0, 0.0], [0.4, 0.0]]),
     )
 
     task_context.command["lin_vel_x"] = torch.tensor([[0.2], [0.0]])
+    state_manager.update(task_context)
     term.compute(task_context)
     torch.testing.assert_close(
-        term.foot_phase_steps,
-        torch.tensor([[0.0, 1.0, 1.0, 0.0], [0.0, 2.0, 2.0, 0.0]]),
+        phase,
+        torch.tensor([[0.2, 0.0], [0.6, 0.0]]),
     )
 
-    term.reset(torch.tensor([1]))
+    state_manager.reset(torch.tensor([1]))
     term.compute(task_context)
-    torch.testing.assert_close(term.foot_phase_steps[1], torch.zeros(4))
+    torch.testing.assert_close(phase[1], torch.zeros(2))
 
 
-def test_quadrupedal_phase_gait_updates_phase_steps(
+def test_command_adaptive_gait_phase_height_lands_and_resumes(
+    runtime_context,
+    model_context,
+):
+    phase_model_context = replace(
+        model_context,
+        geom_names=("floor", "base", "thigh", "FL", "FR", "RL", "RR"),
+        geom_body_ids=torch.arange(7),
+        foot_geom_ids=torch.tensor([3, 4, 5, 6]),
+    )
+    term = QuadrupedalCommandAdaptiveGaitPhaseHeightL2(
+        context=runtime_context,
+        num_envs=2,
+        model_context=phase_model_context,
+        target_height=0.2,
+    )
+    task_context = make_phase_gait_context()
+    state_manager = make_gait_phase_state(
+        runtime_context, task_context, omega_min=torch.pi, omega_max=torch.pi,
+    )
+    phase = state_manager.terms["quadrupedal_gait_phase"].value
+    task_context.step_dt = 0.25
+    task_context.state.geom_xpos[:, [3, 4, 5, 6], 2] = 0.3
+    task_context.command["lin_vel_x"] = torch.tensor([[0.0], [0.2]])
+    task_context.command["lin_vel_y"] = torch.zeros(2, 1)
+    task_context.command["ang_vel_z"] = torch.zeros(2, 1)
+
+    for _ in range(6):
+        state_manager.update(task_context)
+        term.compute(task_context)
+    torch.testing.assert_close(phase[0], torch.zeros(2))
+    torch.testing.assert_close(
+        phase[1],
+        torch.tensor([1.5 * torch.pi, 0.5 * torch.pi]),
+    )
+    task_context.state.geom_xpos[1, [3, 4, 5, 6], 2] = torch.tensor(
+        [0.3, 0.4, 0.4, 0.3]
+    )
+    torch.testing.assert_close(term._get_phase_height(phase)[1], torch.tensor(
+        [-0.2, -0.1, -0.1, -0.2]
+    ))
+
+    task_context.command["lin_vel_x"][1] = 0.0
+    for _ in range(6):
+        state_manager.update(task_context)
+        term.compute(task_context)
+    torch.testing.assert_close(
+        phase[1],
+        torch.full((2,), 2.0 * torch.pi),
+    )
+    task_context.state.geom_xpos[1, [3, 4, 5, 6], 2] = 0.3
+    torch.testing.assert_close(term.compute(task_context), torch.zeros(2))
+
+    task_context.command["lin_vel_x"][1] = 0.2
+    state_manager.update(task_context)
+    term.compute(task_context)
+    torch.testing.assert_close(
+        phase[1],
+        torch.tensor([2.25 * torch.pi, 2.0 * torch.pi]),
+    )
+    state_manager.reset(torch.tensor([1]))
+    torch.testing.assert_close(phase, torch.zeros(2, 2))
+
+
+def test_command_adaptive_gait_phase_height_clamps_at_cycle_boundary(
+    runtime_context,
+    model_context,
+):
+    phase_model_context = replace(
+        model_context,
+        geom_names=("floor", "base", "thigh", "FL", "FR", "RL", "RR"),
+        geom_body_ids=torch.arange(7),
+        foot_geom_ids=torch.tensor([3, 4, 5, 6]),
+    )
+    term = QuadrupedalCommandAdaptiveGaitPhaseHeightL2(
+        context=runtime_context,
+        num_envs=2,
+        model_context=phase_model_context,
+        target_height=0.2,
+    )
+    task_context = make_phase_gait_context()
+    state_manager = make_gait_phase_state(
+        runtime_context, task_context, omega_min=2.0, omega_max=2.0,
+    )
+    phase = state_manager.terms["quadrupedal_gait_phase"].value
+    task_context.step_dt = 0.5
+    task_context.state.geom_xpos[:, [3, 4, 5, 6], 2] = 0.3
+    task_context.command["lin_vel_x"] = torch.full((2, 1), 0.2)
+    task_context.command["lin_vel_y"] = torch.zeros(2, 1)
+    task_context.command["ang_vel_z"] = torch.zeros(2, 1)
+
+    state_manager.update(task_context)
+    term.compute(task_context)
+    state_manager.update(task_context)
+    term.compute(task_context)
+    task_context.command["lin_vel_x"].zero_()
+    for _ in range(5):
+        state_manager.update(task_context)
+        term.compute(task_context)
+
+    torch.testing.assert_close(
+        phase[:, 0],
+        torch.full((2,), 2.0 * torch.pi),
+    )
+    torch.testing.assert_close(phase[:, 1], torch.zeros(2))
+    torch.testing.assert_close(term.compute(task_context), torch.zeros(2))
+
+
+@pytest.mark.parametrize(
+    ("params", "match"),
+    [
+        ({"target_height": 0.0}, "target_height"),
+        ({"height_std": 0.0}, "height_std"),
+        ({"height_std": float("nan")}, "height_std"),
+    ],
+)
+def test_command_adaptive_gait_phase_height_rejects_invalid_params(
+    runtime_context,
+    model_context,
+    params,
+    match,
+):
+    phase_model_context = replace(
+        model_context,
+        geom_names=("floor", "base", "thigh", "FL", "FR", "RL", "RR"),
+        geom_body_ids=torch.arange(7),
+        foot_geom_ids=torch.tensor([3, 4, 5, 6]),
+    )
+    with pytest.raises(ValueError, match=match):
+        QuadrupedalCommandAdaptiveGaitPhaseHeightL2(
+            context=runtime_context,
+            num_envs=2,
+            model_context=phase_model_context,
+            **{"target_height": 0.2, **params},
+        )
+
+
+@pytest.mark.parametrize(
+    ("params", "match"),
+    [
+        ({"omega_min": 0.0}, "omega_min"),
+        ({"omega_max": 0.5}, "omega_max"),
+        ({"omega_max": float("inf")}, "omega_max"),
+        ({"command_gain": -1.0}, "command_gain"),
+        ({"command_gain": float("nan")}, "command_gain"),
+    ],
+)
+def test_gait_phase_state_rejects_invalid_params(
+    runtime_context,
+    params,
+    match,
+):
+    with pytest.raises(ValueError, match=match):
+        TaskStateManager(
+            context=runtime_context,
+            num_envs=2,
+            terms={"quadrupedal_gait_phase": params},
+        )
+
+
+def test_command_adaptive_gait_phase_height_registers_and_resets(
     runtime_context,
     model_context,
 ):
@@ -852,48 +1035,138 @@ def test_quadrupedal_phase_gait_updates_phase_steps(
         context=runtime_context,
         model_context=phase_model_context,
         terms={
-            "quadrupedal_gait_phase_l2_exp": {
+            "quadrupedal_command_adaptive_gait_phase_height_l2": {
+                "weight": -1.0,
                 "params": {"target_height": 0.2},
             },
         },
     )
-    term = cast(
-        QuadrupedalGaitPhaseL2Exp,
-        manager.terms["quadrupedal_gait_phase_l2_exp"],
+    assert isinstance(
+        manager.terms["quadrupedal_command_adaptive_gait_phase_height_l2"],
+        QuadrupedalCommandAdaptiveGaitPhaseHeightL2,
     )
     task_context = make_phase_gait_context()
+    state_manager = make_gait_phase_state(
+        runtime_context, task_context, omega_min=2.0, omega_max=2.0,
+    )
+    phase = state_manager.terms["quadrupedal_gait_phase"].value
+    task_context.step_dt = 0.1
+    task_context.command["lin_vel_x"].fill_(0.2)
 
+    state_manager.update(task_context)
     reward, _ = manager.compute(task_context)
     assert reward.shape == (2,)
-    torch.testing.assert_close(
-        term.foot_phase_steps,
-        torch.tensor([
-            [0.0, 1.0, 1.0, 0.0],
-            [0.0, 1.0, 1.0, 0.0],
-        ]),
-    )
-
-    manager.compute(task_context)
-    torch.testing.assert_close(
-        term.foot_phase_steps,
-        torch.tensor([
-            [0.0, 2.0, 2.0, 0.0],
-            [0.0, 2.0, 2.0, 0.0],
-        ]),
-    )
-
-    manager.compute(task_context)
-    torch.testing.assert_close(
-        term.foot_phase_steps,
-        torch.tensor([
-            [1.0, 3.0, 3.0, 1.0],
-            [1.0, 3.0, 3.0, 1.0],
-        ]),
-    )
+    assert torch.all(reward <= 0.0)
+    torch.testing.assert_close(phase[:, 0], torch.full((2,), 0.2))
+    repeated_reward, _ = manager.compute(task_context)
+    torch.testing.assert_close(repeated_reward, reward)
+    torch.testing.assert_close(phase[:, 0], torch.full((2,), 0.2))
 
     manager.reset(torch.tensor([1]))
-    assert term.foot_phase_steps[0].any()
-    assert not term.foot_phase_steps[1].any()
+    torch.testing.assert_close(phase[:, 0], torch.full((2,), 0.2))
+    state_manager.reset(torch.tensor([1]))
+    torch.testing.assert_close(phase[0], torch.tensor([0.2, 0.0]))
+    torch.testing.assert_close(phase[1], torch.zeros(2))
+
+
+def test_command_adaptive_gait_phase_height_matches_lift_and_error(
+    runtime_context,
+    model_context,
+):
+    phase_model_context = replace(
+        model_context,
+        geom_names=("floor", "base", "thigh", "FL", "FR", "RL", "RR"),
+        geom_body_ids=torch.arange(7),
+        foot_geom_ids=torch.tensor([3, 4, 5, 6]),
+    )
+    term = QuadrupedalCommandAdaptiveGaitPhaseHeightL2(
+        num_envs=2,
+        context=runtime_context,
+        model_context=phase_model_context,
+        target_height=0.2,
+    )
+    task_context = make_phase_gait_context()
+    state_manager = make_gait_phase_state(
+        runtime_context, task_context, omega_min=torch.pi, omega_max=torch.pi,
+    )
+    phase = state_manager.terms["quadrupedal_gait_phase"].value
+    task_context.step_dt = 0.5
+    task_context.command["lin_vel_x"].fill_(0.2)
+    task_context.state.geom_xpos[0, [3, 4, 5, 6], 2] = torch.tensor(
+        [0.4, 0.3, 0.3, 0.4]
+    )
+
+    state_manager.update(task_context)
+    torch.testing.assert_close(
+        term.compute(task_context),
+        torch.tensor([0.0, 0.5]),
+    )
+    torch.testing.assert_close(
+        term._get_phase_height(phase)[0],
+        torch.tensor([-0.1, -0.2, -0.2, -0.1]),
+    )
+
+
+def test_command_adaptive_gait_phase_height_uses_model_foot_order(
+    runtime_context,
+    model_context,
+):
+    phase_model_context = replace(
+        model_context,
+        geom_names=("floor", "base", "thigh", "FR", "FL", "RR", "RL"),
+        geom_body_ids=torch.arange(7),
+        foot_geom_ids=torch.tensor([3, 4, 5, 6]),
+    )
+    term = QuadrupedalCommandAdaptiveGaitPhaseHeightL2(
+        num_envs=2,
+        context=runtime_context,
+        model_context=phase_model_context,
+        target_height=0.2,
+    )
+    task_context = make_phase_gait_context()
+    state_manager = make_gait_phase_state(
+        runtime_context, task_context, omega_min=torch.pi, omega_max=torch.pi,
+    )
+    phase = state_manager.terms["quadrupedal_gait_phase"].value
+    task_context.step_dt = 0.5
+    task_context.command["lin_vel_x"].fill_(0.2)
+    state_manager.update(task_context)
+    term.compute(task_context)
+
+    torch.testing.assert_close(
+        term._get_phase_height(phase)[0],
+        torch.tensor([-0.1, -0.2, -0.2, -0.1]),
+    )
+
+
+def test_command_adaptive_gait_phase_height_scales_with_command(
+    runtime_context,
+    model_context,
+):
+    phase_model_context = replace(
+        model_context,
+        geom_names=("floor", "base", "thigh", "FL", "FR", "RL", "RR"),
+        geom_body_ids=torch.arange(7),
+        foot_geom_ids=torch.tensor([3, 4, 5, 6]),
+    )
+    term = QuadrupedalCommandAdaptiveGaitPhaseHeightL2(
+        num_envs=2,
+        context=runtime_context,
+        model_context=phase_model_context,
+        target_height=0.2,
+    )
+    task_context = make_phase_gait_context()
+    state_manager = make_gait_phase_state(runtime_context, task_context)
+    phase = state_manager.terms["quadrupedal_gait_phase"].value
+    task_context.step_dt = 0.05
+    task_context.command["lin_vel_x"] = torch.tensor([[0.2], [1.0]])
+
+    state_manager.update(task_context)
+    term.compute(task_context)
+    command_norm = torch.tensor([0.2, 1.0])
+    expected_omega = 4.0 + 6.0 * torch.tanh(command_norm)
+    torch.testing.assert_close(phase[:, 0], expected_omega * 0.05)
+    torch.testing.assert_close(phase[:, 1], torch.zeros(2))
 
 
 def test_trot_loop_duration_tracks_valid_contact_sequence_and_resets(
@@ -1076,7 +1349,7 @@ def test_trot_loop_duration_treats_small_commands_as_idle(
     )
 
 
-def test_quadrupedal_phase_gait_uses_base_plane_distance(
+def test_command_adaptive_gait_phase_height_uses_base_plane_distance(
     runtime_context,
     model_context,
 ):
@@ -1086,7 +1359,7 @@ def test_quadrupedal_phase_gait_uses_base_plane_distance(
         geom_body_ids=torch.arange(7),
         foot_geom_ids=torch.tensor([3, 4, 5, 6]),
     )
-    term = QuadrupedalGaitPhaseL2Exp(
+    term = QuadrupedalCommandAdaptiveGaitPhaseHeightL2(
         num_envs=1,
         context=runtime_context,
         model_context=phase_model_context,
@@ -1098,10 +1371,6 @@ def test_quadrupedal_phase_gait_uses_base_plane_distance(
     task_context.state.qpos[:, 3] = 2.0 ** -0.5
     task_context.state.geom_xpos = torch.zeros(1, 7, 3)
     task_context.state.geom_xpos[:, [3, 4, 5, 6], 0] = 0.2
-    task_context.command["foot_phase_real"] = torch.ones(1, 4)
-    task_context.command["foot_phase_imag"] = torch.zeros(1, 4)
-    task_context.command["half_period_duration"] = torch.full((1,), 0.04)
-
     torch.testing.assert_close(
         term._foot_height_from_base_plane(task_context),
         torch.full((1, 4), 0.2),

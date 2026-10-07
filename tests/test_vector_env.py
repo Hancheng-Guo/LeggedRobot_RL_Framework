@@ -69,6 +69,7 @@ class FakeTask:
         self.action_manager = SimpleNamespace(input_dim=1)
         self.observation_manager = SimpleNamespace(output_dim=3)
         self.last_step_result: TaskStepResult | None = None
+        self.last_state_command: torch.Tensor | None = None
 
     def reset(self, env_ids: torch.Tensor | None = None) -> None:
         if env_ids is None:
@@ -108,6 +109,9 @@ class FakeTask:
 
     def pre_step(self) -> dict:
         return {}
+
+    def update_task_state(self, task_context: TaskContext) -> None:
+        self.last_state_command = task_context.command["target"].clone()
 
     def process_action(
         self,
@@ -274,6 +278,7 @@ def test_playback_prepare_failure_clears_temporary_environment(
 
 def test_step_uses_old_command_for_reward_and_new_command_for_observation():
     env = make_env()
+    task = cast(FakeTask, env.task)
     initial_obs = env.reset()
     torch.testing.assert_close(initial_obs, torch.zeros(2, 3))
 
@@ -282,6 +287,8 @@ def test_step_uses_old_command_for_reward_and_new_command_for_observation():
     )
 
     torch.testing.assert_close(reward, torch.zeros(2))
+    assert task.last_state_command is not None
+    torch.testing.assert_close(task.last_state_command, torch.zeros(2, 1))
     torch.testing.assert_close(transition_obs[:, 0], torch.ones(2))
     torch.testing.assert_close(transition_obs[:, 1], torch.ones(2))
     torch.testing.assert_close(

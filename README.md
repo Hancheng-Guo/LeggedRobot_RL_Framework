@@ -573,7 +573,23 @@ reward_manager_config:
 
 `constants` 仅由 YAML 自身解析，框架不会读取它，因此可安全用作 anchor 容器。
 
-### 9.1 Action Manager
+### 9.1 Task State Manager
+
+`task_state_manager_config` 可省略；配置的 task state term 在每个仿真步更新一次，局部 reset 时只清理对应环境。reward 和 observation 可通过 `TaskContext` 读取同一份状态。
+
+```yaml
+task_state_manager_config:
+  terms:
+    quadrupedal_gait_phase: {omega_min: 4.0, omega_max: 10.0, command_gain: 1.0}
+```
+
+已注册 task state term：
+
+| 名称 | 参数 | 状态与行为 |
+|---|---|---|
+| `quadrupedal_gait_phase` | `command_names=[lin_vel_x, lin_vel_y, ang_vel_z]`、`omega_min=4.0`、`omega_max=10.0`、`command_gain=1.0` | 维护 `[num_envs, 2]` 的两组对角足相位；命令范数低于 `0.1` 时分别推进到下一次触地位置后停止。相位观测项和高度奖励项可以单独启用，但都依赖此 term。 |
+
+### 9.2 Action Manager
 
 Action term 会按 YAML 从上到下执行：第一项最靠近策略原始动作，最后一项的输出直接发送给仿真器。框架会在初始化时反向推导各层维度，因此不要随意交换有维度映射作用的 term：
 
@@ -594,7 +610,7 @@ action_manager_config:
 | `keyframe_centered_linear_map` | 无；以默认/keyframe 控制为中心线性映射 |
 | `hard_clamp` | 必填 `min_value`、`max_value` |
 
-### 9.2 Command Manager
+### 9.3 Command Manager
 
 ```yaml
 command_manager_config:
@@ -622,7 +638,7 @@ LPAC term 必须搭配同类 curriculum term。`group` 相同的命令组成联�
 
 约束的 `operator` 支持 `<=`、`>=`、`<`、`>`、`!=`；表达式用 `{命令名}` 引用其他维度，可使用 `torch` 和 `abs`。`!=` 还支持 `direction: positive|negative`（默认 `positive`）决定相等时向哪一侧偏移。课程空间内的约束不能跨 `group`。
 
-### 9.3 Observation Manager
+### 9.4 Observation Manager
 
 ```yaml
 observation_manager_config:
@@ -649,6 +665,7 @@ term 顺序决定最终 observation 的拼接顺序。所有 observation term �
 | `foot_contact_normal_force` | 足端法向接触力 |
 | `foot_contact_state` | 足端接触状态 |
 | `foot_duration_tanh` | 每只足的触地状态保持时间经 `tanh(alpha × 时间)` 压缩；触地为正、离地为负，默认 `alpha=1.0` |
+| `quadrupedal_gait_phase` | 读取任务状态中的两组对角足相位，输出 `[sin(phase_0), sin(phase_1), cos(phase_0), cos(phase_1)]` |
 | `command` | 所有命令拼接结果 |
 | `track_linear_velocity_x_error_integral` | 最近 `integral_length` 步的有符号 X 速度误差积分 |
 | `track_linear_velocity_y_error_integral` | 最近 `integral_length` 步的有符号 Y 速度误差积分 |
@@ -658,7 +675,7 @@ term 顺序决定最终 observation 的拼接顺序。所有 observation term �
 | `track_angular_velocity_z_error_integral_tanh` | 对 Z 误差积分计算 `tanh(alpha * integral)`；默认 `alpha=1.0` |
 | `last_action` | 最近 `lags` 步策略动作，按从新到旧排列（默认 `lags: 1`） |
 
-### 9.4 Reward Manager
+### 9.5 Reward Manager
 
 统一写法：
 
@@ -698,8 +715,7 @@ reward_manager_config:
 | `track_angular_velocity_z_l2_exp_and_logcosh` | `std=1.0`、`command_names=[ang_vel_z]`、`logcosh_weight=0.5` |
 | `track_angular_velocity_z_error_integral_l2` | 最近 `integral_length` 步的 Z 有符号角速度误差取平均后平方；窗口未满时只除以有效步数，reset 后重新累计；默认 `integral_length=100`、`command_names=[ang_vel_z]` |
 | `trot_loop_duration_tanh` | `command_names=[lin_vel_x, lin_vel_y, ang_vel_z]`、`growth_rate=1.0`；指令范数低于 `0.1` 时要求四足着地 |
-| `quadrupedal_gait_phase_l2_exp` | 必填 `target_height`；`sigma=1.0`；从命令 `half_period_duration` 读取半周期时长并按 `step_dt` 换算为步数 |
-| `quadrupedal_command_adaptive_gait_phase_l2_exp` | 必填 `target_height`；`sigma=1.0`、`command_names=[lin_vel_x, lin_vel_y, ang_vel_z]`、`alpha=0.5`、`beta=0.2`；半周期时长为 `beta * exp(alpha / max(command_norm, 0.1))`，命令范数低于 `0.1` 时不推进足端相位 |
+| `quadrupedal_command_adaptive_gait_phase_height_l2` | 必填 `target_height`；`height_std=0.2`。读取 `quadrupedal_gait_phase` task state term 的相位；触地目标为相对 base 平面的 `-target_height`，摆动最高点为 `-0.5 * target_height`；返回四足归一化高度误差平方和，应使用负权重。 |
 | `foot_state_duration_command_weighted_exp` | 整组足端触地状态保持时间；`command_names=[lin_vel_x, lin_vel_y, ang_vel_z]`、`sigma=1.0` |
 | `foot_state_duration_cubic_command_weighted_exp` | 整组足端触地状态保持时间的三次方版本；参数同上 |
 | `foot_state_duration_cubic_command_tanh_weighted_exp` | 整组足端触地状态保持时间的三次方版本，指令范数先取 `tanh`；参数同上 |
@@ -713,7 +729,7 @@ reward_manager_config:
 
 名称由注册类名自动转为 snake_case；大小写缩写会被正确拆分，例如 `TrackAngularVelocityZL2Exp` → `track_angular_velocity_z_l2_exp`。
 
-### 9.5 Termination Manager
+### 9.6 Termination Manager
 
 ```yaml
 termination_manager_config:
@@ -731,7 +747,7 @@ termination_manager_config:
 
 Episode 达到 `max_episode_steps` 属于 `truncated`，不是 termination term。
 
-### 9.6 Curriculum Manager
+### 9.7 Curriculum Manager
 
 ```yaml
 curriculum_manager_config:

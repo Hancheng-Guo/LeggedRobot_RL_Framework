@@ -5,7 +5,7 @@ from .registry import (
     register_observation,
 )
 
-from . import action, command, foot, state, tracking
+from . import action, command, foot, gait, state, tracking
 
 
 __all__ = (

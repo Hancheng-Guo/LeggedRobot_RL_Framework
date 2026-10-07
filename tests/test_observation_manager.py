@@ -3,10 +3,12 @@ import torch
 from dataclasses import replace
 
 from envs.simulators.utils import SimulatorState
+from envs.tasks import BaseTaskLogic
 from envs.tasks.managers.observation import ObservationManager
 from envs.tasks.managers.observation.terms import BaseObservationTerm
 from envs.tasks.managers.observation.terms.action import LastAction
 from envs.tasks.managers.observation.terms.foot import FootDurationTanh
+from envs.tasks.managers.task_state import TaskStateManager
 from envs.tasks.managers.observation.terms import (
     OBSERVATION_CLASS_MAP,
 )
@@ -105,6 +107,119 @@ def make_manager(runtime_context, model_context, clip=None):
             "last_action": {},
         },
     )
+
+
+def test_gait_phase_observation_reads_shared_state(
+    runtime_context,
+    model_context,
+):
+    task_context = make_task_context()
+    state_manager = TaskStateManager(
+        num_envs=2,
+        context=runtime_context,
+        terms={"quadrupedal_gait_phase": {"omega_min": 2.0, "omega_max": 2.0}},
+    )
+    task_context.task_state = state_manager.values()
+    observation_manager = ObservationManager(
+        num_envs=2,
+        context=runtime_context,
+        model_context=model_context,
+        command_dim=3,
+        action_dim=2,
+        terms={"quadrupedal_gait_phase": {}},
+    )
+
+    initial, _ = observation_manager.compute(task_context)
+    torch.testing.assert_close(initial, torch.tensor([[0., 0., 1., 1.]] * 2))
+    assert observation_manager.output_dim == 4
+
+    state_manager.update(task_context)
+    phase = state_manager.terms["quadrupedal_gait_phase"].value
+    expected = torch.cat((phase.sin(), phase.cos()), dim=-1)
+    observed, _ = observation_manager.compute(task_context)
+    torch.testing.assert_close(observed, expected)
+    repeated, _ = observation_manager.compute(task_context)
+    torch.testing.assert_close(repeated, expected)
+
+    state_manager.reset(torch.tensor([1]))
+    task_context.env_ids = torch.tensor([1])
+    task_context.task_state = state_manager.values(task_context.env_ids)
+    selected, _ = observation_manager.compute(task_context, env_ids=task_context.env_ids)
+    torch.testing.assert_close(selected, torch.tensor([[0., 0., 1., 1.]]))
+    torch.testing.assert_close(phase[0], torch.tensor([0.04, 0.0]))
+
+    task_context.command = {
+        name: value[task_context.env_ids]
+        for name, value in task_context.command.items()
+    }
+    task_context.command["lin_vel_x"].fill_(0.2)
+    task_context.step_dt = 0.1
+    state_manager.update(task_context)
+    torch.testing.assert_close(phase[0], torch.tensor([0.04, 0.0]))
+    torch.testing.assert_close(phase[1], torch.tensor([0.2, 0.0]))
+    torch.testing.assert_close(
+        task_context.task_state["quadrupedal_gait_phase"], phase[1:2],
+    )
+
+
+def test_gait_phase_observation_requires_state(runtime_context, model_context):
+    manager = ObservationManager(
+        num_envs=2,
+        context=runtime_context,
+        model_context=model_context,
+        command_dim=3,
+        action_dim=2,
+        terms={"quadrupedal_gait_phase": {}},
+    )
+    with pytest.raises(ValueError, match="quadrupedal_gait_phase"):
+        manager.compute(make_task_context())
+
+
+def test_task_exposes_gait_phase_without_reward(runtime_context, model_context):
+    task = BaseTaskLogic(runtime_context)
+    task.num_envs = 2
+    task.model_context = model_context
+    task._build_managers(
+        action_manager_config={"terms": {}},
+        command_manager_config={
+            "terms": {
+                name: {
+                    "type": "UniformOnReset",
+                    "params": {"min_value": 0.0, "max_value": 0.0},
+                }
+                for name in ("lin_vel_x", "lin_vel_y", "ang_vel_z")
+            },
+        },
+        task_state_manager_config={
+            "terms": {
+                "quadrupedal_gait_phase": {"omega_min": 2.0, "omega_max": 2.0},
+            },
+        },
+        observation_manager_config={
+            "terms": {"quadrupedal_gait_phase": {}},
+        },
+        reward_manager_config={"terms": {}},
+        termination_manager_config={"terms": {}},
+        constants={},
+    )
+    state = make_task_context().state
+    task.command["lin_vel_x"].fill_(0.2)
+    context = task.build_task_context(state, torch.ones(2, dtype=torch.long), 0.1)
+    task.update_task_state(context)
+    observation, _ = task.compute_observation(context)
+    expected_phase = torch.tensor([[0.2, 0.0]] * 2)
+    torch.testing.assert_close(context.task_state["quadrupedal_gait_phase"], expected_phase)
+    torch.testing.assert_close(
+        observation,
+        torch.cat((expected_phase.sin(), expected_phase.cos()), dim=-1),
+    )
+
+    task.reset(torch.tensor([1]))
+    selected = task.build_task_context(
+        state, torch.zeros(1, dtype=torch.long), 0.1, env_ids=torch.tensor([1]),
+    )
+    reset_observation, _ = task.compute_observation(selected, env_ids=selected.env_ids)
+    torch.testing.assert_close(reset_observation, torch.tensor([[0., 0., 1., 1.]]))
 
 
 def test_observation_manager_scales_and_concatenates_in_config_order(

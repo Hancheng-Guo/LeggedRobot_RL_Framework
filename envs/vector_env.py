@@ -329,6 +329,7 @@ class VectorEnv(BaseEnv):
             step_dt=self.simulator.control_dt,
         ) # old_command, action, last_action
 
+        self.task.update_task_state(task_context)
         reward, reward_info = self.task.compute_reward(task_context)
         scaled_reward = reward * self.simulator.control_dt
         terminated, terminated_info = self.task.check_terminated(task_context)

@@ -1,5 +1,5 @@
 import torch
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from envs.simulators.utils import SimulatorState
 
@@ -16,6 +16,7 @@ class TaskContext:
     episode_step: torch.Tensor              # Completed control steps in each episode.
     step_dt: float                          # Duration of one control step.
     env_ids: torch.Tensor | None = None     # Selected environments; None means all.
+    task_state: dict[str, torch.Tensor] = field(default_factory=dict)
 
 
 @dataclass

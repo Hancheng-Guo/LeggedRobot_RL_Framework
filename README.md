@@ -715,7 +715,7 @@ reward_manager_config:
 | `track_angular_velocity_z_l2_exp_and_logcosh` | `std=1.0`、`command_names=[ang_vel_z]`、`logcosh_weight=0.5` |
 | `track_angular_velocity_z_error_integral_l2` | 最近 `integral_length` 步的 Z 有符号角速度误差取平均后平方；窗口未满时只除以有效步数，reset 后重新累计；默认 `integral_length=100`、`command_names=[ang_vel_z]` |
 | `trot_loop_duration_tanh` | `command_names=[lin_vel_x, lin_vel_y, ang_vel_z]`、`growth_rate=1.0`；指令范数低于 `0.1` 时要求四足着地 |
-| `quadrupedal_command_adaptive_gait_phase_height_l2` | 必填 `target_height`；`height_std=0.2`。读取 `quadrupedal_gait_phase` task state term 的相位；触地目标为相对 base 平面的 `-target_height`，摆动最高点为 `-0.5 * target_height`；返回四足归一化高度误差平方和，应使用负权重。 |
+| `quadrupedal_command_adaptive_gait_phase_height_l2` | 必填 `target_height`；`height_std=0.2`。读取 `quadrupedal_gait_phase` task state term 的相位，并根据 `foot_phase_real/imag` 命令的四足分量（每个 `[num_envs, 4]`）逐足添加 `atan2(imag, real)` 相位偏移；触地目标为相对 base 平面的 `-target_height`，摆动最高点为 `-0.5 * target_height`；返回四足归一化高度误差平方和，应使用负权重。 |
 | `foot_state_duration_command_weighted_exp` | 整组足端触地状态保持时间；`command_names=[lin_vel_x, lin_vel_y, ang_vel_z]`、`sigma=1.0` |
 | `foot_state_duration_cubic_command_weighted_exp` | 整组足端触地状态保持时间的三次方版本；参数同上 |
 | `foot_state_duration_cubic_command_tanh_weighted_exp` | 整组足端触地状态保持时间的三次方版本，指令范数先取 `tanh`；参数同上 |

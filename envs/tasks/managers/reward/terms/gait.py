@@ -421,13 +421,7 @@ class QuadrupedalCommandAdaptiveGaitPhaseHeightL2(BaseRewardTerm):
         task_context: TaskContext
     ) -> torch.Tensor:
 
-        phase = task_context.task_state.get("quadrupedal_gait_phase")
-        if phase is None:
-            raise ValueError(
-                "QuadrupedalCommandAdaptiveGaitPhaseHeightL2 requires task state "
-                "'quadrupedal_gait_phase'."
-            )
-        phase_height = self._get_phase_height(phase)
+        phase_height = self._get_phase_height(task_context)
         foot_height = self._foot_height_from_base_plane(task_context)
         height_diff = phase_height - foot_height
         height_diff_norm = height_diff / self.height_std
@@ -435,20 +429,43 @@ class QuadrupedalCommandAdaptiveGaitPhaseHeightL2(BaseRewardTerm):
         return height_diff_norm.square().sum(dim=-1)
 
 
-    def _get_phase_height(self, phase: torch.Tensor) -> torch.Tensor:
+    def _get_phase_height(
+        self,
+        task_context: TaskContext,
+    ) -> torch.Tensor:
 
+        phase = task_context.task_state.get("quadrupedal_gait_phase")
+        if phase is None:
+            raise ValueError(
+                "QuadrupedalCommandAdaptiveGaitPhaseHeightL2 requires task state "
+                "'quadrupedal_gait_phase'."
+            )
+        foot_phase = torch.cat((phase, phase.flip(-1)), dim=-1)
+
+        phase_real = _named_tensor_squeeze(task_context, _FOOT_PHASE_REAL_NAME)
+        phase_imag = _named_tensor_squeeze(task_context, _FOOT_PHASE_IMAG_NAME)
+        for name, value in (
+            (_FOOT_PHASE_REAL_NAME, phase_real),
+            (_FOOT_PHASE_IMAG_NAME, phase_imag),
+        ):
+            if value.shape != foot_phase.shape:
+                raise ValueError(
+                    f"'{name}' must have shape {tuple(foot_phase.shape)}."
+                )
+
+        foot_phase = foot_phase + torch.atan2(phase_imag, phase_real)
         lifted_phase_height = (
             self.target_height * (
                 _LANDED_DISTANCE_FACTOR + 
-                torch.sin(phase) * (_LIFTED_DISTANCE_FACTOR - _LANDED_DISTANCE_FACTOR)
+                torch.sin(foot_phase) * (_LIFTED_DISTANCE_FACTOR - _LANDED_DISTANCE_FACTOR)
             )
         )
         phase_height = torch.where(
-            torch.remainder(phase, 2 * torch.pi) <= torch.pi,
+            torch.remainder(foot_phase, 2 * torch.pi) <= torch.pi,
             lifted_phase_height,
-            torch.full_like(phase, self.target_height * _LANDED_DISTANCE_FACTOR)
+            torch.full_like(foot_phase, self.target_height * _LANDED_DISTANCE_FACTOR)
         )
-        return torch.cat((phase_height, phase_height.flip(-1)), dim=-1)
+        return phase_height
 
 
     def _foot_height_from_base_plane(

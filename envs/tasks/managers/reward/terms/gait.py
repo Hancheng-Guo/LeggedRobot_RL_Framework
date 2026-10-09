@@ -394,7 +394,7 @@ class QuadrupedalCommandAdaptiveGaitPhaseHeightL2(BaseRewardTerm):
         self,
         model_context: ModelContext,
         target_height: float,
-        height_std: float = 0.2,
+        std: float = 0.2,
         *args, **kwargs,
     ) -> None:
 
@@ -407,13 +407,13 @@ class QuadrupedalCommandAdaptiveGaitPhaseHeightL2(BaseRewardTerm):
             )
         if not math.isfinite(target_height) or target_height <= 0.0:
             raise ValueError("'target_height' must be positive and finite.")
-        if not math.isfinite(height_std) or height_std <= 0.0:
-            raise ValueError("'height_std' must be positive and finite.")
+        if not math.isfinite(std) or std <= 0.0:
+            raise ValueError("'std' must be positive and finite.")
 
         self.base_pos_qpos_ids = model_context.base_pos_qpos_ids
         self.base_quat_qpos_ids = model_context.base_quat_qpos_ids
         self.target_height = target_height
-        self.height_std = height_std
+        self.std = std
 
 
     def compute(
@@ -424,9 +424,9 @@ class QuadrupedalCommandAdaptiveGaitPhaseHeightL2(BaseRewardTerm):
         phase_height = self._get_phase_height(task_context)
         foot_height = self._foot_height_from_base_plane(task_context)
         height_diff = phase_height - foot_height
-        height_diff_norm = height_diff / self.height_std
+        height_diff_norm = height_diff / self.std
 
-        return height_diff_norm.square().sum(dim=-1)
+        return height_diff_norm.square().mean(dim=-1)
 
 
     def _get_phase_height(
@@ -496,3 +496,40 @@ class QuadrupedalCommandAdaptiveGaitPhaseHeightL2(BaseRewardTerm):
             (foot_pos - base_pos.unsqueeze(1))
             * base_plane_normal.unsqueeze(1)
         ).sum(dim=-1)
+
+
+@register_reward
+class QuadrupedalCommandAdaptiveGaitPhaseHeightL2Exp(QuadrupedalCommandAdaptiveGaitPhaseHeightL2):
+
+    def __init__(
+        self,
+        model_context: ModelContext,
+        target_height: float,
+        std: float = 0.05,
+        *args, **kwargs,
+    ) -> None:
+
+        if model_context.foot_geom_ids.numel() != 4:
+            raise ValueError(
+                "QuadrupedalCommandAdaptiveGaitPhaseHeightL2Exp requires exactly four foot geoms."
+            )
+
+        super().__init__(
+            model_context=model_context,
+            target_height=target_height,
+            std=std,
+            *args, **kwargs
+        )
+
+
+    def compute(
+        self,
+        task_context: TaskContext
+    ) -> torch.Tensor:
+
+        phase_height = self._get_phase_height(task_context)
+        foot_height = self._foot_height_from_base_plane(task_context)
+        height_diff = phase_height - foot_height
+        height_diff_norm = height_diff / self.std
+
+        return torch.exp(-height_diff_norm.square()).mean(dim=-1)

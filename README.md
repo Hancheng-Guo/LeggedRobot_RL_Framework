@@ -498,6 +498,7 @@ frame_skip: 10                                 # 必填，正整数
 step_workers: 8                                # 可选，并行推进环境的线程数；默认 1
 render_mode: rgb_array                         # null | human | rgb_array
 foot_geom_names: [FR, FL, RR, RL]              # 足端 geom 名称
+leg_joint_names: [FR_thigh_joint, FR_calf_joint, FL_thigh_joint, FL_calf_joint, RR_thigh_joint, RR_calf_joint, RL_thigh_joint, RL_calf_joint] # 大腿与小腿关节名
 floor_geom_names: [floor]                      # 地面 geom 名称
 foot_contact_force_threshold: 15.0             # >= 0
 reset_keyframe: home                           # 可选，MJCF keyframe 名
@@ -518,6 +519,7 @@ train_render_mode: null                        # 可选，训练期间的渲染�
 env_spacing: 2.0                               # > 0
 robot_prim_path: /Robot
 base_body_prim_path: /Geometry/base/trunk
+leg_joint_names: [FR_thigh_joint, FR_calf_joint, FL_thigh_joint, FL_calf_joint, RR_thigh_joint, RR_calf_joint, RL_thigh_joint, RL_calf_joint] # DOF 名称，不是 Prim path
 foot_body_prim_paths:
   - /Geometry/base/trunk/FR_hip/FR_thigh/FR_calf/FR_foot
   - /Geometry/base/trunk/FL_hip/FL_thigh/FL_calf/FL_foot
@@ -537,6 +539,8 @@ reset_state:
 ```
 
 `model_path` 支持 `.usd`、`.usda`、`.usdc`、`.urdf`、MJCF `.xml`。`robot_prim_path`、body path 会被规范为以 `/` 开头的相对机器人路径；`floor_prim_paths` 则必须是完整绝对路径。
+
+两种仿真器的 `leg_joint_names` 均可省略（默认为空）；启用 `leg_joint_position_diff_l2` 时，至少须配置一个模型中已受控的腿关节名称。构建 `ModelContext` 时会解析成 `leg_joint_qpos_ids`，名称不存在时会报错。`base_joint_position_diff_l2` 中的 `base` 指未列入名单的受控关节，在当前 Go1 配置中为四个髋关节，不是浮动基座的位置或姿态。
 
 #### Isaac Sim 退出异常与训练产物
 
@@ -694,7 +698,9 @@ reward_manager_config:
 | `action_diff_l2` | `max_lag=1`、`decay=0.5`。在最大 lag 范围内惩罚当前动作与历史动作的均方差，权重按 `decay**(lag-1)` 衰减；历史按环境独立维护，并在 reset 时清空。 |
 | `illegal_contact_l1` | `geom_legal_names=null` |
 | `joint_velocity_l2` | — |
-| `joint_position_diff_l2` | — |
+| `joint_position_diff_l2` | `std=1.0` |
+| `base_joint_position_diff_l2` | `std=1.0`；仅对未列入 `leg_joint_names` 的受控关节取均方偏差，应使用负权重。 |
+| `leg_joint_position_diff_l2` | `std=1.0`；仅对列入 `leg_joint_names` 的受控关节取均方偏差，应使用负权重。与`base_joint_position_diff_l2`均为分别取均值，直接沿用原 `joint_position_diff_l2` 的权重通常不会得到相同的合计惩罚。 |
 | `joint_limit_violation_l1` | `lower_limits=null`、`upper_limits=null` |
 | `joint_power_l1` | — |
 | `base_linear_velocity_z_l2` | — |

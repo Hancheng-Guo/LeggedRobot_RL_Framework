@@ -12,6 +12,15 @@ foot_body_prim_paths:
   - /Geometry/base/trunk/RR_hip/RR_thigh/RR_calf/RR_foot
   - /Geometry/base/trunk/RL_hip/RL_thigh/RL_calf/RL_foot
 floor_prim_paths: []  # /World/GroundPlane
+leg_joint_names: 
+  - FR_thigh_joint
+  - FR_calf_joint
+  - FL_thigh_joint
+  - FL_calf_joint
+  - RR_thigh_joint
+  - RR_calf_joint
+  - RL_thigh_joint
+  - RL_calf_joint
 foot_contact_force_threshold: 15.0
 merge_fixed_joints: false
 allow_self_collision: false

@@ -143,6 +143,16 @@ def test_isaac_sim_is_registered_without_importing_optional_runtime() -> None:
     assert SIM_TYPE_MAP["isaac_sim"] is IsaacSimSimulator
 
 
+def test_isaac_maps_named_leg_joints_to_qpos(tmp_path: Path, runtime_context) -> None:
+    simulator, _ = _configure(tmp_path, runtime_context)
+    simulator.leg_joint_names = ("FL_joint",)
+    simulator._build_model_context()
+    assert simulator.model_context.leg_joint_qpos_ids.tolist() == [8]
+    simulator.leg_joint_names = ("missing_joint",)
+    with pytest.raises(ValueError, match="Unknown actuated leg joint"):
+        simulator._build_model_context()
+
+
 def test_isaac_playback_mode_does_not_create_training_camera(
     tmp_path: Path, runtime_context
 ) -> None:

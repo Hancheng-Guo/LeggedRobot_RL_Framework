@@ -50,6 +50,7 @@ def model_context() -> ModelContext:
         body_names=("world", "base", "thigh", "foot"),
         gravity=torch.tensor([0.0, 0.0, -9.81]),
         joint_qpos_ids=torch.tensor([0, 8]),
+        leg_joint_qpos_ids=torch.tensor([8]),
         joint_qvel_ids=torch.tensor([0, 7]),
         joint_default_pos=torch.tensor([0.0, 0.0]),
         joint_pos_limits=torch.tensor(

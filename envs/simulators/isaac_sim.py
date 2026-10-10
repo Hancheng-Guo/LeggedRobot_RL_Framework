@@ -60,6 +60,7 @@ class IsaacSimSimulator(BaseSimulator):
         self.base_body_prim_path: str | None = None
         self.foot_body_prim_paths: tuple[str, ...] = ()
         self.floor_prim_paths: tuple[str, ...] = ()
+        self.leg_joint_names: tuple[str, ...] = ()
         self.foot_contact_force_threshold: float = self.FOOT_CONTACT_FORCE_THRESHOLD
         self.camera_prim_path: str | None = None
         self.camera_resolution: tuple[int, int] = (640, 480)
@@ -81,6 +82,7 @@ class IsaacSimSimulator(BaseSimulator):
         base_body_prim_path: str | None = None,
         foot_body_prim_paths: Sequence[str] | None = None,
         floor_prim_paths: Sequence[str] | None = None,
+        leg_joint_names: Sequence[str] | None = None,
         foot_contact_force_threshold: float | None = None,
         camera_prim_path: str | None = None,
         camera_resolution: Sequence[int] | None = None,
@@ -205,6 +207,11 @@ class IsaacSimSimulator(BaseSimulator):
             floor_prim_paths=(
                 tuple(floor_prim_paths)
                 if floor_prim_paths is not None
+                else None
+            ),
+            leg_joint_names=(
+                tuple(leg_joint_names)
+                if leg_joint_names is not None
                 else None
             ),
             foot_contact_force_threshold=foot_contact_force_threshold,
@@ -376,6 +383,10 @@ class IsaacSimSimulator(BaseSimulator):
                 f"Unknown foot body Prim path(s): {sorted(unknown_feet)}."
             )
 
+        missing_leg_names = set(self.leg_joint_names) - set(metadata.dof_names)
+        if missing_leg_names:
+            raise ValueError(f"Unknown actuated leg joint(s): {sorted(missing_leg_names)}.")
+
         dof_count = len(metadata.dof_names)
         floor_geom_names = tuple(
             path.rsplit("/", 1)[-1]
@@ -400,6 +411,12 @@ class IsaacSimSimulator(BaseSimulator):
                 7 + dof_count,
                 dtype=torch.long,
                 device=self.context.device,
+            ),
+            leg_joint_qpos_ids=self._index_tensor(
+                tuple(
+                    7 + index for index, name in enumerate(metadata.dof_names)
+                    if name in self.leg_joint_names
+                )
             ),
             joint_qvel_ids=torch.arange(
                 6,

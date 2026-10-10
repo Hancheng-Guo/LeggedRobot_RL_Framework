@@ -4,6 +4,15 @@ frame_skip: 10
 step_workers: 8
 render_mode: rgb_array
 foot_geom_names: [FR, FL, RR, RL]
+leg_joint_names: 
+  - FR_thigh_joint
+  - FR_calf_joint
+  - FL_thigh_joint
+  - FL_calf_joint
+  - RR_thigh_joint
+  - RR_calf_joint
+  - RL_thigh_joint
+  - RL_calf_joint
 floor_geom_names: [floor]
 foot_contact_force_threshold: 15.0
 reset_keyframe: home

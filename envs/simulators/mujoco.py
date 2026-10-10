@@ -57,6 +57,7 @@ class MujocoSimulator(BaseSimulator):
         self.step_workers: int = 1
         self.foot_geom_names: tuple[str, ...]
         self.floor_geom_names: tuple[str, ...]
+        self.leg_joint_names: tuple[str, ...] = ()
         self.foot_contact_force_threshold: float = self.FOOT_CONTACT_FORCE_THRESHOLD
         self.render_mode: str | None = None
         self.reset_keyframe: str | None = None
@@ -86,6 +87,7 @@ class MujocoSimulator(BaseSimulator):
         render_mode: str | None = None,
         foot_geom_names: list[str] | tuple[str, ...] | None = None,
         floor_geom_names: list[str] | tuple[str, ...] | None = None,
+        leg_joint_names: list[str] | tuple[str, ...] | None = None,
         foot_contact_force_threshold: float | None = None,
         reset_keyframe: str | None = None,
     ) -> None:
@@ -120,6 +122,11 @@ class MujocoSimulator(BaseSimulator):
             floor_geom_names=(
                 tuple(floor_geom_names)
                 if floor_geom_names is not None
+                else None
+            ),
+            leg_joint_names=(
+                tuple(leg_joint_names)
+                if leg_joint_names is not None
                 else None
             ),
         )
@@ -203,6 +210,16 @@ class MujocoSimulator(BaseSimulator):
             else model.key_ctrl[self.reset_keyframe_id, :]
         )
         joint_qpos_ids = model.jnt_qposadr[actuator_joint_ids]
+        actuator_joint_names = self._object_names(
+            model, mujoco.mjtObj.mjOBJ_JOINT, model.njnt  # pyright: ignore[reportAttributeAccessIssue]
+        )
+        actuated_names = tuple(actuator_joint_names[int(i)] for i in actuator_joint_ids)
+        missing_leg_names = set(self.leg_joint_names) - set(actuated_names)
+        if missing_leg_names:
+            raise ValueError(f"Unknown actuated leg joint(s): {sorted(missing_leg_names)}.")
+        leg_joint_qpos_ids = joint_qpos_ids[
+            [name in self.leg_joint_names for name in actuated_names]
+        ]
         joint_default_pos = (
             model.qpos0[joint_qpos_ids]
             if self.reset_keyframe_id == -1
@@ -245,6 +262,7 @@ class MujocoSimulator(BaseSimulator):
             ),
             joint_default_pos=self._tensor(joint_default_pos),
             joint_pos_limits=self._tensor(joint_pos_limits),
+            leg_joint_qpos_ids=self._index_tensor(leg_joint_qpos_ids),
 
             # actuator_names=names(mujoco.mjtObj.mjOBJ_ACTUATOR, model.nu),
             actuator_ctrl_range = self._tensor(model.actuator_ctrlrange),

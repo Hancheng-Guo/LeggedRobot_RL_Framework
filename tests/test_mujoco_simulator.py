@@ -8,10 +8,27 @@ from pathlib import Path
 
 from envs.simulators.mujoco import MujocoSimulator
 from envs.simulators.utils import SimulatorState
-from utils import Component
+from utils import Component, load_yaml
 
 
 pytestmark = pytest.mark.mujoco
+
+
+@pytest.mark.parametrize(
+    "name",
+    (
+        "mujoco_unitree_go1_rgb_array.yaml",
+        "isaac_sim_unitree_go1_headless.yaml",
+        "isaac_sim_unitree_go1_rgb_array.yaml",
+    ),
+)
+def test_go1_simulator_configs_select_thigh_and_calf_joints(name: str):
+    config = load_yaml(Path(__file__).parents[1] / "configs" / "simulators" / name)
+    assert set(config["leg_joint_names"]) == {
+        f"{leg}_{part}_joint"
+        for leg in ("FR", "FL", "RR", "RL")
+        for part in ("thigh", "calf")
+    }
 
 
 def _configure_go1_simulator(
@@ -42,6 +59,21 @@ def _configure_go1_simulator(
         reset_keyframe=reset_keyframe,
     )
     return simulator
+
+
+def test_mujoco_maps_named_leg_joints_to_qpos(runtime_context):
+    simulator = _configure_go1_simulator(runtime_context)
+    simulator.config_update(
+        component=Component(None, None, None, None, None, None),
+        leg_joint_names=("FR_thigh_joint", "FR_calf_joint"),
+    )
+    context = simulator.model_context
+    assert context.leg_joint_qpos_ids.tolist() == [8, 9]
+    with pytest.raises(ValueError, match="Unknown actuated leg joint"):
+        simulator.config_update(
+            component=Component(None, None, None, None, None, None),
+            leg_joint_names=("missing_joint",),
+        )
 
 
 def test_mujoco_rejects_unsupported_render_mode(runtime_context):

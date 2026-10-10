@@ -27,6 +27,7 @@ class ModelContext:
     joint_qvel_ids: torch.Tensor
     joint_default_pos: torch.Tensor
     joint_pos_limits: torch.Tensor
+    leg_joint_qpos_ids: torch.Tensor
 
     # actuator_names: tuple[str, ...]
     # actuator_ids: torch.Tensor

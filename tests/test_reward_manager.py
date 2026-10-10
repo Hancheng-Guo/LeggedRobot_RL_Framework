@@ -16,6 +16,10 @@ from envs.tasks.managers.reward.terms.gait import (
     QuadrupedalCommandAdaptiveGaitPhaseHeightL2Exp,
     TrotLoopDurationTanh,
 )
+from envs.tasks.managers.reward.terms.joint import (
+    BaseJointPositionDiffL2,
+    LegJointPositionDiffL2,
+)
 from envs.tasks.managers.reward.terms.tracking import (
     TrackAngularVelocityZErrorIntegralL2,
     TrackLinearVelocityXL2Exp,
@@ -64,6 +68,42 @@ def make_reward_context() -> TaskContext:
         episode_step=torch.zeros(2, dtype=torch.long),
         step_dt=0.02,
     )
+
+
+def test_joint_position_diff_groups_use_disjoint_model_ids(runtime_context, model_context):
+    base = BaseJointPositionDiffL2(
+        context=runtime_context, num_envs=2, model_context=model_context,
+    )
+    leg = LegJointPositionDiffL2(
+        context=runtime_context, num_envs=2, model_context=model_context,
+    )
+    assert base.qpos_ids.tolist() == [0]
+    assert leg.qpos_ids.tolist() == [8]
+    task_context = make_state_reward_context()
+    torch.testing.assert_close(base.compute(task_context), torch.tensor([2.25, 0.0]))
+    torch.testing.assert_close(leg.compute(task_context), torch.tensor([0.0, 6.25]))
+
+
+def test_joint_position_diff_groups_register_with_reward_manager(
+    runtime_context, model_context,
+):
+    manager = RewardManager(
+        num_envs=2,
+        context=runtime_context,
+        model_context=model_context,
+        terms={
+            "base_joint_position_diff_l2": {"weight": -2.0},
+            "leg_joint_position_diff_l2": {"weight": -3.0},
+        },
+    )
+    reward, info = manager.compute(make_state_reward_context())
+    torch.testing.assert_close(
+        info["reward/base_joint_position_diff_l2"], torch.tensor([-4.5, 0.0]),
+    )
+    torch.testing.assert_close(
+        info["reward/leg_joint_position_diff_l2"], torch.tensor([0.0, -18.75]),
+    )
+    torch.testing.assert_close(reward, torch.tensor([-4.5, -18.75]))
 
 
 def make_state_reward_context() -> TaskContext:

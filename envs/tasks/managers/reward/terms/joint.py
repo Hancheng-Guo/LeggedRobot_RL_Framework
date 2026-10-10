@@ -63,6 +63,42 @@ class JointPositionDiffL2(BaseRewardTerm):
 
 
 @register_reward
+class BaseJointPositionDiffL2(JointPositionDiffL2):
+
+    def __init__(
+        self,
+        model_context: ModelContext,
+        *args, **kwargs
+    ) -> None:
+
+        super().__init__(model_context=model_context, *args, **kwargs)
+
+        selected = ~torch.isin(self.qpos_ids, model_context.leg_joint_qpos_ids)
+        self.qpos_ids = self.qpos_ids[selected]
+        self.default_position = self.default_position[selected]
+        if self.qpos_ids.numel() == 0:
+            raise ValueError("BaseJointPositionDiffL2 requires non-leg joints.")
+
+
+@register_reward
+class LegJointPositionDiffL2(JointPositionDiffL2):
+
+    def __init__(
+        self,
+        model_context: ModelContext,
+        *args, **kwargs
+    ) -> None:
+
+        super().__init__(model_context=model_context, *args, **kwargs)
+
+        selected = torch.isin(self.qpos_ids, model_context.leg_joint_qpos_ids)
+        self.qpos_ids = self.qpos_ids[selected]
+        self.default_position = self.default_position[selected]
+        if self.qpos_ids.numel() == 0:
+            raise ValueError("LegJointPositionDiffL2 requires configured leg joints.")
+
+
+@register_reward
 class JointLimitViolationL1(BaseRewardTerm):
 
     def __init__(

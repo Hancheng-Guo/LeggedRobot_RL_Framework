@@ -13,9 +13,6 @@ _FOOT_PHASE_REAL_NAME = "foot_phase_real"
 _FOOT_PHASE_IMAG_NAME = "foot_phase_imag"
 _HALF_PERIOD_DURATION_NAME = "half_period_duration"
 
-_LANDED_DISTANCE_FACTOR = -1.1
-_LIFTED_DISTANCE_FACTOR = -0.5
-
 _IDLE_SPEED_THRESHOLD = 0.1
 _TROT_LOOPS = {
     False: ((0b1111, 0),),
@@ -393,8 +390,9 @@ class QuadrupedalCommandAdaptiveGaitPhaseHeightL2(BaseRewardTerm):
     def __init__(
         self,
         model_context: ModelContext,
-        target_height: float,
-        std: float = 0.2,
+        landing_distance: float,
+        lift_height: float = 0.08,
+        std: float = 0.08,
         *args, **kwargs,
     ) -> None:
 
@@ -405,14 +403,17 @@ class QuadrupedalCommandAdaptiveGaitPhaseHeightL2(BaseRewardTerm):
             raise ValueError(
                 "QuadrupedalCommandAdaptiveGaitPhaseHeightL2 requires exactly four foot geoms."
             )
-        if not math.isfinite(target_height) or target_height <= 0.0:
-            raise ValueError("'target_height' must be positive and finite.")
+        if not math.isfinite(landing_distance) or landing_distance <= 0.0:
+            raise ValueError("'landing_distance' must be positive and finite.")
+        if not math.isfinite(lift_height) or lift_height < 0.0:
+            raise ValueError("'lift_height' must be non-negative and finite.")
         if not math.isfinite(std) or std <= 0.0:
             raise ValueError("'std' must be positive and finite.")
 
         self.base_pos_qpos_ids = model_context.base_pos_qpos_ids
         self.base_quat_qpos_ids = model_context.base_quat_qpos_ids
-        self.target_height = target_height
+        self.landing_distance = -landing_distance
+        self.lift_height = lift_height
         self.std = std
 
 
@@ -455,15 +456,13 @@ class QuadrupedalCommandAdaptiveGaitPhaseHeightL2(BaseRewardTerm):
 
         foot_phase = foot_phase + torch.atan2(phase_imag, phase_real)
         lifted_phase_height = (
-            self.target_height * (
-                _LANDED_DISTANCE_FACTOR + 
-                torch.sin(foot_phase) * (_LIFTED_DISTANCE_FACTOR - _LANDED_DISTANCE_FACTOR)
-            )
+            self.landing_distance +
+            self.lift_height * torch.sin(foot_phase)
         )
         phase_height = torch.where(
             torch.remainder(foot_phase, 2 * torch.pi) <= torch.pi,
             lifted_phase_height,
-            torch.full_like(foot_phase, self.target_height * _LANDED_DISTANCE_FACTOR)
+            torch.full_like(foot_phase, self.landing_distance)
         )
         return phase_height
 
@@ -504,8 +503,9 @@ class QuadrupedalCommandAdaptiveGaitPhaseHeightL2Exp(QuadrupedalCommandAdaptiveG
     def __init__(
         self,
         model_context: ModelContext,
-        target_height: float,
-        std: float = 0.05,
+        landing_distance: float,
+        lift_height: float = 0.08,
+        std: float = 0.08,
         *args, **kwargs,
     ) -> None:
 
@@ -516,7 +516,8 @@ class QuadrupedalCommandAdaptiveGaitPhaseHeightL2Exp(QuadrupedalCommandAdaptiveG
 
         super().__init__(
             model_context=model_context,
-            target_height=target_height,
+            landing_distance=landing_distance,
+            lift_height=lift_height,
             std=std,
             *args, **kwargs
         )

@@ -25,6 +25,15 @@
       <default class="affine">
         <position kp="100" ctrlrange="-6.28 6.28" forcerange="-80 80"/>
       </default>
+      <default class="affine_fe">
+        <position kp="100" ctrlrange="-2.00 2.00" forcerange="-80 80"/>
+      </default>
+      <default class="affine_left_haa">
+        <position kp="100" ctrlrange="-0.73 0.50" forcerange="-80 80"/>
+      </default>
+      <default class="affine_right_haa">
+        <position kp="100" ctrlrange="-0.50 0.73" forcerange="-80 80"/>
+      </default>
     </default>
   </default>
 
@@ -289,17 +298,17 @@
   </contact>
 
   <actuator>
-    <position class="affine" joint="LF_HAA" name="LF_HAA"/>
-    <position class="affine" joint="LF_HFE" name="LF_HFE"/>
-    <position class="affine" joint="LF_KFE" name="LF_KFE"/>
-    <position class="affine" joint="RF_HAA" name="RF_HAA"/>
-    <position class="affine" joint="RF_HFE" name="RF_HFE"/>
-    <position class="affine" joint="RF_KFE" name="RF_KFE"/>
-    <position class="affine" joint="LH_HAA" name="LH_HAA"/>
-    <position class="affine" joint="LH_HFE" name="LH_HFE"/>
-    <position class="affine" joint="LH_KFE" name="LH_KFE"/>
-    <position class="affine" joint="RH_HAA" name="RH_HAA"/>
-    <position class="affine" joint="RH_HFE" name="RH_HFE"/>
-    <position class="affine" joint="RH_KFE" name="RH_KFE"/>
+    <position class="affine_left_haa" joint="LF_HAA" name="LF_HAA"/>
+    <position class="affine_fe" joint="LF_HFE" name="LF_HFE"/>
+    <position class="affine_fe" joint="LF_KFE" name="LF_KFE"/>
+    <position class="affine_right_haa" joint="RF_HAA" name="RF_HAA"/>
+    <position class="affine_fe" joint="RF_HFE" name="RF_HFE"/>
+    <position class="affine_fe" joint="RF_KFE" name="RF_KFE"/>
+    <position class="affine_left_haa" joint="LH_HAA" name="LH_HAA"/>
+    <position class="affine_fe" joint="LH_HFE" name="LH_HFE"/>
+    <position class="affine_fe" joint="LH_KFE" name="LH_KFE"/>
+    <position class="affine_right_haa" joint="RH_HAA" name="RH_HAA"/>
+    <position class="affine_fe" joint="RH_HFE" name="RH_HFE"/>
+    <position class="affine_fe" joint="RH_KFE" name="RH_KFE"/>
   </actuator>
 </mujoco>

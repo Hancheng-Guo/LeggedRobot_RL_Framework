@@ -1,0 +1,18 @@
+model_path: .\assets\anymal_c\MJCF\scene.xml
+sim_dt: 0.002
+frame_skip: 10
+step_workers: 8
+render_mode: rgb_array
+foot_geom_names: [RF, LF, RH, LH]
+leg_joint_names:
+  - RF_HFE
+  - RF_KFE
+  - LF_HFE
+  - LF_KFE
+  - RH_HFE
+  - RH_KFE
+  - LH_HFE
+  - LH_KFE
+floor_geom_names: [floor]
+foot_contact_force_threshold: 15.0
+reset_keyframe: standing

@@ -176,7 +176,7 @@
             <geom pos="0.01305 -0.08795 -0.33797" quat="0.382683 0 0 -0.92388" material="foot" mesh="foot"
               class="visual"/>
             <geom class="collision" size="0.0175 0.141252" pos="0.01305 -0.08795 -0.168985" quat="1 0 0 -1"/>
-            <geom class="foot" pos="0.01305 -0.08795 -0.31547" quat="1 0 0 -1"/>
+            <geom name="LF" class="foot" pos="0.01305 -0.08795 -0.31547" quat="1 0 0 -1"/>
           </body>
         </body>
       </body>
@@ -208,7 +208,7 @@
               type="box"/>
             <geom pos="0.01305 0.08795 -0.33797" quat="0.382683 0 0 0.92388" material="foot" mesh="foot" class="visual"/>
             <geom class="collision" size="0.0175 0.141252" pos="0.01305 0.08795 -0.168985" quat="1 0 0 1"/>
-            <geom class="foot" pos="0.01305 0.08795 -0.31547" quat="1 0 0 1"/>
+            <geom name="RF" class="foot" pos="0.01305 0.08795 -0.31547" quat="1 0 0 1"/>
           </body>
         </body>
       </body>
@@ -241,7 +241,7 @@
             <geom pos="0.01305 0.08795 -0.33797" quat="-0.382683 0 0 -0.92388" material="foot" mesh="foot"
               class="visual"/>
             <geom class="collision" size="0.0175 0.141252" pos="0.01305 0.08795 -0.168985" quat="1 0 0 -1"/>
-            <geom class="foot" pos="0.01305 0.08795 -0.31547" quat="1 0 0 -1"/>
+            <geom name="LH" class="foot" pos="0.01305 0.08795 -0.31547" quat="1 0 0 -1"/>
           </body>
         </body>
       </body>
@@ -274,7 +274,7 @@
             <geom pos="0.01305 -0.08795 -0.33797" quat="0.382683 0 0 -0.92388" material="foot" mesh="foot"
               class="visual"/>
             <geom class="collision" size="0.0175 0.141252" pos="0.01305 -0.08795 -0.168985" quat="1 0 0 1"/>
-            <geom class="foot" pos="0.01305 -0.08795 -0.31547" quat="1 0 0 1"/>
+            <geom name="RH" class="foot" pos="0.01305 -0.08795 -0.31547" quat="1 0 0 1"/>
           </body>
         </body>
       </body>

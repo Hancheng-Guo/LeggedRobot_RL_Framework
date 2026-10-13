@@ -85,3 +85,24 @@ def test_keyframe_centered_linear_map_uses_asymmetric_scales(
         ]
     )
     torch.testing.assert_close(control, expected)
+
+
+def test_keyframe_centered_linear_map_scales_offset_from_keyframe(
+    runtime_context,
+    model_context,
+):
+    manager = ActionManager(
+        num_envs=3,
+        context=runtime_context,
+        model_context=model_context,
+        terms={"keyframe_centered_linear_map": {"action_scale": 0.1}},
+    )
+
+    control, _ = manager.process(
+        torch.tensor([[-1.0, -1.0], [0.0, 0.0], [1.0, 1.0]])
+    )
+
+    torch.testing.assert_close(
+        control,
+        torch.tensor([[0.45, -0.65], [0.5, -0.5], [0.65, -0.25]]),
+    )

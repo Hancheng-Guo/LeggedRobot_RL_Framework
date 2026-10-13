@@ -1,3 +1,4 @@
+import math
 import torch
 
 from .base import BaseActionTerm
@@ -58,10 +59,14 @@ class KeyframeCenteredLinearMap(BaseActionTerm):
     def __init__(
         self,
         model_context: ModelContext,
+        action_scale: float = 1.0,
         *args, **kwargs,
     ) -> None:
 
         super().__init__(*args, **kwargs)
+
+        if not math.isfinite(action_scale) or not 0.0 < action_scale <= 1.0:
+            raise ValueError("'action_scale' must be finite and in (0, 1].")
 
         self.input_dim = self.output_dim
 
@@ -82,6 +87,7 @@ class KeyframeCenteredLinearMap(BaseActionTerm):
         self.lower = ctrl_range[:, 0]
         self.upper = ctrl_range[:, 1]
         self.center = center
+        self.action_scale = action_scale
 
         if torch.any(self.lower > self.upper):
             raise ValueError("Actuator control lower limits must not exceed upper limits.")
@@ -104,4 +110,4 @@ class KeyframeCenteredLinearMap(BaseActionTerm):
             self.negative_scale,
             self.positive_scale,
         )
-        return self.center + value * scale
+        return self.center + self.action_scale * value * scale

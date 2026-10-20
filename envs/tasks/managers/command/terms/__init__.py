@@ -4,8 +4,12 @@ from .registry import (
     get_command_class,
     register_command,
 )
+from .playback import (
+    PlaybackCommandSource,
+    PlaybackCommandTerm
+)
 
-from . import curriculum, uniform
+from . import curriculum, uniform, playback
 
 
 __all__ = (
@@ -14,4 +18,7 @@ __all__ = (
     "COMMAND_CLASS_MAP",
     "get_command_class",
     "register_command",
+
+    "PlaybackCommandSource",
+    "PlaybackCommandTerm",
 )

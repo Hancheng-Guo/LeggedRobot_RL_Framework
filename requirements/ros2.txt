@@ -1,0 +1,4 @@
+# Conda package specs for optional ROS 2 Jazzy keyboard playback.
+# Use with: conda install -c conda-forge -c robostack-jazzy --file requirements/ros2.txt
+ros-jazzy-rclpy
+ros-jazzy-geometry-msgs

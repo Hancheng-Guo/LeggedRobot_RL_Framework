@@ -209,10 +209,13 @@ class WorkflowRunner(BaseRunner):
 
     def play(
         self,
-        num_steps: int,
+        num_steps: int | None,
         formats: VideoFormat | VideoFormats,
         num_plays: int,
+        mode: str = "configured",
+        playback_config: str | Path | None = None,
     ) -> None:
+        assert num_steps is not None
         self.play_calls.append((num_steps, formats, num_plays))
 
     def close(self) -> None:

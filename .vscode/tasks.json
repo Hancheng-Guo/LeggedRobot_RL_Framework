@@ -100,7 +100,7 @@
             }
         },
         {
-            "label": "Tool: Play Checkpoint",
+            "label": "Tool: Play Checkpoint (Video)",
             "icon": { "id": "play-circle" },
             "type": "process",
             "command": "${command:python.interpreterPath}",
@@ -125,6 +125,45 @@
                     "'${command:python.interpreterPath}'",
                     "-m",
                     "tools.play_checkpoint",
+                    "'${input:playCheckpointDir}'"
+                ],
+                "options": {
+                    "cwd": "${workspaceFolder}",
+                    "shell": {
+                        "executable": "powershell.exe",
+                        "args": ["-NoProfile", "-Command"]
+                    }
+                }
+            }
+        },
+        {
+            "label": "Tool: Play Checkpoint (ROS2 Keyboard)",
+            "icon": { "id": "play-circle" },
+            "type": "process",
+            "command": "${command:python.interpreterPath}",
+            "args": [
+                "-m",
+                "tools.play_human_ros2",
+                "${input:playCheckpointDir}",
+                "--playback-config",
+                "${input:humanRos2PlaybackConfig}"
+            ],
+            "problemMatcher": [],
+            "presentation": {
+                "reveal": "always",
+                "panel": "dedicated",
+                "focus": true
+            },
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "windows": {
+                "type": "shell",
+                "command": "&",
+                "args": [
+                    "'${workspaceFolder}/tools/play_human_ros2.cmd'",
+                    "'${command:python.interpreterPath}'",
+                    "'${input:humanRos2PlaybackConfig}'",
                     "'${input:playCheckpointDir}'"
                 ],
                 "options": {
@@ -376,6 +415,41 @@
             "type": "promptString",
             "description": "Run name or path (blank: latest)",
             "default": ""
+        },
+        {
+            "id": "humanRos2PlaybackConfig",
+            "type": "command",
+            "command": "extension.commandvariable.pickStringRemember",
+            "args": {
+                "description": "Select human ROS 2 playback config",
+                "key": "selectedHumanRos2PlaybackConfig",
+                "rememberTransformed": true,
+                "options": [
+                    {
+                        "label": "Last: ${remember:selectedHumanRos2PlaybackConfig}",
+                        "value": "${remember:selectedHumanRos2PlaybackConfig}"
+                    },
+                    {
+                        "label": "Choose another...",
+                        "value": "${pickFile:humanRos2PlaybackConfig}"
+                    }
+                ],
+                "remember": {
+                    "selectedHumanRos2PlaybackConfig": {
+                        "key": "selectedHumanRos2PlaybackConfig",
+                        "default": "locomotion_unitree_go1_velocity"
+                    }
+                },
+                "pickFile": {
+                    "humanRos2PlaybackConfig": {
+                        "description": "Select playback config",
+                        "fromFolder": { "fixed": "${workspaceFolder}/configs/playback/human_ros2" },
+                        "include": "*.yaml",
+                        "display": "fileName",
+                        "transform": { "text": "${fileBasenameNoExtension}" }
+                    }
+                }
+            }
         }
     ]
 }

@@ -66,9 +66,11 @@ class BaseRunner(ABC):
     @abstractmethod
     def play(
         self,
-        num_steps: int,
+        num_steps: int | None,
         formats: VideoFormat | VideoFormats,
         num_plays: int,
+        mode: str,
+        playback_config: str | Path | None = None,
     ) -> None:
         raise NotImplementedError
 

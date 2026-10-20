@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 from typing import Any
+from collections.abc import Mapping
 
 from .base import BaseEnv
 from envs.simulators import SIM_TYPE_MAP, BaseSimulator
@@ -120,13 +121,17 @@ class VectorEnv(BaseEnv):
         return self.simulator.has_playback_render_mode()
 
 
-    def prepare_playback(self) -> None:
+    def prepare_playback(
+        self,
+        render_mode: str | None = None
+    ) -> None:
+
         if self._playback_environment is not None:
             raise RuntimeError("Playback is already prepared.")
         if self.supports_concurrent_instances:
             self._playback_environment = self._create_playback_environment()
         try:
-            self.simulator.prepare_playback()
+            self.simulator.prepare_playback(render_mode)
         except BaseException:
             if self._playback_environment is not None:
                 self.terminate_playback()
@@ -157,6 +162,27 @@ class VectorEnv(BaseEnv):
             self._playback_environment = None
             if temporary is not None:
                 temporary.close()
+
+
+    def set_playback_command_source(
+        self,
+        source: Any | None,
+        fixed_commands: Mapping[str, tuple[float, ...]] | None = None,
+    ) -> None:
+        
+        manager = self.task.command_manager
+        if source is None:
+            manager.deactivate_playback_commands()
+        else:
+            manager.activate_playback_commands(
+                source=source,
+                env_index=self.playback_env_index,
+                fixed_commands=fixed_commands,
+            )
+
+
+    def is_playback_open(self) -> bool:
+        return self.simulator.is_playback_open()
 
 
     @property

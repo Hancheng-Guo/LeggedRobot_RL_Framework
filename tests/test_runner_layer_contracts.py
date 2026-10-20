@@ -184,7 +184,7 @@ def test_stage_training_after_evaluation_rebuilds_completion_callback(
     if evaluation == "test":
         manager.test(num_episodes=1)
     else:
-        manager.play(num_steps=1, formats="gif", num_plays=1)
+        manager.play(num_steps=1, formats="gif", num_plays=1, mode="configured")
     manager.train()
     assert not manager.continue_training
     saved = tmp_path / "checkpoints" / "stage_000" / "latest.pt"
@@ -193,7 +193,7 @@ def test_stage_training_after_evaluation_rebuilds_completion_callback(
     if evaluation == "test":
         manager.test(num_episodes=1)
     else:
-        manager.play(num_steps=1, formats="gif", num_plays=1)
+        manager.play(num_steps=1, formats="gif", num_plays=1, mode="configured")
     manager.save()
     assert inspect_checkpoint_metadata(saved).stage_completed is True
     manager.close()

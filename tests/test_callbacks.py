@@ -995,6 +995,28 @@ def test_progress_bar_tracks_play_steps(
     assert "25.00%" in output
 
 
+def test_progress_bar_animates_open_ended_play(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    callback = ProgressBarCallback(
+        runner=make_runner(),
+        max_iterations=2,
+        rollout_length=4,
+        width=8,
+        refresh_interval=0.0,
+    )
+
+    callback._on_play_start(num_steps=None)
+    for step, frame in enumerate(
+        (">------<", "->----<-", "-->--<--", "---><---", ">------<"),
+        start=1,
+    ):
+        callback._on_step_end()
+        assert f"[{frame}] {step} playback steps" in capsys.readouterr().out
+
+    callback._on_play_end()
+
+
 def test_progress_bar_tracks_test_steps_and_episodes(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

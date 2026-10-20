@@ -1,0 +1,8 @@
+topic: /cmd_vel
+ros_commands:
+  lin_vel_x: {field: linear.x, positive_key: w, negative_key: s, speed: 0.8}
+  lin_vel_y: {field: linear.y, positive_key: a, negative_key: d, speed: 0.4}
+  ang_vel_z: {field: angular.z, positive_key: q, negative_key: e, speed: 0.8}
+fixed_commands:
+  foot_phase_real: [1.0, 1.0, 1.0, 1.0]
+  foot_phase_imag: [0.0, 0.0, 0.0, 0.0]

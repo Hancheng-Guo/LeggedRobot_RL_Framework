@@ -83,7 +83,30 @@ application.play(num_steps=500, formats="gif", num_plays=3)
 python -m tools.play_checkpoint unitree_go1_mujoco_cpu_velocity_only_2026-10-04_22-55-48 --num-plays 5 --format mp4
 ```
 
-将示例中的目录名替换为实际存在的运行目录。省略运行目录时选择最新的带时间戳运行；`--num-plays` 默认 `3`，`--format` 默认 `gif`，也可选 `mp4`。VS Code 的 `Tool: Play Checkpoint` 任务只提供运行目录选择；需要指定这两个参数时使用终端。`Run: Select App` 任务可通过顶层配置名启动新的训练。
+将示例中的目录名替换为实际存在的运行目录。省略运行目录时选择最新的带时间戳运行；`--num-plays` 默认 `3`，`--format` 默认 `gif`，也可选 `mp4`。VS Code 的 `Tool: Play Checkpoint (Video)` 任务只提供运行目录选择；需要指定这两个参数时使用终端。`Run: Select App` 任务可通过顶层配置名启动新的训练。
+
+### 通过键盘控制历史检查点
+
+键盘通过 ROS 2 控制历史检查点时，使用单独的入口：
+
+```powershell
+python -m tools.play_human_ros2 unitree_go1_mujoco_cpu_velocity_only_2026-10-04_22-55-48 --playback-config locomotion_unitree_go1_velocity
+```
+
+也可运行 VS Code 的 `Tool: Play Checkpoint (ROS2 Keyboard)` 任务：先输入运行目录，通过下拉菜单选择播放配置。运行目录留空时选择最新运行；播放配置可选择上次使用的配置，或从 `configs/playback/human_ros2/` 中选择另一个 YAML 文件。在终端使用 `--playback-config` 时，可输入该目录下的文件名（`.yaml` 可省略），也可输入相对项目根目录的路径或绝对路径。
+
+此入口调用现有 `play(mode="human_ros2")`，由 `play()` 创建和清理 ROS 2 节点及键盘窗口，不生成视频。键盘窗口需保持焦点；空格停止，关闭窗口或按 Ctrl+C 退出。控制消息类型为 `geometry_msgs/Twist`。所用 Python 环境需能导入 `rclpy` 和 `geometry_msgs`。MuJoCo 可在播放时切换 human 窗口；已经以 headless 模式启动的 Isaac Sim 无法在同一进程切换到 human。
+
+示例播放配置位于 `configs/playback/human_ros2/`，播放时必须显式指定文件。文件中的 `topic` 和 `ros_commands` 指定 ROS 话题、Twist 字段、键位和速度，`fixed_commands` 指定其余 command 的固定值（向量按各分量列出）。每个任务 command 必须恰好由其中一种方式提供；启动播放时会检查名称和维度，因此选错配置会明确报错。配置文件路径会写入播放日志。现有配置使用 `/cmd_vel`，键位为 `W/S`、`A/D`、`Q/E`；修改映射只需编辑播放配置，不影响训练配置。
+
+ROS 2 Jazzy 的 Conda 包列在 `requirements/ros2.txt`。在项目根目录、运行仿真的 Conda 环境中执行：
+
+```powershell
+conda activate quadruped_rl
+conda install -c conda-forge -c robostack-jazzy --file requirements/ros2.txt
+```
+
+此文件供 `conda install --file` 使用，不属于 pip requirements。
 
 ### 从历史检查点续训
 

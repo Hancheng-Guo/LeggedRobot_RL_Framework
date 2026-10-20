@@ -1,7 +1,9 @@
 import torch
 from typing import Any
+from collections.abc import Mapping
 
 from .terms import BaseCommandTerm, get_command_class
+from .playback import PlaybackCommandSource, PlaybackCommands
 from .constraints import CommandConstraintSet
 from envs.simulators.utils import ModelContext
 from envs.tasks.utils import TaskContext
@@ -47,6 +49,51 @@ class CommandManager:
             term.dim
             for term in self.terms.values()
         )
+        self._playback_commands: PlaybackCommands | None = None
+
+
+    def activate_playback_commands(
+        self,
+        source: PlaybackCommandSource,
+        env_index: int,
+        fixed_commands: Mapping[str, tuple[float, ...]] | None = None,
+    ) -> None:
+
+        if self._playback_commands is not None:
+            raise RuntimeError("Playback commands are already active.")
+        if not 0 <= env_index < self.num_envs:
+            raise ValueError("Playback environment index is out of range.")
+
+        playback = PlaybackCommands(
+            terms=self.terms,
+            source=source,
+            env_index=env_index,
+            fixed_commands=fixed_commands,
+        )
+        self.terms.update(playback.terms)
+        self._playback_commands = playback
+        self._playback_reset_completed = False
+
+
+    def deactivate_playback_commands(self) -> None:
+
+        playback = self._playback_commands
+        if playback is None:
+            return
+
+        self.terms.update(playback.original_terms)
+        self._playback_commands = None
+        if not self._playback_reset_completed:
+            return
+        env_ids = torch.tensor(
+            [playback.env_index],
+            dtype=torch.long,
+            device=self.context.device
+        )
+        for term in self.terms.values():
+            term.reset(env_ids)
+        checked_command = self._constraints_check(self.proposed_command, env_ids=env_ids)
+        self._update_command(checked_command, env_ids=env_ids)
 
 
     def _build_terms(
@@ -160,6 +207,8 @@ class CommandManager:
             env_ids=env_ids,
         )
         self._update_command(checked_command, env_ids=env_ids)
+        if self._playback_commands is not None:
+            self._playback_reset_completed = True
 
 
     def get_command(
@@ -212,7 +261,5 @@ class CommandManager:
                 )
                 self.command[name].copy_(value)
             else:
-                self.last_command[name][env_ids].copy_(
-                    self.command[name][env_ids]
-                )
-                self.command[name][env_ids].copy_(value)
+                self.last_command[name][env_ids] = self.command[name][env_ids]
+                self.command[name][env_ids] = value

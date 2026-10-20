@@ -69,8 +69,15 @@ class BaseSimulator(ABC):
         return self.render_mode is not None
 
 
-    def prepare_playback(self) -> None:
+    def prepare_playback(
+        self,
+        render_mode: str | None = None
+    ) -> None:
         """Prepare simulator-specific playback resources, if needed."""
+
+
+    def is_playback_open(self) -> bool:
+        return True
 
 
     def terminate_playback(self) -> None:

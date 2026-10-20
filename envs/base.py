@@ -3,6 +3,7 @@ from __future__ import annotations
 import torch
 import numpy as np
 from typing import Any
+from collections.abc import Mapping
 from abc import ABC, abstractmethod
 
 from utils import RuntimeContext
@@ -38,7 +39,7 @@ class BaseEnv(ABC):
         return self.render_mode is not None
 
     @abstractmethod
-    def prepare_playback(self) -> None:
+    def prepare_playback(self, render_mode: str | None = None) -> None:
         """Activate the environment used for playback."""
         raise NotImplementedError
 
@@ -46,6 +47,16 @@ class BaseEnv(ABC):
     def terminate_playback(self) -> None:
         """Release playback resources and restore normal environment calls."""
         raise NotImplementedError
+
+    def set_playback_command_source(
+        self,
+        source: Any | None,
+        fixed_commands: Mapping[str, tuple[float, ...]] | None = None,
+    ) -> None:
+        raise NotImplementedError("This environment does not support playback commands.")
+
+    def is_playback_open(self) -> bool:
+        return True
 
 
     @property

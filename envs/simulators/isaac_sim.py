@@ -481,8 +481,12 @@ class IsaacSimSimulator(BaseSimulator):
         return self._require_backend().render()
 
 
-    def prepare_playback(self) -> None:
-        mode = self.render_mode
+    def prepare_playback(
+        self,
+        render_mode: str | None = None
+    ) -> None:
+        
+        mode = render_mode if render_mode is not None else self.render_mode
         if mode is None:
             return
         backend = self._require_backend()

@@ -385,15 +385,19 @@ class ApplicationEntry:
 
     def play(
         self,
-        num_steps: int = 500,
+        num_steps: int | None = 500,
         formats: VideoFormat | VideoFormats = "gif",
         num_plays: int = 3,
+        mode: str = "configured",
+        playback_config: str | Path | None = None,
     ) -> None:
         self._ensure_open()
         self.stage_manager.play(
             num_steps=num_steps,
             formats=formats,
             num_plays=num_plays,
+            mode=mode,
+            playback_config=playback_config,
         )
 
 

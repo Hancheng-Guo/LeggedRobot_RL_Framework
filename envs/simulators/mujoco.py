@@ -74,6 +74,8 @@ class MujocoSimulator(BaseSimulator):
         self._reset_state_numpy_buffers: MujocoFixedStateBuffers[np.ndarray] | None = None
         self._reset_state_tensor_buffers: MujocoFixedStateBuffers[torch.Tensor] | None = None
         self._state_staging_tensors: dict[int, torch.Tensor] = {}
+        self._playback_render_mode: str | None = None
+        self._playback_render_mode_changed = False
 
 
     def config_update(
@@ -476,6 +478,32 @@ class MujocoSimulator(BaseSimulator):
         if self.render_mode == "rgb_array":
             return self._rgb_array_render()
         raise RuntimeError(f"Invalid configured render mode: {self.render_mode!r}.")
+
+
+    def prepare_playback(
+        self,
+        render_mode: str | None = None
+    ) -> None:
+
+        if render_mode is None:
+            return
+        if render_mode not in self.SUPPORTED_RENDER_MODES:
+            raise ValueError(f"Unsupported render mode: {render_mode!r}.")
+
+        self._playback_render_mode = self.render_mode
+        self._playback_render_mode_changed = True
+        self.render_mode = render_mode
+
+
+    def terminate_playback(self) -> None:
+        if self._playback_render_mode_changed:
+            self.render_mode = self._playback_render_mode
+            self._playback_render_mode = None
+            self._playback_render_mode_changed = False
+
+
+    def is_playback_open(self) -> bool:
+        return self.viewer is None or bool(self.viewer.is_running())
 
 
     def _human_render(self) -> None:

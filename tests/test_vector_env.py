@@ -218,7 +218,7 @@ def test_playback_delegates_without_replacing_environment(
         num_envs=1,
         marker=playback_marker,
         simulator=SimpleNamespace(
-            prepare_playback=lambda: lifecycle.append("prepare"),
+            prepare_playback=lambda _render_mode: lifecycle.append("prepare"),
             terminate_playback=lambda: lifecycle.append("terminate"),
         ),
         render_mode="rgb_array",
@@ -255,7 +255,7 @@ def test_playback_prepare_failure_clears_temporary_environment(
     env = make_env()
     lifecycle: list[str] = []
 
-    def fail_prepare() -> None:
+    def fail_prepare(_render_mode: str | None) -> None:
         raise RuntimeError("prepare failed")
 
     temporary = SimpleNamespace(

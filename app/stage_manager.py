@@ -380,9 +380,11 @@ class StageManager:
 
     def play(
         self,
-        num_steps: int,
+        num_steps: int | None,
         formats: VideoFormat | VideoFormats,
         num_plays: int,
+        mode: str,
+        playback_config: str | Path | None = None,
     ) -> None:
 
         if hasattr(self, "runner"):
@@ -392,6 +394,8 @@ class StageManager:
                 num_steps=num_steps,
                 formats=formats,
                 num_plays=num_plays,
+                mode=mode,
+                playback_config=playback_config,
             )
             return
 
@@ -411,6 +415,8 @@ class StageManager:
             num_steps=num_steps,
             formats=formats,
             num_plays=num_plays,
+            mode=mode,
+            playback_config=playback_config,
         )
 
 

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import warnings
+import time
 import torch
 import numpy as np
+from contextlib import ExitStack
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
@@ -13,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 from .base import BaseRunner
 from .types import RestoreMode, TrainResult, TrainStopReason
 from .callbacks import CALLBACK_TYPE_MAP, BaseCallback, StageCallback
-from .utils import TrackingSpec, parse_tracking_specs
+from .utils import TrackingSpec, parse_tracking_specs, load_human_ros2_config
 from envs import ENV_TYPE_MAP, BaseEnv
 from rl.algorithms import ALG_TYPE_MAP, OnPolicyAlgorithm
 from utils import (
@@ -620,26 +622,26 @@ class OnPolicyRunner(BaseRunner):
 
     def play(
         self,
-        num_steps: int,
+        num_steps: int | None,
         formats: VideoFormat | VideoFormats,
         num_plays: int,
+        mode: str,
+        playback_config: str | Path | None = None,
     ) -> None:
 
         self._snapshot_callbacks_before_evaluation()
         self._set_stage_transition(transition=None)
         self._pending_callback_states = None
         
-        try:
-            from runners.utils.frames import save_frames_to_video
-        except ModuleNotFoundError as error:
-            raise ModuleNotFoundError(
-                "Playback requires the demo dependencies. Install them with "
-                "'python -m pip install -r requirements/demo.txt'."
-            ) from error
-
         if not hasattr(self, "environment"):
             raise RuntimeError("environment is not instantiated.")
-        if not self.environment.has_playback_render_mode():
+        if mode not in {"configured", "human_ros2"}:
+            raise ValueError(f"Unsupported playback mode: {mode!r}.")
+        if mode == "human_ros2" and playback_config is None:
+            raise ValueError("Human ROS 2 playback requires 'playback_config'.")
+        if mode != "human_ros2" and playback_config is not None:
+            raise ValueError("'playback_config' is only used in human_ros2 mode.")
+        if mode == "configured" and not self.environment.has_playback_render_mode():
             LOGGER.info("Skipping playback because render mode is disabled.")
             return
 
@@ -647,7 +649,9 @@ class OnPolicyRunner(BaseRunner):
         if not hasattr(self, "algorithm"):
             raise RuntimeError("algorithm is not instantiated.")
 
-        if (
+        if num_steps is None and mode != "human_ros2":
+            raise ValueError("'num_steps' must be a positive integer.")
+        if num_steps is not None and (
             not isinstance(num_steps, int)
             or isinstance(num_steps, bool)
             or num_steps <= 0
@@ -659,30 +663,65 @@ class OnPolicyRunner(BaseRunner):
             or num_plays <= 0
         ):
             raise ValueError("'num_plays' must be a positive integer.")
+        if mode == "human_ros2" and num_plays != 1:
+            raise ValueError("Human ROS 2 playback requires num_plays=1.")
 
-        self.environment.prepare_playback()
-        try:
+        if mode == "human_ros2":
+            self.environment.prepare_playback("human")
+        else:
+            self.environment.prepare_playback()
+        session = None
+        frame_saver = None
+
+        with ExitStack() as cleanup:
+            cleanup.callback(self.environment.terminate_playback)
+
+            if mode == "human_ros2":
+
+                if self.environment.render_mode != "human":
+                    raise RuntimeError("Human ROS 2 playback requires human rendering.")
+                assert playback_config is not None
+                from .utils.ros2_keyboard import Ros2KeyboardSession
+
+                config = load_human_ros2_config(playback_config)
+                LOGGER.info("Human ROS 2 playback config: %s", config.path)
+                session = Ros2KeyboardSession(config)
+                cleanup.callback(session.close)
+                self.environment.set_playback_command_source(
+                    session, fixed_commands=config.fixed_commands,
+                )
+                cleanup.callback(self.environment.set_playback_command_source, None)
+            
+            elif self.environment.render_mode == "rgb_array":
+                try:
+                    from runners.utils.frames import save_frames_to_video
+                except ModuleNotFoundError as error:
+                    raise ModuleNotFoundError(
+                        "Playback requires the demo dependencies. Install them with "
+                        "'python -m pip install -r requirements/demo.txt'."
+                    ) from error
+                frame_saver = save_frames_to_video
+
+            cleanup.callback(self.algorithm.reset_policy_state)
             for play_index in range(num_plays):
-                if not self._play_steps(
+                completed = self._play_steps(
                     num_steps=num_steps,
                     formats=formats,
-                    frame_saver=save_frames_to_video,
-                ):
+                    frame_saver=frame_saver,
+                    session=session,
+                )
+                if not completed:
                     break
                 if play_index + 1 < num_plays:
                     self.algorithm.reset_policy_state()
-        finally:
-            try:
-                self.algorithm.reset_policy_state()
-            finally:
-                self.environment.terminate_playback()
 
 
     def _play_steps(
         self,
-        num_steps: int,
+        num_steps: int | None,
         formats: VideoFormat | VideoFormats,
-        frame_saver: Callable[..., list[Path]],
+        frame_saver: Callable[..., list[Path]] | None,
+        session: Any | None = None,
     ) -> bool:
         
         if not hasattr(self, "environment"):
@@ -692,6 +731,8 @@ class OnPolicyRunner(BaseRunner):
             raise RuntimeError("algorithm is not instantiated.")
 
         self.algorithm.set_eval_mode()
+        if session is not None:
+            session.poll()
         obs = self.environment.reset()
         render_mode = self.environment.render_mode
         if render_mode == "rgb_array":
@@ -712,11 +753,20 @@ class OnPolicyRunner(BaseRunner):
         measured: list[tuple[float, ...]] = []
         step = 0
         stopped_by_callback = False
-        while step < num_steps:
+        next_tick = time.perf_counter()
+        while num_steps is None or step < num_steps:
+
+            if session is not None and (
+                not session.is_open() or not self.environment.is_playback_open()
+            ):
+                break
 
             if not self._run_callbacks("_on_step_start"):
                 stopped_by_callback = True
                 break
+
+            if session is not None:
+                session.poll()
 
             with torch.no_grad():
                 policy_output = self.algorithm.act(
@@ -770,11 +820,14 @@ class OnPolicyRunner(BaseRunner):
                 stopped_by_callback = True
                 break
             step += 1
-            if playback_done:
+            if session is not None:
+                next_tick += 1.0 / self.environment.render_fps
+                time.sleep(max(0.0, next_tick - time.perf_counter()))
+            if playback_done and session is None:
                 break
 
         output_paths: list[Path] = []
-        if frames:
+        if frames and frame_saver is not None:
             video_dir = Path(self.context.save_dir) / "videos"
             output_paths = frame_saver(
                 frames=frames,

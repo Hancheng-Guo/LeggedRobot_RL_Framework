@@ -40,7 +40,8 @@ class ProgressBarCallback(BaseCallback):
         self._last_refresh_time = 0.0
         self._training = False
         self._mode: str | None = None
-        self._play_total_steps = 0
+        self._play_total_steps: int | None = 0
+        self._play_frame_index = 0
         self._test_completed_episodes = 0
         self._test_total_episodes = 0
 
@@ -122,11 +123,12 @@ class ProgressBarCallback(BaseCallback):
 
     def _on_play_start(
         self,
-        num_steps: int,
+        num_steps: int | None,
         *args, **kwargs,
     ) -> bool:
         self._start_evaluation(mode="play")
         self._play_total_steps = num_steps
+        self._play_frame_index = 0
         return True
 
 
@@ -189,6 +191,13 @@ class ProgressBarCallback(BaseCallback):
 
 
     def _render_play(self, now: float) -> None:
+        if self._play_total_steps is None:
+            bar = self._build_converging_bar()
+            self._print_progress(
+                f"\r[{bar}] {self._completed_steps} playback steps",
+                now,
+            )
+            return
         completed = min(self._completed_steps, self._play_total_steps)
         fraction = completed / self._play_total_steps
         filled = round(self.width * fraction)
@@ -248,4 +257,15 @@ class ProgressBarCallback(BaseCallback):
             for index in range(self.width)
         ]
         bar_parts[self._cursor_position] = ">"
+        return "".join(bar_parts)
+
+
+    def _build_converging_bar(self) -> str:
+        bar_parts = ["-"] * self.width
+        bar_parts[self._play_frame_index] = ">"
+        if self.width > 1:
+            bar_parts[self.width - 1 - self._play_frame_index] = "<"
+        self._play_frame_index = (
+            self._play_frame_index + 1
+        ) % max(1, self.width // 2)
         return "".join(bar_parts)

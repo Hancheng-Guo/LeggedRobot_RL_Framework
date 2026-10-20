@@ -10,6 +10,9 @@ from .frames import (
     VideoWriter,
     save_frames_to_video,
 )
+from .human_ros2_config import (
+    load_human_ros2_config
+)
 
 
 __all__ = (
@@ -22,4 +25,6 @@ __all__ = (
     "VideoFormats",
     "VideoWriter",
     "save_frames_to_video",
+
+    "load_human_ros2_config",
 )

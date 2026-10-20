@@ -41,7 +41,7 @@ class TrackingEnvironment(BaseEnv):
         self.num_envs = num_envs
         self._component = component
 
-    def prepare_playback(self) -> None:
+    def prepare_playback(self, render_mode: str | None = None) -> None:
         if not self.supports_concurrent_instances:
             return
         temporary = type(self)(self.context)
@@ -359,8 +359,9 @@ def test_play_restores_original_environment_after_failure(
         num_steps: int,
         formats: str | Sequence[str],
         frame_saver: Any,
+        session: Any = None,
     ) -> None:
-        assert callable(frame_saver)
+        assert frame_saver is None
         assert runner.environment is original_environment
         assert runner.environment.num_envs == 1
         raise RuntimeError("play failed")
@@ -368,7 +369,7 @@ def test_play_restores_original_environment_after_failure(
     monkeypatch.setattr(runner, "_play_steps", fail_during_play)
 
     with pytest.raises(RuntimeError, match="play failed"):
-        runner.play(num_steps=1, formats="gif", num_plays=1)
+        runner.play(num_steps=1, formats="gif", num_plays=1, mode="configured")
 
     temporary_environment = TrackingEnvironment.instances[-1]
     assert temporary_environment is not original_environment
@@ -394,6 +395,7 @@ def test_play_reuses_environment_when_concurrent_instances_are_unsupported(
         num_steps: int,
         formats: str | Sequence[str],
         frame_saver: Any,
+        session: Any = None,
     ) -> None:
         assert runner.environment is environment
         assert runner.environment.num_envs == 64
@@ -402,11 +404,65 @@ def test_play_reuses_environment_when_concurrent_instances_are_unsupported(
     monkeypatch.setattr(runner, "_play_steps", fail_during_play)
 
     with pytest.raises(RuntimeError, match="play failed"):
-        runner.play(num_steps=1, formats="gif", num_plays=1)
+        runner.play(num_steps=1, formats="gif", num_plays=1, mode="configured")
 
     assert TrackingEnvironment.instances == [environment]
     assert environment.closed is False
+
+
+def test_human_ros2_play_owns_command_session_lifecycle(
+    runtime_context: RuntimeContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from runners.utils import ros2_keyboard
+    from runners.utils.human_ros2_config import PROJECT_ROOT
+
+    events: list[str] = []
+
+    class FakeSession:
+        def __init__(self, config: Any) -> None:
+            assert config.topic == "/cmd_vel"
+            events.append("session_start")
+
+        def close(self) -> None:
+            events.append("session_close")
+
+    monkeypatch.setattr(ros2_keyboard, "Ros2KeyboardSession", FakeSession)
+    monkeypatch.setattr(
+        TrackingEnvironment,
+        "set_playback_command_source",
+        lambda self, source, fixed_commands=None: events.append("attach" if source is not None else "detach"),
+    )
+    runner = OnPolicyRunner(context=runtime_context)
+    environment = TrackingEnvironment(runtime_context)
+    environment.SUPPORTS_CONCURRENT_INSTANCES = False
+    runner.environment = environment
+    runner.algorithm = MinimalAlgorithm(runtime_context)
+    config_path = PROJECT_ROOT / "configs/playback/human_ros2/locomotion_unitree_go1_phase.yaml"
+    monkeypatch.setattr(runner, "_play_steps", lambda **kwargs: events.append("step") or True)
+
+    runner.play(
+        num_steps=None, formats="gif", num_plays=1, mode="human_ros2",
+        playback_config=config_path,
+    )
+
+    assert events == ["session_start", "attach", "step", "detach", "session_close"]
     assert runner.environment is environment
+
+
+def test_ros2_keyboard_session_distinguishes_close_from_failure() -> None:
+    from runners.utils.ros2_keyboard import Ros2KeyboardSession
+
+    session = object.__new__(Ros2KeyboardSession)
+    setattr(session, "_process", SimpleNamespace(is_alive=lambda: True, exitcode=None))
+    assert session.is_open()
+
+    setattr(session, "_process", SimpleNamespace(is_alive=lambda: False, exitcode=0))
+    assert not session.is_open()
+
+    setattr(session, "_process", SimpleNamespace(is_alive=lambda: False, exitcode=1))
+    with pytest.raises(RuntimeError, match="exited with code 1"):
+        session.is_open()
 
 
 def test_playback_file_name_uses_stage_iteration_and_collision_suffix(
@@ -449,12 +505,13 @@ def test_play_records_requested_number_of_plays(
         num_steps: int,
         formats: Any,
         frame_saver: Any,
+        session: Any = None,
     ) -> bool:
         recordings.append(num_steps)
         return True
 
     monkeypatch.setattr(runner, "_play_steps", record_playback)
-    runner.play(num_steps=12, formats="gif", num_plays=3)
+    runner.play(num_steps=12, formats="gif", num_plays=3, mode="configured")
 
     assert recordings == [12, 12, 12]
 
@@ -469,7 +526,7 @@ def test_play_rejects_invalid_play_count(
     runner.algorithm = MinimalAlgorithm(runtime_context)
 
     with pytest.raises(ValueError, match="num_plays"):
-        runner.play(num_steps=1, formats="gif", num_plays=num_plays)
+        runner.play(num_steps=1, formats="gif", num_plays=num_plays, mode="configured")
 
 
 def test_play_stops_when_primary_environment_episode_ends(
@@ -648,3 +705,56 @@ def test_human_playback_does_not_wait_for_rgb_frames(
 
     assert environment.render_calls == 3
     assert saved_frames == []
+
+
+def test_human_playback_polls_before_reset_and_each_step(
+    runtime_context: RuntimeContext,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+
+    class PollingEnvironment(TrackingEnvironment):
+        def __init__(self, context: RuntimeContext) -> None:
+            super().__init__(context)
+            self.num_envs = 1
+
+        def reset(self) -> torch.Tensor:
+            events.append("reset")
+            return torch.zeros(1, 1)
+
+        def step(self, action: torch.Tensor):
+            events.append("step")
+            obs = torch.zeros(1, 1)
+            done = torch.zeros(1, dtype=torch.bool)
+            return obs, obs, torch.zeros(1), done, done, {}
+
+    class Session:
+        def poll(self) -> None:
+            events.append("poll")
+
+        def is_open(self) -> bool:
+            return True
+
+    runner = OnPolicyRunner(context=runtime_context)
+    runner.environment = PollingEnvironment(runtime_context)
+    runner.callbacks = []
+    runner.algorithm = MinimalAlgorithm(runtime_context)
+    runner.algorithm.set_eval_mode = lambda: None
+    monkeypatch.setattr(
+        runner.algorithm,
+        "act",
+        lambda obs, deterministic=False: PolicyOutput(
+            action=torch.zeros(1, 1),
+            log_prob=torch.zeros(1),
+            value=torch.zeros(1),
+        ),
+    )
+
+    runner._play_steps(
+        num_steps=2,
+        formats="gif",
+        frame_saver=None,
+        session=Session(),
+    )
+
+    assert events == ["poll", "reset", "poll", "step", "poll", "step"]

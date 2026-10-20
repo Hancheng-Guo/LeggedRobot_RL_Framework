@@ -89,6 +89,21 @@ def test_mujoco_rejects_unsupported_render_mode(runtime_context):
         simulator.close()
 
 
+def test_human_playback_switches_render_mode_temporarily(runtime_context, monkeypatch):
+    simulator = _configure_go1_simulator(runtime_context)
+    rendered: list[bool] = []
+    monkeypatch.setattr(simulator, "_human_render", lambda: rendered.append(True))
+    try:
+        assert simulator.render_mode is None
+        simulator.prepare_playback("human")
+        simulator.render()
+        assert rendered == [True]
+        simulator.terminate_playback()
+        assert simulator.render_mode is None
+    finally:
+        simulator.close()
+
+
 def test_mujoco_viewer_tracks_base_without_changing_view(runtime_context, monkeypatch):
     simulator = _configure_go1_simulator(runtime_context)
     camera = mujoco.MjvCamera()  # pyright: ignore[reportAttributeAccessIssue]

@@ -422,12 +422,12 @@
             "command": "extension.commandvariable.pickStringRemember",
             "args": {
                 "description": "Select human ROS 2 playback config",
-                "key": "selectedHumanRos2PlaybackConfig",
+                "key": "selectedHumanRos2Profile",
                 "rememberTransformed": true,
                 "options": [
                     {
-                        "label": "Last: ${remember:selectedHumanRos2PlaybackConfig}",
-                        "value": "${remember:selectedHumanRos2PlaybackConfig}"
+                        "label": "Last: ${remember:selectedHumanRos2Profile}",
+                        "value": "${remember:selectedHumanRos2Profile}"
                     },
                     {
                         "label": "Choose another...",
@@ -435,9 +435,9 @@
                     }
                 ],
                 "remember": {
-                    "selectedHumanRos2PlaybackConfig": {
-                        "key": "selectedHumanRos2PlaybackConfig",
-                        "default": "locomotion_unitree_go1_velocity"
+                    "selectedHumanRos2Profile": {
+                        "key": "selectedHumanRos2Profile",
+                        "default": "locomotion_velocity"
                     }
                 },
                 "pickFile": {

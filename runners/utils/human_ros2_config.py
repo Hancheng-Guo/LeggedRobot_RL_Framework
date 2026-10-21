@@ -22,7 +22,7 @@ class RosCommandMapping:
     field: str
     positive_key: str
     negative_key: str
-    speed: float
+    levels: tuple[float, ...]
 
 
 @dataclass(frozen=True)
@@ -58,8 +58,8 @@ def load_human_ros2_config(config_path: str | Path) -> HumanRos2Config:
     for name, entry in raw_ros.items():
         if not isinstance(name, str) or not name or not isinstance(entry, dict):
             raise ValueError(f"{path}: each ROS command needs a name and mapping.")
-        if set(entry) != {"field", "positive_key", "negative_key", "speed"}:
-            raise ValueError(f"{path}: ROS command {name!r} needs field, keys, speed.")
+        if set(entry) != {"field", "positive_key", "negative_key", "levels"}:
+            raise ValueError(f"{path}: ROS command {name!r} needs field, keys, levels.")
         field = entry["field"]
         if not isinstance(field, str) or field not in TWIST_FIELDS or field in used_fields:
             raise ValueError(f"{path}: invalid or duplicate Twist field {field!r}.")
@@ -71,10 +71,18 @@ def load_human_ros2_config(config_path: str | Path) -> HumanRos2Config:
                 raise ValueError(f"{path}: invalid or duplicate {key_name} for {name!r}.")
             used_keys.add(key)
             keys.append(key)
-        speed = entry["speed"]
-        if isinstance(speed, bool) or not isinstance(speed, (int, float)) or not math.isfinite(speed) or speed <= 0:
-            raise ValueError(f"{path}: speed for {name!r} must be positive and finite.")
-        ros_commands[name] = RosCommandMapping(field, keys[0], keys[1], float(speed))
+        raw_levels = entry["levels"]
+        if not isinstance(raw_levels, list) or len(raw_levels) < 3 or any(
+            isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)
+            for value in raw_levels
+        ):
+            raise ValueError(f"{path}: levels for {name!r} must contain finite numbers.")
+        levels = tuple(float(value) for value in raw_levels)
+        if not (levels[0] < 0 < levels[-1]) or 0.0 not in levels or any(
+            left >= right for left, right in zip(levels, levels[1:])
+        ):
+            raise ValueError(f"{path}: levels for {name!r} must increase across zero.")
+        ros_commands[name] = RosCommandMapping(field, keys[0], keys[1], levels)
 
     fixed_commands: dict[str, tuple[float, ...]] = {}
     for name, value in raw_fixed.items():

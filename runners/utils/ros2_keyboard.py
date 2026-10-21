@@ -9,11 +9,57 @@ import time
 from collections.abc import Mapping
 from typing import Any
 
-from .human_ros2_config import HumanRos2Config
+from .human_ros2_config import HumanRos2Config, RosCommandMapping
 
 PUBLISH_INTERVAL_MS = 50
 COMMAND_TIMEOUT_SECONDS = 0.5
 KEYBOARD_STARTUP_TIMEOUT_SECONDS = 60.0
+
+
+class _KeyboardGears:
+    def __init__(self, mappings: Mapping[str, RosCommandMapping]) -> None:
+        self.mappings = mappings
+        self.positions = {
+            name: mapping.levels.index(0.0)
+            for name, mapping in mappings.items()
+        }
+        self.held: set[str] = set()
+        self.keys = {
+            key: (name, direction)
+            for name, mapping in mappings.items()
+            for key, direction in (
+                (mapping.positive_key, 1),
+                (mapping.negative_key, -1),
+            )
+        }
+
+    def press(self, key: str) -> bool:
+        if key == "space":
+            self.zero()
+            return True
+        if key not in self.keys or key in self.held:
+            return False
+        self.held.add(key)
+        name, direction = self.keys[key]
+        self.positions[name] = max(
+            0,
+            min(len(self.mappings[name].levels) - 1, self.positions[name] + direction),
+        )
+        return True
+
+    def release(self, key: str) -> None:
+        self.held.discard(key)
+
+    def zero(self) -> None:
+        for name, mapping in self.mappings.items():
+            self.positions[name] = mapping.levels.index(0.0)
+
+    def reset(self) -> None:
+        self.zero()
+        self.held.clear()
+
+    def value(self, name: str) -> float:
+        return self.mappings[name].levels[self.positions[name]]
 
 
 def _keyboard_publisher(
@@ -40,40 +86,78 @@ def _keyboard_publisher(
         publisher = node.create_publisher(Twist, config.topic, 1)
         window = tk.Tk()
         window.title("Quadruped ROS 2 keyboard control")
-        controls = "  ".join(
-            f"{mapping.positive_key.upper()}/{mapping.negative_key.upper()} {name}"
-            for name, mapping in config.ros_commands.items()
+        controls = tk.Frame(window)
+        controls.pack(padx=24, pady=(24, 8))
+        for row, (name, mapping) in enumerate(config.ros_commands.items()):
+            tk.Label(controls, text=f"{name}:", anchor="w").grid(
+                row=row, column=0, sticky="w", padx=(0, 16),
+            )
+            tk.Label(controls, text=f"{mapping.positive_key.upper()} ↑").grid(
+                row=row, column=1, padx=(0, 8),
+            )
+            tk.Label(controls, text="/").grid(row=row, column=2, padx=(0, 8))
+            tk.Label(controls, text=f"{mapping.negative_key.upper()} ↓").grid(
+                row=row, column=3,
+            )
+        tk.Label(window, text="Space zero · Close to exit").pack(
+            padx=24, pady=(0, 24),
         )
-        tk.Label(window, text=f"{controls}\nSpace stop · Close to exit").pack(padx=24, pady=24)
-        pressed: set[str] = set()
-        keys = {
-            key
-            for mapping in config.ros_commands.values()
-            for key in (mapping.positive_key, mapping.negative_key)
-        }
+        tk.Label(window, text="Command values", anchor="w").pack(fill="x", padx=24)
+        values_label = tk.Label(
+            window, justify="left", anchor="w", font=("Consolas", 11),
+        )
+        values_label.pack(fill="x", padx=24, pady=(0, 24))
+        fixed_rows = [
+            f"{name}: [{', '.join(f'{value:+.2f}' for value in values)}] (fixed)"
+            for name, values in config.fixed_commands.items()
+        ]
+        gears = _KeyboardGears(config.ros_commands)
+        pending_releases: dict[str, str] = {}
 
         def publish() -> None:
             message = Twist()
-            for mapping in config.ros_commands.values():
-                value = mapping.speed * (
-                    int(mapping.positive_key in pressed)
-                    - int(mapping.negative_key in pressed)
-                )
+            current_rows = []
+            for name, mapping in config.ros_commands.items():
+                value = gears.value(name)
                 vector_name, component = mapping.field.split(".")
                 setattr(getattr(message, vector_name), component, value)
+                current_rows.append(
+                    f"{name}: {value:+.2f} "
+                    f"({gears.positions[name] + 1}/{len(mapping.levels)})"
+                )
             publisher.publish(message)
+            values_label.configure(text="\n".join(current_rows + fixed_rows))
 
         def key_down(event: Any) -> None:
             key = event.keysym.lower()
-            if key == "space":
-                pressed.clear()
-            elif key in keys:
-                pressed.add(key)
-            publish()
+            pending = pending_releases.pop(key, None)
+            if pending is not None:
+                window.after_cancel(pending)
+            if gears.press(key):
+                publish()
+
+        def finish_release(key: str) -> None:
+            pending_releases.pop(key, None)
+            gears.release(key)
 
         def key_up(event: Any) -> None:
-            pressed.discard(event.keysym.lower())
+            key = event.keysym.lower()
+            if key in gears.keys:
+                pending = pending_releases.pop(key, None)
+                if pending is not None:
+                    window.after_cancel(pending)
+                pending_releases[key] = window.after(50, finish_release, key)
+
+        def zero_and_publish() -> None:
+            for pending in pending_releases.values():
+                window.after_cancel(pending)
+            pending_releases.clear()
+            gears.reset()
             publish()
+
+        def close_window() -> None:
+            zero_and_publish()
+            window.quit()
 
         def tick() -> None:
             if stop.is_set():
@@ -84,13 +168,12 @@ def _keyboard_publisher(
 
         window.bind("<KeyPress>", key_down)
         window.bind("<KeyRelease>", key_up)
-        window.bind("<FocusOut>", lambda _event: (pressed.clear(), publish()))
-        window.protocol("WM_DELETE_WINDOW", window.quit)
+        window.bind("<FocusOut>", lambda _event: zero_and_publish())
+        window.protocol("WM_DELETE_WINDOW", close_window)
         ready.put(None)
         tick()
         window.mainloop()
-        pressed.clear()
-        publish()
+        zero_and_publish()
 
     except BaseException as error:
         ready.put(f"{type(error).__name__}: {error}")
@@ -175,7 +258,7 @@ class Ros2KeyboardSession:
             value = getattr(getattr(message, vector_name), component)
             if not math.isfinite(value):
                 return
-            values[name] = max(-mapping.speed, min(mapping.speed, value))
+            values[name] = max(mapping.levels[0], min(mapping.levels[-1], value))
         self._values = values
         self._last_message_at = time.monotonic()
 

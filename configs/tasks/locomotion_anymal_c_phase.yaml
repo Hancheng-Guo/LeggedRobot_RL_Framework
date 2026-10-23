@@ -1,5 +1,5 @@
 constants:
-  base_target_height: &base_target_height 0.52
+  base_target_height: &base_target_height 0.5
   # foot_lifted_height: &foot_lifted_height 0.1
   integral_length: &integral_length 300
   action_lags: &action_lags 4
@@ -19,7 +19,7 @@ action_manager_config:
 command_manager_config:
   terms:
     lin_vel_x: {type: SymmetricFastLpacSampleOnReset, params: {group: velocity, min_value: 0.0, max_value: 2.5, num_cell: 10}}
-    lin_vel_y: {type: UniformOnReset, params: {min_value: -0.5, max_value: 0.5}}
+    lin_vel_y: {type: SymmetricFastLpacSampleOnReset, params: {group: velocity, min_value: 0.0, max_value: 0.4, num_cell: 4}}
     ang_vel_z: {type: SymmetricFastLpacSampleOnReset, params: {group: velocity, min_value: 0.0, max_value: 1.5, num_cell: 3}}
     foot_phase_real: {type: UniformOnReset, params: {dim: 4, min_value: 1.0, max_value: 1.0}}
     foot_phase_imag: {type: UniformOnReset, params: {dim: 4, min_value: 0.0, max_value: 0.0}}
@@ -70,7 +70,7 @@ reward_manager_config:
 
     illegal_contact_l1: {weight: -2.0}
 
-    quadrupedal_command_adaptive_gait_phase_height_l2_exp: {weight: 2.0, params: {landing_distance: *base_target_height}}
+    quadrupedal_command_adaptive_gait_phase_height_l2_exp: {weight: 2.0, params: {landing_distance: *base_target_height, lift_height: 0.1}}
     # trot_loop_duration_tanh: {weight: 2.0, params: {growth_rate: 5.0}}
     quadrupedal_foot_velocity_diff_l2: {weight: -0.05}
     # foot_state_switch: {weight: -0.1}
@@ -88,7 +88,7 @@ termination_manager_config:
 
 curriculum_manager_config:
   terms:
-    fast_lpac_command_reward: {max_cells: 100000}
+    fast_lpac_command_reward: {max_cells: 100000, temperature: 0.012}
 
 
 event_manager_config: {}

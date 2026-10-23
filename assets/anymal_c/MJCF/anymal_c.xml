@@ -26,7 +26,7 @@
         <position kp="100" ctrlrange="-6.28 6.28" forcerange="-80 80"/>
       </default>
       <default class="affine_fe">
-        <position kp="100" ctrlrange="-2.00 2.00" forcerange="-80 80"/>
+        <position kp="100" ctrlrange="-1.57 1.57" forcerange="-80 80"/>
       </default>
       <default class="affine_left_haa">
         <position kp="100" ctrlrange="-0.73 0.50" forcerange="-80 80"/>

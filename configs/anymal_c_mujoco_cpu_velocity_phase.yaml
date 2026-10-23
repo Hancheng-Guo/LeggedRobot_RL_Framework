@@ -12,7 +12,7 @@ logging:
 
 stage:
   - velocity_tracking:
-      max_iterations: 5000
+      max_iterations: 10000
       transition:
         - {metric: "reward/track_linear_velocity_x_l2_exp_and_logcosh", method: mean, operator: ">=", threshold: 1.8, window: 100}
         - {metric: "reward/track_linear_velocity_y_l2_exp_and_logcosh", method: mean, operator: ">=", threshold: 1.8, window: 100}

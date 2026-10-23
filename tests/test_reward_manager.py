@@ -2,6 +2,7 @@ import pytest
 import torch
 from dataclasses import replace
 from typing import cast
+from unittest.mock import Mock
 
 from envs.tasks.managers.reward import RewardManager
 from envs.tasks.managers.task_state import TaskStateManager
@@ -247,6 +248,51 @@ def test_reward_manager_computes_weighted_reward_and_reuses_buffer(
     torch.testing.assert_close(info["reward"], expected.mean())
 
 
+@pytest.mark.parametrize("weight", [2.0, 0.0, -2.0])
+def test_reward_manager_preserves_raw_reward_and_computes_once_per_step(
+    runtime_context,
+    model_context,
+    monkeypatch,
+    weight,
+):
+    manager = RewardManager(
+        num_envs=2,
+        context=runtime_context,
+        model_context=model_context,
+        terms={"action_diff_l2": {"weight": weight}},
+    )
+    raw_buffer = manager.get_raw_term_reward("action_diff_l2")
+    weighted_buffer = manager.get_term_reward("action_diff_l2")
+    torch.testing.assert_close(raw_buffer, torch.zeros(2))
+    assert raw_buffer.shape == (2,)
+    assert raw_buffer.dtype == runtime_context.dtype
+    assert raw_buffer.device == runtime_context.device
+    assert raw_buffer.data_ptr() != weighted_buffer.data_ptr()
+
+    term = manager.terms["action_diff_l2"]
+    compute = Mock(wraps=term.compute)
+    monkeypatch.setattr(term, "compute", compute)
+    task_context = make_reward_context()
+    expected_raw = torch.tensor([5.0, 4.0])
+
+    for step in range(2):
+        reward, info = manager.compute(task_context)
+
+        assert compute.call_count == step + 1
+        assert manager.get_raw_term_reward("action_diff_l2") is raw_buffer
+        assert manager.get_term_reward("action_diff_l2") is weighted_buffer
+        torch.testing.assert_close(raw_buffer, expected_raw)
+        torch.testing.assert_close(weighted_buffer, expected_raw * weight)
+        torch.testing.assert_close(reward, expected_raw * weight)
+        torch.testing.assert_close(
+            info["reward/action_diff_l2"], expected_raw * weight,
+        )
+        torch.testing.assert_close(info["reward"], (expected_raw * weight).mean())
+
+        # Repeating the action produces zero difference from the stored history.
+        expected_raw = torch.zeros(2)
+
+
 def test_reward_manager_partial_reset(
     runtime_context,
     model_context,
@@ -255,10 +301,11 @@ def test_reward_manager_partial_reset(
         num_envs=2,
         context=runtime_context,
         model_context=model_context,
-        terms={"action_diff_l2": {}},
+        terms={"action_diff_l2": {"weight": 2.0}},
     )
     manager.compute(make_reward_context())
     previous = manager.get_term_reward("action_diff_l2")[0].clone()
+    previous_raw = manager.get_raw_term_reward("action_diff_l2")[0].clone()
 
     manager.reset(torch.tensor([1]))
 
@@ -267,6 +314,32 @@ def test_reward_manager_partial_reset(
         previous,
     )
     assert manager.get_term_reward("action_diff_l2")[1] == 0.0
+    torch.testing.assert_close(
+        manager.get_raw_term_reward("action_diff_l2")[0], previous_raw,
+    )
+    assert manager.get_raw_term_reward("action_diff_l2")[1] == 0.0
+
+
+def test_reward_manager_full_reset_clears_raw_and_weighted_rewards(
+    runtime_context,
+    model_context,
+):
+    manager = RewardManager(
+        num_envs=2,
+        context=runtime_context,
+        model_context=model_context,
+        terms={"action_diff_l2": {"weight": 2.0}},
+    )
+    raw_buffer = manager.get_raw_term_reward("action_diff_l2")
+    weighted_buffer = manager.get_term_reward("action_diff_l2")
+    manager.compute(make_reward_context())
+
+    manager.reset()
+
+    assert manager.get_raw_term_reward("action_diff_l2") is raw_buffer
+    assert manager.get_term_reward("action_diff_l2") is weighted_buffer
+    torch.testing.assert_close(raw_buffer, torch.zeros(2))
+    torch.testing.assert_close(weighted_buffer, torch.zeros(2))
 
 
 def test_new_reward_terms_compute_batched_tensors(

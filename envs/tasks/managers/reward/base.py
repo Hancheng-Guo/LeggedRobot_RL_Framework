@@ -23,6 +23,7 @@ class RewardManager:
         self.model_context = model_context
 
         self.terms: dict[str, BaseRewardTerm] = {}
+        self.raw_term_rewards: dict[str, torch.Tensor] = {}
         self.term_rewards: dict[str, torch.Tensor] = {}
         self._build_terms(terms)
 
@@ -74,6 +75,7 @@ class RewardManager:
             dtype=self.context.dtype,
             device=self.context.device,
         )
+        self.raw_term_rewards[name] = torch.zeros_like(self.term_rewards[name])
 
 
     def compute(
@@ -91,6 +93,7 @@ class RewardManager:
         for name, term in self.terms.items():
 
             reward = term.compute(task_context)
+            self.raw_term_rewards[name].copy_(reward)
             weighted_reward = reward * term.weight
             self.term_rewards[name].copy_(weighted_reward)
             weighted_reward_sum += weighted_reward
@@ -107,6 +110,14 @@ class RewardManager:
     ) -> torch.Tensor:
 
         return self.term_rewards[name]
+
+
+    def get_raw_term_reward(
+        self,
+        name: str,
+    ) -> torch.Tensor:
+
+        return self.raw_term_rewards[name]
     
 
     def reset(
@@ -120,8 +131,12 @@ class RewardManager:
         if env_ids is None:
             for value in self.term_rewards.values():
                 value.zero_()
+            for value in self.raw_term_rewards.values():
+                value.zero_()
 
             return
 
         for value in self.term_rewards.values():
+            value[env_ids] = 0.0
+        for value in self.raw_term_rewards.values():
             value[env_ids] = 0.0

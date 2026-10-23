@@ -93,11 +93,11 @@ python -m tools.play_checkpoint unitree_go1_mujoco_cpu_velocity_only_2026-10-04_
 python -m tools.play_human_ros2 unitree_go1_mujoco_cpu_velocity_only_2026-10-04_22-55-48 --playback-config locomotion_velocity
 ```
 
-也可运行 VS Code 的 `Tool: Play Checkpoint (ROS2 Keyboard)` 任务：先输入运行目录，通过下拉菜单选择播放配置。运行目录留空时选择最新运行；播放配置可选择上次使用的配置，或从 `configs/playback/human_ros2/` 中选择另一个 YAML 文件。在终端使用 `--playback-config` 时，可输入该目录下的文件名（`.yaml` 可省略），也可输入相对项目根目录的路径或绝对路径。
+也可运行 VS Code 的 `Tool: Play Checkpoint (ROS2 Keyboard)` 任务：先输入运行目录，通过下拉菜单选择播放配置。运行目录留空时选择最新运行；播放配置可选择上次使用的配置，或从 `configs/playback/` 中选择另一个 YAML 文件。在终端使用 `--playback-config` 时，可输入该目录下的文件名（`.yaml` 可省略），也可输入相对项目根目录的路径或绝对路径。
 
 此入口调用现有 `play(mode="human_ros2")`，由 `play()` 创建和清理 ROS 2 节点及键盘窗口，不生成视频。键盘窗口需保持焦点；每按一次正向或反向键升降一挡，松键后保持当前值，空格将全部控制值归零，失焦或关闭窗口也会归零。控制消息类型为 `geometry_msgs/Twist`。所用 Python 环境需能导入 `rclpy` 和 `geometry_msgs`。MuJoCo 可在播放时切换 human 窗口；已经以 headless 模式启动的 Isaac Sim 无法在同一进程切换到 human。
 
-播放配置位于 `configs/playback/human_ros2/`：`locomotion_phase` 适用于 Anymal C 和 Unitree Go1 的 phase 任务，`locomotion_velocity` 适用于 Go1 速度跟踪任务。站立任务的三个速度 command 在主配置中均固定为零，因此不提供键盘速度播放配置。文件中的 `topic` 和 `ros_commands` 指定 ROS 话题、Twist 字段、键位和递增的 `levels` 挡位列表（须包含零挡及正负挡）；挡位端点与对应主任务配置的 command 范围一致。`fixed_commands` 指定其余 command 的固定值（向量按各分量列出）。每个任务 command 必须恰好由其中一种方式提供；启动播放时会检查名称和维度。若两个任务的 command 名称相同但范围不同，仍须自行选择与检查点任务匹配的播放配置。配置文件路径会写入播放日志。现有配置使用 `/cmd_vel`，键位为 `W/S`、`A/D`、`Q/E`；修改挡位只需编辑播放配置，不影响训练配置。
+播放配置位于 `configs/playback/`：`locomotion_phase` 适用于 Anymal C 和 Unitree Go1 的 phase 任务，`locomotion_velocity` 适用于 Go1 速度跟踪任务。站立任务的三个速度 command 在主配置中均固定为零，因此不提供键盘速度播放配置。文件中的 `topic` 和 `ros_commands` 指定 ROS 话题、Twist 字段、键位和递增的 `levels` 挡位列表（须包含零挡及正负挡）；挡位范围不超过对应主任务配置的 command 范围。`fixed_commands` 指定其余 command 的固定值（向量按各分量列出）。每个任务 command 必须恰好由其中一种方式提供；启动播放时会检查名称和维度。若两个任务的 command 名称相同但范围不同，仍须自行选择与检查点任务匹配的播放配置。配置文件路径会写入播放日志。现有配置使用 `/cmd_vel`，键位为 `W/S`、`A/D`、`Q/E`；修改挡位只需编辑播放配置，不影响训练配置。
 
 ROS 2 Jazzy 的 Conda 包列在 `requirements/ros2.txt`。在项目根目录、运行仿真的 Conda 环境中执行：
 

@@ -443,7 +443,7 @@
                 "pickFile": {
                     "humanRos2PlaybackConfig": {
                         "description": "Select playback config",
-                        "fromFolder": { "fixed": "${workspaceFolder}/configs/playback/human_ros2" },
+                        "fromFolder": { "fixed": "${workspaceFolder}/configs/playback" },
                         "include": "*.yaml",
                         "display": "fileName",
                         "transform": { "text": "${fileBasenameNoExtension}" }

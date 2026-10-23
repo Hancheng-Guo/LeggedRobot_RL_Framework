@@ -438,7 +438,7 @@ def test_human_ros2_play_owns_command_session_lifecycle(
     environment.SUPPORTS_CONCURRENT_INSTANCES = False
     runner.environment = environment
     runner.algorithm = MinimalAlgorithm(runtime_context)
-    config_path = PROJECT_ROOT / "configs/playback/human_ros2/locomotion_phase.yaml"
+    config_path = PROJECT_ROOT / "configs/playback/locomotion_phase.yaml"
     monkeypatch.setattr(runner, "_play_steps", lambda **kwargs: events.append("step") or True)
 
     runner.play(

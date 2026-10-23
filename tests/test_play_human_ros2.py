@@ -10,7 +10,7 @@ from tools import play_human_ros2
 
 
 @pytest.mark.parametrize("config_arg", [
-    "custom", "custom.yaml", "configs/playback/human_ros2/custom.yaml",
+    "custom", "custom.yaml", "configs/playback/custom.yaml",
     "absolute",
 ])
 @pytest.mark.parametrize("run_arg", ["named", "latest"])
@@ -20,7 +20,7 @@ def test_main_passes_explicit_playback_config(
 ) -> None:
     run_dir = tmp_path / "checkpoints" / "robot_2026-10-01_12-30-05"
     run_dir.mkdir(parents=True)
-    config_path = tmp_path / "configs" / "playback" / "human_ros2" / "custom.yaml"
+    config_path = tmp_path / "configs" / "playback" / "custom.yaml"
     config_path.parent.mkdir(parents=True)
     config_path.write_text("topic: /cmd_vel\n", encoding="utf-8")
     calls: list[object] = []

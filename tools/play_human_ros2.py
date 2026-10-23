@@ -17,7 +17,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument(
         "--playback-config", required=True,
-        help="Playback config name under configs/playback/human_ros2, or a YAML path.",
+        help="Playback config name under configs/playback, or a YAML path.",
     )
     args = parser.parse_args(argv)
     if not args.playback_config.strip():
@@ -25,7 +25,7 @@ def main(argv: list[str] | None = None) -> None:
     playback_config = Path(args.playback_config).expanduser()
     if not playback_config.is_absolute():
         if playback_config.parent == Path("."):
-            playback_config = Path("configs/playback/human_ros2") / playback_config
+            playback_config = Path("configs/playback") / playback_config
         playback_config = PROJECT_ROOT / playback_config
     if not playback_config.suffix:
         playback_config = playback_config.with_suffix(".yaml")

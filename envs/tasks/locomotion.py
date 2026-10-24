@@ -109,7 +109,9 @@ class LocomotionTaskLogic(BaseTaskLogic):
     ) -> dict:
 
         curriculum_info = self.curriculum_manager.update(
-            step_result.reward
+            raw_term_rewards=self.reward_manager.raw_term_rewards,
+            term_rewards=self.reward_manager.term_rewards,
+            total_reward=self.reward_manager.total_reward,
         )
         manager_info = super().post_step(task_context, step_result)
 

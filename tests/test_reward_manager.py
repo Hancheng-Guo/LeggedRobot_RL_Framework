@@ -105,6 +105,7 @@ def test_joint_position_diff_groups_register_with_reward_manager(
         info["reward/leg_joint_position_diff_l2"], torch.tensor([0.0, -18.75]),
     )
     torch.testing.assert_close(reward, torch.tensor([-4.5, -18.75]))
+    torch.testing.assert_close(manager.total_reward, reward)
 
 
 def make_state_reward_context() -> TaskContext:
@@ -263,6 +264,8 @@ def test_reward_manager_preserves_raw_reward_and_computes_once_per_step(
     )
     raw_buffer = manager.get_raw_term_reward("action_diff_l2")
     weighted_buffer = manager.get_term_reward("action_diff_l2")
+    total_buffer = manager.total_reward
+    torch.testing.assert_close(total_buffer, torch.zeros(2))
     torch.testing.assert_close(raw_buffer, torch.zeros(2))
     assert raw_buffer.shape == (2,)
     assert raw_buffer.dtype == runtime_context.dtype
@@ -281,9 +284,11 @@ def test_reward_manager_preserves_raw_reward_and_computes_once_per_step(
         assert compute.call_count == step + 1
         assert manager.get_raw_term_reward("action_diff_l2") is raw_buffer
         assert manager.get_term_reward("action_diff_l2") is weighted_buffer
+        assert manager.total_reward is total_buffer
         torch.testing.assert_close(raw_buffer, expected_raw)
         torch.testing.assert_close(weighted_buffer, expected_raw * weight)
         torch.testing.assert_close(reward, expected_raw * weight)
+        torch.testing.assert_close(total_buffer, reward)
         torch.testing.assert_close(
             info["reward/action_diff_l2"], expected_raw * weight,
         )
@@ -291,6 +296,27 @@ def test_reward_manager_preserves_raw_reward_and_computes_once_per_step(
 
         # Repeating the action produces zero difference from the stored history.
         expected_raw = torch.zeros(2)
+
+
+def test_reward_manager_total_buffer_does_not_mutate_returned_rewards(
+    runtime_context, model_context,
+):
+    manager = RewardManager(
+        num_envs=2, context=runtime_context, model_context=model_context,
+        terms={"action_diff_l2": {"weight": 2.0}},
+    )
+    context = make_reward_context()
+    first_reward, _ = manager.compute(context)
+    total_buffer = manager.total_reward
+
+    second_reward, _ = manager.compute(context)
+    assert manager.total_reward is total_buffer
+    torch.testing.assert_close(first_reward, torch.tensor([10.0, 8.0]))
+    torch.testing.assert_close(total_buffer, second_reward)
+    torch.testing.assert_close(total_buffer, torch.zeros(2))
+
+    manager.reset()
+    torch.testing.assert_close(first_reward, torch.tensor([10.0, 8.0]))
 
 
 def test_reward_manager_partial_reset(
@@ -318,6 +344,8 @@ def test_reward_manager_partial_reset(
         manager.get_raw_term_reward("action_diff_l2")[0], previous_raw,
     )
     assert manager.get_raw_term_reward("action_diff_l2")[1] == 0.0
+    torch.testing.assert_close(manager.total_reward[0], previous)
+    assert manager.total_reward[1] == 0.0
 
 
 def test_reward_manager_full_reset_clears_raw_and_weighted_rewards(
@@ -340,6 +368,7 @@ def test_reward_manager_full_reset_clears_raw_and_weighted_rewards(
     assert manager.get_term_reward("action_diff_l2") is weighted_buffer
     torch.testing.assert_close(raw_buffer, torch.zeros(2))
     torch.testing.assert_close(weighted_buffer, torch.zeros(2))
+    torch.testing.assert_close(manager.total_reward, torch.zeros(2))
 
 
 def test_new_reward_terms_compute_batched_tensors(

@@ -3,8 +3,15 @@ import pytest
 from typing import Any
 from typing import cast
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
 
+from envs.simulators.utils import SimulatorState
+from envs.tasks.locomotion import LocomotionTaskLogic
+from envs.tasks.managers.command import CommandManager
 from envs.tasks.managers.curriculum import CurriculumManager
+from envs.tasks.managers.reward import RewardManager
+from envs.tasks.utils import TaskContext, TaskStepResult
 from envs.tasks.managers.curriculum.terms.command import (
     FastLpacCommandReward,
     LpacCommandReward,
@@ -295,6 +302,150 @@ def test_task_configs_define_valid_curriculum_reward_sources(
     assert set(term.reward_sources) == set(term.spaces) == {"velocity"}
 
 
+@pytest.mark.parametrize("step_dt", [0.01, 0.1])
+@pytest.mark.parametrize(
+    ("sources", "expected"),
+    [
+        (["reward/action_diff_l2"], [10.0, 8.0]),
+        ([{"reward/action_diff_l2": 0.5}], [2.5, 2.0]),
+        ([{"reward/joint_velocity_l2": -2.0}], [-20.0, -10.0]),
+        (
+            [{"reward/action_diff_l2": 0.0}, "reward/joint_velocity_l2"],
+            [-30.0, -15.0],
+        ),
+        (["reward"], [-20.0, -7.0]),
+        (["reward", {"reward/action_diff_l2": 0.5}], [-17.5, -5.0]),
+    ],
+)
+def test_task_routes_real_reward_sources_without_dt_scaling(
+    runtime_context, model_context, reward_source_config, monkeypatch,
+    step_dt, sources, expected,
+) -> None:
+    name, config = next(iter(reward_source_config["terms"].items()))
+    config["min_samples_per_cell"] = 10
+    config["reward_sources"]["motion"] = sources
+    reward_config = reward_source_config["manager_configs"]["reward_manager_config"]
+    reward_config["terms"]["action_diff_l2"]["weight"] = 2.0
+    reward_config["terms"]["joint_velocity_l2"]["weight"] = -3.0
+    manager = CurriculumManager(
+        num_envs=2, context=runtime_context, model_context=model_context,
+        **reward_source_config,
+    )
+    term = cast(LpacCommandReward | FastLpacCommandReward, manager.get_term(name))
+    for buffer in term.buffers.values():
+        buffer.assigned_cell_ids.copy_(torch.tensor([0, 1]))
+
+    task = LocomotionTaskLogic(runtime_context)
+    task.curriculum_manager = manager
+    task.reward_manager = RewardManager(
+        num_envs=2, context=runtime_context, model_context=model_context,
+        **reward_config,
+    )
+    command_update = Mock(return_value={"command/updated": True})
+    task.command_manager = cast(CommandManager, SimpleNamespace(update=command_update))
+    qvel = torch.zeros(2, 8)
+    qvel[:, [0, 7]] = torch.tensor([[2.0, 4.0], [1.0, 3.0]])
+    context = TaskContext(
+        state=cast(SimulatorState, SimpleNamespace(qvel=qvel)),
+        command={}, last_command={},
+        action=torch.tensor([[1.0, 3.0], [2.0, 2.0]]),
+        last_action=torch.zeros(2, 2),
+        episode_step=torch.ones(2, dtype=torch.long), step_dt=step_dt,
+    )
+    compute_spies = []
+    for reward_term in task.reward_manager.terms.values():
+        compute = Mock(wraps=reward_term.compute)
+        monkeypatch.setattr(reward_term, "compute", compute)
+        compute_spies.append(compute)
+
+    reward, reward_info = task.compute_reward(context)
+    result = TaskStepResult(
+        reward=reward * step_dt,
+        terminated=torch.zeros(2, dtype=torch.bool),
+        truncated=torch.zeros(2, dtype=torch.bool),
+    )
+    info = task.post_step(context, result)
+
+    torch.testing.assert_close(reward, torch.tensor([-20.0, -7.0]))
+    torch.testing.assert_close(reward_info["reward"], reward.mean())
+    torch.testing.assert_close(term.episode_reward_sum["motion"], torch.tensor(expected))
+    torch.testing.assert_close(term.episode_reward_sum["posture"], torch.tensor([15.0, 12.0]))
+    assert info["command/updated"] is True
+    command_update.assert_called_once_with(context)
+    assert all(compute.call_count == 1 for compute in compute_spies)
+    # Composition must not overwrite RewardManager's reusable inputs.
+    torch.testing.assert_close(task.reward_manager.raw_term_rewards["action_diff_l2"], torch.tensor([5.0, 4.0]))
+    torch.testing.assert_close(task.reward_manager.term_rewards["joint_velocity_l2"], torch.tensor([-30.0, -15.0]))
+
+    manager.reset(torch.tensor([0]))
+    torch.testing.assert_close(term.buffers["motion"].reward_sum, torch.tensor([expected[0], 0.0]))
+    torch.testing.assert_close(term.buffers["posture"].reward_sum, torch.tensor([15.0, 0.0]))
+    torch.testing.assert_close(term.episode_reward_sum["motion"], torch.tensor([0.0, expected[1]]))
+    torch.testing.assert_close(term.episode_reward_sum["posture"], torch.tensor([0.0, 12.0]))
+
+
+def test_total_reward_source_uses_supplied_vector_without_term_summation(
+    runtime_context, model_context, reward_source_config,
+) -> None:
+    name, config = next(iter(reward_source_config["terms"].items()))
+    config["min_samples_per_cell"] = 10
+    config["reward_sources"] = {"motion": ["reward"], "posture": ["reward"]}
+    manager = CurriculumManager(
+        num_envs=2, context=runtime_context, model_context=model_context,
+        **reward_source_config,
+    )
+    term = cast(LpacCommandReward | FastLpacCommandReward, manager.get_term(name))
+    for buffer in term.buffers.values():
+        buffer.assigned_cell_ids.copy_(torch.tensor([0, 1]))
+    total_reward = torch.tensor([2.0, -5.0])
+    # A total-only source needs no per-term data and must not rebuild the sum.
+    manager.update(raw_term_rewards={}, term_rewards={}, total_reward=total_reward)
+    manager.reset()
+
+    for buffer in term.buffers.values():
+        torch.testing.assert_close(buffer.reward_sum, total_reward)
+    torch.testing.assert_close(total_reward, torch.tensor([2.0, -5.0]))
+
+
+@pytest.mark.parametrize("normalize", [False, True])
+def test_group_rewards_settle_independently_and_clear_invalid_assignments(
+    runtime_context, model_context, reward_source_config, normalize,
+) -> None:
+    name, config = next(iter(reward_source_config["terms"].items()))
+    config["min_samples_per_cell"] = 10
+    config["normalize_by_episode_steps"] = normalize
+    manager = CurriculumManager(
+        num_envs=2, context=runtime_context, model_context=model_context,
+        **reward_source_config,
+    )
+    term = cast(LpacCommandReward | FastLpacCommandReward, manager.get_term(name))
+    term.buffers["motion"].assigned_cell_ids.copy_(torch.tensor([-1, 1]))
+    term.buffers["posture"].assigned_cell_ids.copy_(torch.tensor([0, 1]))
+    raw = {"action_diff_l2": torch.tensor([2.0, 4.0]), "joint_velocity_l2": torch.tensor([3.0, 5.0])}
+    weighted = {"action_diff_l2": torch.tensor([20.0, 40.0]), "joint_velocity_l2": torch.zeros(2)}
+    for _ in range(2):
+        manager.update(
+            raw_term_rewards=raw, term_rewards=weighted,
+            total_reward=torch.tensor([20.0, 40.0]),
+        )
+    manager.reset(torch.tensor([0]))
+
+    expected_posture = 6.0 if normalize else 12.0
+    torch.testing.assert_close(term.buffers["motion"].sample_count, torch.tensor([0, 0]))
+    torch.testing.assert_close(term.buffers["posture"].reward_sum, torch.tensor([expected_posture, 0.0]))
+    torch.testing.assert_close(term.buffers["posture"].sample_count, torch.tensor([1, 0]))
+    torch.testing.assert_close(term.episode_step_count, torch.tensor([0, 2]))
+    torch.testing.assert_close(term.episode_reward_sum["motion"], torch.tensor([0.0, 60.0]))
+    torch.testing.assert_close(term.episode_reward_sum["posture"], torch.tensor([0.0, 24.0]))
+
+    manager.reset()
+    expected_motion = 30.0 if normalize else 60.0
+    torch.testing.assert_close(term.buffers["motion"].reward_sum, torch.tensor([0.0, expected_motion]))
+    torch.testing.assert_close(term.buffers["posture"].reward_sum, torch.tensor([expected_posture, 2 * expected_posture]))
+    assert all(torch.count_nonzero(value) == 0 for value in term.episode_reward_sum.values())
+    assert torch.count_nonzero(term.episode_step_count) == 0
+
+
 def test_lpac_discovers_derived_command_terms(
     runtime_context,
     model_context,
@@ -353,21 +504,33 @@ def test_lpac_reset_records_episode_scores_for_different_lengths(
     buffer.assigned_cell_ids.copy_(torch.tensor([0, 1, 2]))
     reward = torch.tensor([1.0, -2.0, 3.0])
 
-    manager.update(reward)
+    manager.update(
+        raw_term_rewards={"action_diff_l2": reward},
+        term_rewards={"action_diff_l2": reward},
+        total_reward=reward,
+    )
     manager.reset(torch.tensor([0]))
     torch.testing.assert_close(buffer.reward_sum, torch.tensor([1.0, 0.0, 0.0]))
-    torch.testing.assert_close(term.episode_reward_sum, torch.tensor([0.0, -2.0, 3.0]))
+    torch.testing.assert_close(term.episode_reward_sum["motion"], torch.tensor([0.0, -2.0, 3.0]))
     torch.testing.assert_close(term.episode_step_count, torch.tensor([0, 1, 1]))
 
-    manager.update(reward)
+    manager.update(
+        raw_term_rewards={"action_diff_l2": reward},
+        term_rewards={"action_diff_l2": reward},
+        total_reward=reward,
+    )
     manager.reset(torch.tensor([1]))
-    manager.update(reward)
+    manager.update(
+        raw_term_rewards={"action_diff_l2": reward},
+        term_rewards={"action_diff_l2": reward},
+        total_reward=reward,
+    )
     manager.reset(torch.tensor([2]))
 
     expected = [1.0, -2.0, 3.0] if normalize else [1.0, -4.0, 9.0]
     torch.testing.assert_close(buffer.reward_sum, torch.tensor(expected))
     torch.testing.assert_close(buffer.sample_count, torch.tensor([1, 1, 1]))
-    torch.testing.assert_close(term.episode_reward_sum, torch.tensor([2.0, -2.0, 0.0]))
+    torch.testing.assert_close(term.episode_reward_sum["motion"], torch.tensor([2.0, -2.0, 0.0]))
     torch.testing.assert_close(term.episode_step_count, torch.tensor([2, 1, 0]))
 
 
@@ -386,8 +549,16 @@ def test_lpac_full_reset_averages_episode_scores_per_cell(
     buffer = term.buffers["motion"]
     buffer.assigned_cell_ids.copy_(torch.tensor([0, 0, 1]))
 
-    manager.update(torch.tensor([1.0, 2.0, 3.0]))
-    manager.update(torch.tensor([1.0, 2.0, 3.0]))
+    manager.update(
+        raw_term_rewards={"action_diff_l2": torch.tensor([1.0, 2.0, 3.0])},
+        term_rewards={"action_diff_l2": torch.tensor([1.0, 2.0, 3.0])},
+        total_reward=torch.tensor([1.0, 2.0, 3.0]),
+    )
+    manager.update(
+        raw_term_rewards={"action_diff_l2": torch.tensor([1.0, 2.0, 3.0])},
+        term_rewards={"action_diff_l2": torch.tensor([1.0, 2.0, 3.0])},
+        total_reward=torch.tensor([1.0, 2.0, 3.0]),
+    )
     manager.reset()
 
     expected_sum = torch.tensor([3.0, 3.0, 0.0] if normalize else [6.0, 6.0, 0.0])
@@ -395,7 +566,7 @@ def test_lpac_full_reset_averages_episode_scores_per_cell(
     torch.testing.assert_close(buffer.reward_sum, expected_sum)
     torch.testing.assert_close(buffer.sample_count, torch.tensor([2, 1, 0]))
     torch.testing.assert_close(term._calculate_reward_mean("motion"), expected_mean)
-    torch.testing.assert_close(term.episode_reward_sum, torch.zeros(3))
+    torch.testing.assert_close(term.episode_reward_sum["motion"], torch.zeros(3))
     torch.testing.assert_close(term.episode_step_count, torch.zeros(3, dtype=torch.long))
 
     # Resetting again without a new step must not count another episode.

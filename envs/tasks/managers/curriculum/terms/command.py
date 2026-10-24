@@ -67,7 +67,7 @@ class CommandRewardCurriculum(BaseCurriculumTerm, ABC):
         reward_sources: dict[str, Any],
         reward_manager_config: dict[str, Any],
     ) -> dict[str, dict[str, float | None]]:
-        """Parse reward sources; applying them is a separate update step.
+        """Parse reward sources used to construct each group's step reward.
 
         None preserves a term's training weight (or selects the weighted total
         for 'reward'). Explicit coefficients replace training weights, without
@@ -115,7 +115,8 @@ class CommandRewardCurriculum(BaseCurriculumTerm, ABC):
                     raise ValueError(f"{label} reward names must be non-empty strings.")
 
                 if name != "reward" and (
-                    not name.startswith("reward/") or name[7:] not in reward_terms
+                    not name.startswith("reward/")
+                    or name.removeprefix("reward/") not in reward_terms
                 ):
                     raise ValueError(f"{label} references unknown reward source {name!r}.")
                 if name in coefficients:
@@ -416,7 +417,10 @@ class CommandRewardCurriculum(BaseCurriculumTerm, ABC):
     @abstractmethod
     def update(     # update rewards to cell buffer
         self,
-        reward: torch.Tensor
+        *,
+        raw_term_rewards: dict[str, torch.Tensor],
+        term_rewards: dict[str, torch.Tensor],
+        total_reward: torch.Tensor,
     ) -> dict[str, torch.Tensor]:
         raise NotImplementedError(
             "Subclasses of CommandRewardCurriculum must implement "
@@ -591,11 +595,14 @@ class BaseLpacCommandReward(CommandRewardCurriculum, ABC):
             name: self._calculate_probabilities(name)
             for name in self.buffers
         }
-        self.episode_reward_sum = torch.zeros(
-            self.num_envs,
-            dtype=self.context.dtype,
-            device=self.context.device,
-        )
+        self.episode_reward_sum = {
+            name: torch.zeros(
+                self.num_envs,
+                dtype=self.context.dtype,
+                device=self.context.device,
+            )
+            for name in self.buffers
+        }
         self.episode_step_count = torch.zeros(
             self.num_envs,
             dtype=torch.long,
@@ -605,11 +612,30 @@ class BaseLpacCommandReward(CommandRewardCurriculum, ABC):
 
     def update(
         self,
-        reward: torch.Tensor,
-        *args, **kwargs,
+        *,
+        raw_term_rewards: dict[str, torch.Tensor],
+        term_rewards: dict[str, torch.Tensor],
+        total_reward: torch.Tensor,
     ) -> dict[str, torch.Tensor]:
 
-        self.episode_reward_sum += reward
+        # Resolve all groups before changing accumulators. No input has dt
+        # scaling; explicit coefficients apply to raw rewards, not weighted ones.
+        group_rewards: dict[str, torch.Tensor] = {}
+        for group, sources in self.reward_sources.items():
+            reward = torch.zeros_like(self.episode_reward_sum[group])
+            for source, coefficient in sources.items():
+                if source == "reward":
+                    reward += total_reward
+                else:
+                    term_name = source.removeprefix("reward/")
+                    if coefficient is None:
+                        reward += term_rewards[term_name]
+                    else:
+                        reward += raw_term_rewards[term_name] * coefficient
+            group_rewards[group] = reward
+
+        for group, reward in group_rewards.items():
+            self.episode_reward_sum[group] += reward
         self.episode_step_count += 1
 
         return {
@@ -624,22 +650,21 @@ class BaseLpacCommandReward(CommandRewardCurriculum, ABC):
     ) -> None:
 
         collected = self.episode_step_count > 0
-        valid = torch.ones(self.num_envs,dtype=torch.bool,device=self.context.device)
-        for buffer in self.buffers.values():
-            valid &= buffer.assigned_cell_ids >= 0
         if env_ids is None:
-            done = torch.arange(
+            selected = torch.arange(
                 self.num_envs,
                 dtype=torch.long,
                 device=self.context.device,
-            )[(collected & valid)]
+            )
         else:
-            done = env_ids[(collected & valid)[env_ids]]
+            selected = env_ids
 
         for name, buffer in self.buffers.items():
+            valid = buffer.assigned_cell_ids >= 0
+            done = selected[(collected & valid)[selected]]
             cell_ids = buffer.assigned_cell_ids[done]
 
-            episode_reward = self.episode_reward_sum[done]
+            episode_reward = self.episode_reward_sum[name][done]
             if self.normalize_by_episode_steps:
                 episode_reward = episode_reward / self.episode_step_count[done]
             buffer.reward_sum.scatter_add_(0, cell_ids, episode_reward)
@@ -648,12 +673,9 @@ class BaseLpacCommandReward(CommandRewardCurriculum, ABC):
             buffer.assigned_cell_ids[done] = -1
             self._update_space(name)
 
-        if env_ids is None:
-            self.episode_step_count.fill_(0)
-            self.episode_reward_sum.fill_(0)
-        else:
-            self.episode_step_count[done] = 0
-            self.episode_reward_sum[done] = 0
+        self.episode_step_count[selected] = 0
+        for reward_sum in self.episode_reward_sum.values():
+            reward_sum[selected] = 0
 
         self.resample(set(self.buffers), env_ids)
 

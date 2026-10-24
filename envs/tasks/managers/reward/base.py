@@ -25,6 +25,11 @@ class RewardManager:
         self.terms: dict[str, BaseRewardTerm] = {}
         self.raw_term_rewards: dict[str, torch.Tensor] = {}
         self.term_rewards: dict[str, torch.Tensor] = {}
+        self.total_reward = torch.zeros(
+            self.num_envs,
+            dtype=self.context.dtype,
+            device=self.context.device,
+        )
         self._build_terms(terms)
 
 
@@ -99,6 +104,7 @@ class RewardManager:
             weighted_reward_sum += weighted_reward
             weighted_reward_info[f"reward/{name}"] = weighted_reward
 
+        self.total_reward.copy_(weighted_reward_sum)
         weighted_reward_info["reward"] = weighted_reward_sum.mean()
             
         return weighted_reward_sum, weighted_reward_info
@@ -129,6 +135,7 @@ class RewardManager:
             term.reset(env_ids)
 
         if env_ids is None:
+            self.total_reward.zero_()
             for value in self.term_rewards.values():
                 value.zero_()
             for value in self.raw_term_rewards.values():
@@ -136,6 +143,7 @@ class RewardManager:
 
             return
 
+        self.total_reward[env_ids] = 0.0
         for value in self.term_rewards.values():
             value[env_ids] = 0.0
         for value in self.raw_term_rewards.values():

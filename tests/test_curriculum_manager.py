@@ -161,7 +161,11 @@ def test_lpac_uses_first_window_as_zero_progress_baseline(
     buffer = term.buffers["motion"]
     buffer.assigned_cell_ids.copy_(torch.tensor([0, 1, 2]))
 
-    manager.update(torch.tensor([1.0, 2.0, 3.0]))
+    manager.update(
+        raw_term_rewards={"action_diff_l2": torch.tensor([1.0, 2.0, 3.0])},
+        term_rewards={"action_diff_l2": torch.tensor([1.0, 2.0, 3.0])},
+        total_reward=torch.tensor([1.0, 2.0, 3.0]),
+    )
     manager.reset(torch.tensor([0, 1, 2]))
 
     torch.testing.assert_close(
@@ -186,11 +190,19 @@ def test_lpac_prioritizes_positive_progress_after_second_window(
     buffer = term.buffers["motion"]
 
     buffer.assigned_cell_ids.copy_(torch.tensor([0, 1, 2]))
-    manager.update(torch.tensor([1.0, 2.0, 3.0]))
+    manager.update(
+        raw_term_rewards={"action_diff_l2": torch.tensor([1.0, 2.0, 3.0])},
+        term_rewards={"action_diff_l2": torch.tensor([1.0, 2.0, 3.0])},
+        total_reward=torch.tensor([1.0, 2.0, 3.0]),
+    )
     manager.reset(torch.tensor([0, 1, 2]))
 
     buffer.assigned_cell_ids.copy_(torch.tensor([0, 1, 2]))
-    manager.update(torch.tensor([2.0, 1.0, 3.0]))
+    manager.update(
+        raw_term_rewards={"action_diff_l2": torch.tensor([2.0, 1.0, 3.0])},
+        term_rewards={"action_diff_l2": torch.tensor([2.0, 1.0, 3.0])},
+        total_reward=torch.tensor([2.0, 1.0, 3.0]),
+    )
     manager.reset(torch.tensor([0, 1, 2]))
 
     torch.testing.assert_close(
@@ -274,7 +286,11 @@ def test_curriculum_accumulates_reward_by_assigned_joint_cell(
     buffer = term.buffers["motion"]
     buffer.assigned_cell_ids.copy_(torch.tensor([0, 1, 0, 2]))
 
-    manager.update(torch.tensor([1.0, 2.0, 3.0, 4.0]))
+    manager.update(
+        raw_term_rewards={"action_diff_l2": torch.tensor([1.0, 2.0, 3.0, 4.0])},
+        term_rewards={"action_diff_l2": torch.tensor([1.0, 2.0, 3.0, 4.0])},
+        total_reward=torch.tensor([1.0, 2.0, 3.0, 4.0]),
+    )
 
     torch.testing.assert_close(
         buffer.reward_sum,

@@ -22,6 +22,15 @@ class CommandCurriculumBuffer:
     assigned_cell_ids: torch.Tensor
 
 
+@dataclass
+class CellRewardStatistics:
+    reward_sum: torch.Tensor
+    sample_count: torch.Tensor
+    reward_mean: torch.Tensor
+    valid: torch.Tensor
+    revision: torch.Tensor
+
+
 class CommandRewardCurriculum(BaseCurriculumTerm, ABC):
 
     manager_config_names = ("command_manager_config", "reward_manager_config")
@@ -582,6 +591,23 @@ class BaseLpacCommandReward(CommandRewardCurriculum, ABC):
 
         self.min_samples_per_cell = min_samples_per_cell
         self.normalize_by_episode_steps = normalize_by_episode_steps
+        # Track cell evaluations separately from the sampling algorithm.
+        # Sampling buffer resets do not erase these statistics, 
+        # and FastLPAC's estimated baselines do not count as real cell evaluations.
+        self.cell_statistics = {
+            name: CellRewardStatistics(
+                reward_sum=torch.zeros_like(buffer.reward_sum),
+                sample_count=torch.zeros_like(buffer.sample_count),
+                reward_mean=torch.full_like(buffer.reward_sum, torch.nan),
+                valid=torch.zeros_like(buffer.sample_count, dtype=torch.bool),
+                revision=torch.zeros((), dtype=torch.long, device=self.context.device),
+            )
+            for name, buffer in self.buffers.items()
+        }
+        self._cell_metrics = {
+            name: self._summarize_cell_statistics(name)
+            for name in self.buffers
+        }
 
         self.last_reward_mean = {
             name: torch.full_like(buffer.reward_sum, torch.nan)
@@ -670,6 +696,7 @@ class BaseLpacCommandReward(CommandRewardCurriculum, ABC):
             buffer.reward_sum.scatter_add_(0, cell_ids, episode_reward)
 
             buffer.sample_count.scatter_add_(0, cell_ids, torch.ones_like(cell_ids))
+            self._record_cell_statistics(name, cell_ids, episode_reward)
             buffer.assigned_cell_ids[done] = -1
             self._update_space(name)
 
@@ -678,6 +705,63 @@ class BaseLpacCommandReward(CommandRewardCurriculum, ABC):
             reward_sum[selected] = 0
 
         self.resample(set(self.buffers), env_ids)
+
+
+    def _record_cell_statistics(
+        self,
+        space_name: str,
+        cell_ids: torch.Tensor,
+        episode_reward: torch.Tensor,
+    ) -> None:
+
+        stats = self.cell_statistics[space_name]
+        stats.reward_sum.scatter_add_(0, cell_ids, episode_reward)
+        stats.sample_count.scatter_add_(0, cell_ids, torch.ones_like(cell_ids))
+        ready = stats.sample_count >= self.min_samples_per_cell
+        if not torch.any(ready):
+            return
+
+        means = stats.reward_sum[ready] / stats.sample_count[ready]
+        stats.reward_mean[ready] = means
+        stats.valid[ready] = torch.isfinite(means)
+        stats.reward_sum[ready] = 0
+        stats.sample_count[ready] = 0
+        stats.revision.add_(1)
+        self._cell_metrics[space_name] = self._summarize_cell_statistics(space_name)
+
+
+    def _summarize_cell_statistics(
+        self,
+        space_name: str,
+    ) -> dict[str, torch.Tensor]:
+
+        stats = self.cell_statistics[space_name]
+        valid_count = stats.valid.count_nonzero()
+        metrics = {
+            "coverage": valid_count.to(self.context.dtype) / stats.valid.numel(),
+            "valid_cell_count": valid_count,
+            "num_cells": stats.sample_count.new_tensor(stats.valid.numel()),
+            "all_cells_valid": stats.valid.all().to(self.context.dtype),
+            "statistics_revision": stats.revision.clone(),
+        }
+        values = stats.reward_mean[stats.valid]
+        if values.numel():
+            metrics.update({
+                "reward_mean": values.mean(),
+                "reward_min": values.min(),
+                "reward_max": values.max(),
+                "reward_std": values.std(unbiased=False),
+            })
+        return metrics
+
+
+    def collect_metrics(self) -> dict[str, torch.Tensor]:
+        # Return snapshots: subsequent cell updates must not rewrite old info.
+        return {
+            f"{name}/{key}": value.clone()
+            for name, metrics in self._cell_metrics.items()
+            for key, value in metrics.items()
+        }
 
 
     @abstractmethod

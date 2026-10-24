@@ -90,7 +90,7 @@ curriculum_manager_config:
   terms:
     fast_lpac_command_reward:
       max_cells: 100000
-      temperature: 0.012
+      temperature: 300.0
       reward_sources:
         velocity:
           - reward/track_linear_velocity_x_l2_exp_and_logcosh

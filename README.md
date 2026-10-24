@@ -826,6 +826,28 @@ LPAC/FastLPAC 通过 `normalize_by_episode_steps` 决定 episode 结束时如何
 - 累计分数的尺度会受到 episode 长度、最大步数和奖励权重影响；修改这些设置后，应重新检查采样 `temperature` 及使用相关分数的阈值，避免直接沿用每步均值口径下的数值。
 - curriculum 使用未乘 `control_dt` 的 group 奖励，累计模式对其逐步求和，归一化模式再除以实际步数；训练传给 PPO 的总奖励仍由环境统一乘 `control_dt`，两条链路的缩放相互独立。切换来源、归一化模式或控制步长后，应重新检查 `temperature` 和相关阈值。
 
+**Cell 评价统计：**
+
+每个 group 使用独立的 cell 评价缓冲，每个 cell 收集至少 `min_samples_per_cell` 个已结束 episode 后，保存这批 episode 分数的均值，再清空该批累计；下一批未完成时保留上次评价。episode 分数受 `reward_sources` 和 `normalize_by_episode_steps` 控制。FastLPAC 为未采样 cell 填充的 baseline 不计入真实评价，也不会提高覆盖率。
+
+指标前缀为 `curriculum/<term>/<group>/`，例如 `curriculum/fast_lpac_command_reward/velocity/coverage`：
+
+| 指标 | 含义 |
+|---|---|
+| `coverage` | 各 cell 最后一次完成的批次评价中，有效 cell 数 / 经过 constraints 过滤后的总 cell 数；评价需有足量真实 episode，且均值有限。尚未完成首批评价的 cell 不计入，未完成的新批次不影响已有评价的有效性 |
+| `valid_cell_count` | 有效评价 cell 数 |
+| `num_cells` | 总 cell 数 |
+| `all_cells_valid` | 全部 cell 均有有效评价时为 1，否则为 0 |
+| `statistics_revision` | 本 group 每次有一批 cell 评价完成时递增；仅收集指标或无新步骤的 reset 不递增 |
+| `reward_mean` | 有效 cell 最新批次均值的等权平均，不按 cell 的采样次数加权 |
+| `reward_min` | 有效 cell 最新评价的最小值 |
+| `reward_max` | 有效 cell 最新评价的最大值 |
+| `reward_std` | 有效 cell 最新评价的总体标准差；只有一个有效 cell 时为 0 |
+
+初始化时覆盖率为 0，尚无有效 cell 时不导出 `reward_*` 指标，避免用零分或估计值冒充真实结果。有限评价不会因采样窗口清空或新批次尚未完成而失效；若新一批评价为 NaN/Inf，则该 cell 标记为无效。各 cell 使用自己最后一次完成的批次评价，可能来自不同时刻。任务指标在本步 done 环境 reset、cell 结算完成后收集，返回的标量是独立快照。
+
+<!-- 两个内置 runner 配置已启用这些标量的 TensorBoard 记录；原有 learning progress 直方图保留。Stage 的版本采样与有效性约束尚未加入，因此本次不新增 curriculum transition 配置。后续以全空间表现判定阶段时，需要结合覆盖率与分数，并避免将同一个 `statistics_revision` 重复计入时间窗口。 -->
+
 ## 10. 完整组合示例
 
 可直接参考：

@@ -116,3 +116,10 @@ class LocomotionTaskLogic(BaseTaskLogic):
         manager_info = super().post_step(task_context, step_result)
 
         return curriculum_info | manager_info
+
+
+    def collect_metrics(self) -> dict:
+        return (
+            super().collect_metrics()
+            | self.curriculum_manager.collect_metrics()
+        )

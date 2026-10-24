@@ -28,6 +28,10 @@ class BaseCurriculumTerm(ABC):
         raise NotImplementedError
 
 
+    def collect_metrics(self) -> dict[str, torch.Tensor]:
+        return {}
+
+
     def reset(
         self,
         env_ids: torch.Tensor | None = None

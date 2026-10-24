@@ -226,6 +226,11 @@ class BaseTaskLogic(ABC):
         return command_update_info
 
 
+    def collect_metrics(self) -> dict:
+        """Collect task metrics after completed episodes have been settled."""
+        return {}
+
+
     def process_action(
         self,
         action: torch.Tensor,

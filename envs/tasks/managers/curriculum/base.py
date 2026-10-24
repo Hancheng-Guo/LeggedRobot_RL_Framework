@@ -109,6 +109,16 @@ class CurriculumManager:
         return info
 
 
+    def collect_metrics(self) -> dict[str, torch.Tensor]:
+        info: dict[str, torch.Tensor] = {}
+        for name, term in self.terms.items():
+            info.update({
+                f"curriculum/{name}/{key}": value
+                for key, value in term.collect_metrics().items()
+            })
+        return info
+
+
     def reset(
         self,
         env_ids: torch.Tensor | None = None

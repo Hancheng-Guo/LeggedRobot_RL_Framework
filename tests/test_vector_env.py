@@ -110,6 +110,9 @@ class FakeTask:
     def pre_step(self) -> dict:
         return {}
 
+    def collect_metrics(self) -> dict:
+        return {}
+
     def update_task_state(self, task_context: TaskContext) -> None:
         self.last_state_command = task_context.command["target"].clone()
 
@@ -325,6 +328,29 @@ def test_reward_is_scaled_for_consumers_but_not_info() -> None:
     torch.testing.assert_close(task.last_step_result.reward, expected_scaled)
     torch.testing.assert_close(info["reward/test"], torch.tensor([2.0, 3.0]))
     torch.testing.assert_close(info["reward"], torch.tensor(2.5))
+
+
+def test_step_collects_metric_snapshots_after_done_reset(monkeypatch):
+    env = make_env(max_episode_steps=1)
+    task = cast(FakeTask, env.task)
+    original_reset = task.reset
+    revision = torch.zeros(())
+
+    def reset(env_ids=None):
+        original_reset(env_ids)
+        revision.add_(1)
+
+    def collect_metrics():
+        assert torch.count_nonzero(env.current_episode_steps) == 0
+        return {"curriculum/test/revision": revision.clone()}
+
+    monkeypatch.setattr(task, "reset", reset)
+    monkeypatch.setattr(task, "collect_metrics", collect_metrics)
+    env.reset()
+    first_info = env.step(torch.zeros(2, 1))[-1]
+    second_info = env.step(torch.zeros(2, 1))[-1]
+    assert first_info["curriculum/test/revision"].item() == 2.0
+    assert second_info["curriculum/test/revision"].item() == 3.0
 
 
 def test_done_env_returns_terminal_and_reset_observations_separately():

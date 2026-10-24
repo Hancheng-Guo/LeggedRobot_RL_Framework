@@ -21,6 +21,15 @@ callbacks:
         "termination/*": [mean]
         "command/*": [histogram]
         "curriculum/*": [histogram]
+        "curriculum/*/coverage": [value]
+        "curriculum/*/valid_cell_count": [value]
+        "curriculum/*/num_cells": [value]
+        "curriculum/*/all_cells_valid": [value]
+        "curriculum/*/statistics_revision": [value]
+        "curriculum/*/reward_mean": [value]
+        "curriculum/*/reward_min": [value]
+        "curriculum/*/reward_max": [value]
+        "curriculum/*/reward_std": [value]
 #   - early_stopping:
 #       monitor: "*/loss"
 #       mode: min
@@ -39,4 +48,3 @@ playback:
     measured: "state/base_ang_vel_body[2]"
     label: "Z angular velocity (rad/s)"
     limits: [-2.0, 2.0]
-    

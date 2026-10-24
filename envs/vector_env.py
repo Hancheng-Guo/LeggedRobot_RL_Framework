@@ -382,6 +382,8 @@ class VectorEnv(BaseEnv):
             truncated,
         )
 
+        task_info = self.task.collect_metrics()
+
         info = (
             pre_step_info
             | action_info
@@ -390,6 +392,7 @@ class VectorEnv(BaseEnv):
             | reward_info
             | terminated_info
             | state_info
+            | task_info
         )
 
         return (

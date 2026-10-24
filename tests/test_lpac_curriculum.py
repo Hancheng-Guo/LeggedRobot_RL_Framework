@@ -588,6 +588,121 @@ def test_lpac_rejects_non_boolean_episode_normalization(
         )
 
 
+@pytest.mark.parametrize("fast", [False, True])
+def test_cell_statistics_require_real_episode_samples_before_becoming_valid(
+    runtime_context, model_context, fast,
+) -> None:
+    manager = make_manager(runtime_context, model_context, fast=fast)
+    name = "fast_lpac_command_reward" if fast else "lpac_command_reward"
+    term = cast(LpacCommandReward | FastLpacCommandReward, manager.get_term(name))
+    term.min_samples_per_cell = 2
+    prefix = f"curriculum/{name}/motion/"
+    initial = manager.collect_metrics()
+    assert initial[prefix + "coverage"].item() == 0
+    assert initial[prefix + "valid_cell_count"].item() == 0
+    assert initial[prefix + "num_cells"].item() == 3
+    assert initial[prefix + "all_cells_valid"].item() == 0
+    assert prefix + "reward_mean" not in initial
+    manager.reset()
+    assert manager.collect_metrics()[prefix + "statistics_revision"].item() == 0
+
+    buffer = term.buffers["motion"]
+    buffer.assigned_cell_ids[0] = 0
+    for reward in (torch.tensor([2.0, 0.0, 0.0]), torch.tensor([4.0, 0.0, 0.0])):
+        manager.update(
+            raw_term_rewards={"action_diff_l2": reward},
+            term_rewards={"action_diff_l2": reward}, total_reward=reward,
+        )
+        manager.reset(torch.tensor([0]))
+        if reward[0] == 2.0:
+            assert manager.collect_metrics()[prefix + "coverage"].item() == 0
+        buffer.assigned_cell_ids[0] = 0
+
+    info = manager.collect_metrics()
+    assert info[prefix + "coverage"].item() == pytest.approx(1 / 3)
+    assert info[prefix + "reward_mean"].item() == 3.0
+    assert info[prefix + "reward_min"].item() == 3.0
+    assert info[prefix + "reward_std"].item() == 0.0
+    assert info[prefix + "statistics_revision"].item() == 1
+    # Statistics are available even while LPAC is waiting for other cells.
+    assert not torch.any(term.learning_progress["motion"])
+
+
+@pytest.mark.parametrize("fast", [False, True])
+@pytest.mark.parametrize("normalize", [False, True])
+def test_cell_statistics_exclude_inferred_baselines_and_survive_window_clears(
+    runtime_context, model_context, fast, normalize,
+) -> None:
+    manager = make_manager(
+        runtime_context, model_context, fast=fast,
+        normalize_by_episode_steps=normalize,
+    )
+    name = "fast_lpac_command_reward" if fast else "lpac_command_reward"
+    term = cast(LpacCommandReward | FastLpacCommandReward, manager.get_term(name))
+    prefix = f"curriculum/{name}/motion/"
+    buffer = term.buffers["motion"]
+    buffer.assigned_cell_ids.copy_(torch.tensor([0, 1, -1]))
+    reward = torch.tensor([2.0, 4.0, 0.0])
+    for _ in range(2):
+        manager.update(
+            raw_term_rewards={"action_diff_l2": reward},
+            term_rewards={"action_diff_l2": reward}, total_reward=reward,
+        )
+    manager.reset()
+    scale = 1.0 if normalize else 2.0
+    first = manager.collect_metrics()
+    assert first[prefix + "coverage"].item() == pytest.approx(2 / 3)
+    assert first[prefix + "reward_mean"].item() == 3.0 * scale
+    assert first[prefix + "reward_min"].item() == 2.0 * scale
+    assert first[prefix + "reward_max"].item() == 4.0 * scale
+    assert first[prefix + "reward_std"].item() == scale
+    stats = term.cell_statistics["motion"]
+    assert stats.valid.tolist() == [True, True, False]
+    assert torch.isnan(stats.reward_mean[2])
+    if fast:
+        assert torch.isfinite(term.last_reward_mean["motion"][2])
+    manager.reset()
+    assert manager.collect_metrics()[prefix + "statistics_revision"].item() == 1
+
+    buffer.assigned_cell_ids[0] = 2
+    reward = torch.tensor([9.0, 0.0, 0.0])
+    manager.update(
+        raw_term_rewards={"action_diff_l2": reward},
+        term_rewards={"action_diff_l2": reward}, total_reward=reward,
+    )
+    manager.reset(torch.tensor([0]))
+    second = manager.collect_metrics()
+    assert second[prefix + "coverage"].item() == 1.0
+    assert second[prefix + "all_cells_valid"].item() == 1.0
+    assert second[prefix + "statistics_revision"].item() == 2
+    assert second[prefix + "reward_mean"].item() == pytest.approx((6 * scale + 9) / 3)
+    # Old info is a snapshot; sampling buffer resets do not erase cell scores.
+    assert first[prefix + "coverage"].item() == pytest.approx(2 / 3)
+    assert first[prefix + "statistics_revision"].item() == 1
+    torch.testing.assert_close(stats.reward_mean, torch.tensor([2 * scale, 4 * scale, 9.0]))
+
+
+def test_cell_statistics_use_equal_cell_weights_and_independent_groups(
+    runtime_context, model_context, reward_source_config,
+) -> None:
+    name, config = next(iter(reward_source_config["terms"].items()))
+    config["min_samples_per_cell"] = 1
+    config["reward_sources"] = {"motion": ["reward"], "posture": ["reward"]}
+    manager = CurriculumManager(
+        num_envs=3, context=runtime_context, model_context=model_context,
+        **reward_source_config,
+    )
+    term = cast(LpacCommandReward | FastLpacCommandReward, manager.get_term(name))
+    term.buffers["motion"].assigned_cell_ids.copy_(torch.tensor([0, 0, 1]))
+    term.buffers["posture"].assigned_cell_ids.copy_(torch.tensor([0, 1, 1]))
+    manager.update(raw_term_rewards={}, term_rewards={}, total_reward=torch.tensor([2.0, 4.0, 9.0]))
+    manager.reset()
+    info = manager.collect_metrics()
+    assert info[f"curriculum/{name}/motion/reward_mean"].item() == 6.0
+    assert info[f"curriculum/{name}/posture/reward_mean"].item() == 4.25
+    assert info[f"curriculum/{name}/motion/coverage"].item() == 1.0
+
+
 def test_lpac_uses_zero_as_first_reward_baseline(
     runtime_context,
     model_context,

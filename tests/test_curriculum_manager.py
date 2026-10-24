@@ -86,10 +86,12 @@ def make_lpac_curriculum(runtime_context, model_context, num_envs=3):
                 "exploration": 0.0,
                 "min_coverage": 1.0,
                 "min_samples_per_cell": 1,
+                "reward_sources": {"motion": [{"reward/action_diff_l2": 1.0}]},
             },
         },
         manager_configs={
             "command_manager_config": {"terms": terms},
+            "reward_manager_config": {"terms": {"action_diff_l2": {}}},
         },
     )
 

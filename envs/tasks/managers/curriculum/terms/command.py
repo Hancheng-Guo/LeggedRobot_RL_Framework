@@ -1,7 +1,9 @@
+import math
 import torch
 from abc import ABC, abstractmethod
 from typing import Any
 from dataclasses import dataclass
+from numbers import Real
 
 from .base import BaseCurriculumTerm
 from .registry import register_curriculum
@@ -22,12 +24,14 @@ class CommandCurriculumBuffer:
 
 class CommandRewardCurriculum(BaseCurriculumTerm, ABC):
 
-    manager_config_names = ("command_manager_config",)
+    manager_config_names = ("command_manager_config", "reward_manager_config")
 
     def __init__(
         self,
         command_manager_config: dict[str, Any],
         command_term_type: str,
+        reward_manager_config: dict[str, Any],
+        reward_sources: dict[str, Any],
         temperature: float = 0.01,
         exploration: float = 0.1,
         max_cells: int = 1000,
@@ -47,12 +51,91 @@ class CommandRewardCurriculum(BaseCurriculumTerm, ABC):
         self.max_cells = max_cells
 
         self.spaces = self._extract_spaces(command_manager_config)
+        self.reward_sources = self._parse_reward_sources(
+            reward_sources,
+            reward_manager_config,
+        )
         self.constraint_set = self._extract_constraint_set(
             command_manager_config,
             self.spaces
         )
         self.buffers = self._build_buffer()
         
+
+    def _parse_reward_sources(
+        self,
+        reward_sources: dict[str, Any],
+        reward_manager_config: dict[str, Any],
+    ) -> dict[str, dict[str, float | None]]:
+        """Parse reward sources; applying them is a separate update step.
+
+        None preserves a term's training weight (or selects the weighted total
+        for 'reward'). Explicit coefficients replace training weights, without
+        normalization or dt scaling. Each group owns an independent mapping.
+        """
+
+        owner = f"Curriculum {type(self).__name__!r}"
+        if not isinstance(reward_sources, dict):
+            raise TypeError(f"{owner} 'reward_sources' must be a dict.")
+        if any(not isinstance(group, str) for group in reward_sources):
+            raise TypeError(f"{owner} reward source group names must be strings.")
+
+        missing = set(self.spaces) - set(reward_sources)
+        unknown = set(reward_sources) - set(self.spaces)
+        if missing or unknown:
+            raise ValueError(
+                f"{owner} reward_sources must match curriculum groups exactly; "
+                f"missing groups: {sorted(missing)}, unknown groups: {sorted(unknown)}."
+            )
+
+        if not isinstance(reward_manager_config, dict):
+            raise TypeError(f"{owner} 'reward_manager_config' must be a dict.")
+        reward_terms = reward_manager_config.get("terms")
+        if not isinstance(reward_terms, dict):
+            raise TypeError(f"{owner} reward manager must define a 'terms' dict.")
+
+        sources: dict[str, dict[str, float | None]] = {}
+        for group, config in reward_sources.items():
+            label = f"{owner} reward_sources group {group!r}"
+            if not isinstance(config, list) or not config:
+                raise ValueError(f"{label} must be a non-empty list.")
+
+            coefficients: dict[str, float | None] = {}
+            for entry in config:
+                override = isinstance(entry, dict)
+                if isinstance(entry, str):
+                    name, coefficient = entry, None
+                elif override and len(entry) == 1:
+                    name, coefficient = next(iter(entry.items()))
+                else:
+                    raise ValueError(
+                        f"{label} entries must be strings or single-entry dicts."
+                    )
+                if not isinstance(name, str) or not name:
+                    raise ValueError(f"{label} reward names must be non-empty strings.")
+
+                if name != "reward" and (
+                    not name.startswith("reward/") or name[7:] not in reward_terms
+                ):
+                    raise ValueError(f"{label} references unknown reward source {name!r}.")
+                if name in coefficients:
+                    raise ValueError(f"{label} has duplicate reward source {name!r}.")
+                if override:
+                    if name == "reward":
+                        raise ValueError(f"{label} 'reward' does not support an override coefficient.")
+                    if not isinstance(coefficient, Real) or isinstance(coefficient, bool):
+                        raise TypeError(f"{label} reward {name!r} coefficient must be numeric.")
+                    coefficient = float(coefficient)
+                    if not math.isfinite(coefficient):
+                        raise ValueError(f"{label} reward {name!r} coefficient must be finite.")
+                coefficients[name] = coefficient
+
+            if all(coefficient == 0.0 for coefficient in coefficients.values()):
+                raise ValueError(f"{label} coefficients must not all be zero.")
+            sources[group] = coefficients
+
+        return sources
+
 
     def _extract_spaces(
         self,
@@ -475,6 +558,7 @@ class BaseLpacCommandReward(CommandRewardCurriculum, ABC):
     def __init__(
         self,
         min_samples_per_cell: int = 5,
+        normalize_by_episode_steps: bool = False,
         *args, **kwargs,
     ) -> None:
 
@@ -489,7 +573,11 @@ class BaseLpacCommandReward(CommandRewardCurriculum, ABC):
                 "'min_samples_per_cell' must be a positive integer."
             )
 
+        if not isinstance(normalize_by_episode_steps, bool):
+            raise TypeError("'normalize_by_episode_steps' must be a bool.")
+
         self.min_samples_per_cell = min_samples_per_cell
+        self.normalize_by_episode_steps = normalize_by_episode_steps
 
         self.last_reward_mean = {
             name: torch.full_like(buffer.reward_sum, torch.nan)
@@ -517,7 +605,8 @@ class BaseLpacCommandReward(CommandRewardCurriculum, ABC):
 
     def update(
         self,
-        reward: torch.Tensor
+        reward: torch.Tensor,
+        *args, **kwargs,
     ) -> dict[str, torch.Tensor]:
 
         self.episode_reward_sum += reward
@@ -549,11 +638,12 @@ class BaseLpacCommandReward(CommandRewardCurriculum, ABC):
 
         for name, buffer in self.buffers.items():
             cell_ids = buffer.assigned_cell_ids[done]
-            episode_reward_mean = (
-                self.episode_reward_sum[done]
-                / self.episode_step_count[done]
-            )
-            buffer.reward_sum.scatter_add_(0, cell_ids, episode_reward_mean)
+
+            episode_reward = self.episode_reward_sum[done]
+            if self.normalize_by_episode_steps:
+                episode_reward = episode_reward / self.episode_step_count[done]
+            buffer.reward_sum.scatter_add_(0, cell_ids, episode_reward)
+
             buffer.sample_count.scatter_add_(0, cell_ids, torch.ones_like(cell_ids))
             buffer.assigned_cell_ids[done] = -1
             self._update_space(name)

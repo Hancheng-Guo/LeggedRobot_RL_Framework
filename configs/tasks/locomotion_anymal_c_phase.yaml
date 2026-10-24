@@ -88,7 +88,14 @@ termination_manager_config:
 
 curriculum_manager_config:
   terms:
-    fast_lpac_command_reward: {max_cells: 100000, temperature: 0.012}
+    fast_lpac_command_reward:
+      max_cells: 100000
+      temperature: 0.012
+      reward_sources:
+        velocity:
+          - reward/track_linear_velocity_x_l2_exp_and_logcosh
+          - reward/track_linear_velocity_y_l2_exp_and_logcosh
+          - reward/track_angular_velocity_z_l2_exp_and_logcosh
 
 
 event_manager_config: {}

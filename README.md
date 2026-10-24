@@ -787,15 +787,44 @@ curriculum_manager_config:
       exploration: 0.1
       max_cells: 100000
       min_samples_per_cell: 5
+      normalize_by_episode_steps: false
       min_coverage: 0.8
+      reward_sources:
+        velocity:
+          - reward/track_linear_velocity_x_l2_exp_and_logcosh
+          - reward/track_angular_velocity_z_l2_exp_and_logcosh: 0.5
 ```
 
 | 名称 | 参数 |
 |---|---|
-| `lpac_command_reward` | `temperature=0.01`（>0）、`exploration=0.1`（[0,1]）、`max_cells=1000`、`min_samples_per_cell=5`（正整数） |
+| `lpac_command_reward` | `temperature=0.01`（>0）、`exploration=0.1`（[0,1]）、`max_cells=1000`、`min_samples_per_cell=5`（正整数）、`normalize_by_episode_steps=false`（布尔值） |
 | `fast_lpac_command_reward` | 同上，并增加 `min_coverage=0.8`（(0,1]） |
 
 `lpac_command_reward` 对应 `LpacSampleOnReset`/`SymmetricLpacSampleOnReset`；`fast_lpac_command_reward` 对应 Fast 版本。没有课程学习时写 `terms: {}`。
+
+`reward_sources` 为必填配置，必须覆盖该 curriculum 的所有 command group，且不能包含未知 group。每个 group 是非空列表，元素为来源字符串或单项字典：
+
+- `reward/<name>`：使用该项原始奖励 × 训练权重。
+- `reward/<name>: c`：使用该项原始奖励 × 覆盖系数 `c`，替换训练权重，不是额外乘一次。允许有限的负数和零；显式 `null` 不表示省略系数，应改用字符串形式。
+- `reward`：使用逐环境的所有奖励按训练权重加权后的总和。整体奖励不支持覆盖系数，可写作 `velocity: [reward]`。
+
+以上来源均不做整体 `dt` 缩放；同组来源直接求和，不自动归一化。仅接受完整名称，同组不能重复配置同一来源，不能全部为显式零系数。`reward` 可以和逐项来源混合，选中的逐项会再次计入，不做隐式去重。解析结果使用 `None` 保留未指定系数的状态，显式 `0.0` 则保留为零。
+
+当前仅实现来源配置的解析和校验；实际 curriculum 更新仍使用原有总奖励链路，尚未应用这些系数。
+
+**Episode 累计奖励的统计口径与注意事项：**
+
+LPAC/FastLPAC 通过 `normalize_by_episode_steps` 决定 episode 结束时如何向 cell 计分：
+
+- `false`（默认）：直接使用 episode 累计奖励，不除以实际步数，将存活时长和奖励所衡量的表现（例如跟踪质量）共同纳入评价。
+- `true`：累计奖励除以该 episode 的实际步数，使用平均每步奖励，减弱 episode 长度本身的影响。
+
+两种模式下，cell 分数均会再除以采集的 episode 数，分别得到“episode 累计奖励的均值”或“episode 每步平均奖励的均值”。后者是 episode 等权平均，不是所有采样步合在一起求平均；尚未采集步骤的 episode 不计入统计。以下存活时长相关注意事项针对 `false` 的累计模式。
+
+- 当每步奖励主要为正时，相近质量下更长的 episode 通常得到更高累计分数；当每步奖励主要为负时，更早结束可能因少累计负奖励而得到更高分。例如每步均为 `-0.1`，1000 步累计为 `-100`，100 步累计为 `-10`，后者分数更高。应根据所选奖励的组合判断它是否符合预期的存活偏好。
+- learning progress 通常使用当前 cell 分数与历史分数之差，不是 PPO advantage。上述例子会产生 `+90` 的差分；减去历史基线不能消除由 episode 长度变化带来的影响。FastLPAC 首次初始化另有 baseline 填充规则。
+- 累计分数的尺度会受到 episode 长度、最大步数和奖励权重影响；修改这些设置后，应重新检查采样 `temperature` 及使用相关分数的阈值，避免直接沿用每步均值口径下的数值。
+<!-- - 当前实际输入仍是乘过 `control_dt` 的总奖励，累计模式使用 `sum(control_dt * weighted_reward)`，归一化模式再除以实际步数；两种模式都不会消除这项时间缩放。前述 `reward_sources` 的未乘 `dt` 口径将在奖励来源接入后生效。切换归一化模式时也应重新检查 `temperature` 和相关阈值。 -->
 
 ## 10. 完整组合示例
 

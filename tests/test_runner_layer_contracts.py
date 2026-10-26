@@ -31,6 +31,28 @@ def test_training_layers_do_not_import_application() -> None:
     assert not violations, violations
 
 
+def test_runner_checkpoints_opaque_environment_state(tmp_path, runtime_context) -> None:
+    restored = []
+    runner = OnPolicyRunner(runtime_context)
+    # This environment has no task or curriculum attributes.
+    runner.environment = cast(BaseEnv, SimpleNamespace(
+        checkpoint_state_dict=lambda: {"training_counter": 17},
+        load_checkpoint_state_dict=lambda state: restored.append(state),
+    ))
+    runner.algorithm = cast(OnPolicyAlgorithm, SimpleNamespace(
+        checkpoint_state_dict=lambda: {},
+        load_checkpoint_state_dict=lambda state, load_optimizer: None,
+        save_module_artifacts=lambda path: [],
+    ))
+    path = runner.save(tmp_path / "opaque_environment.pt")
+    state = torch.load(path, weights_only=False)["runner"]
+    assert state["environment"] == {"training_counter": 17}
+    assert "curriculum" not in state
+    runner.prepare_checkpoint_load(path)
+    runner.load()
+    assert restored == [{"training_counter": 17}]
+
+
 def test_application_does_not_access_callback_implementation() -> None:
     root = Path(__file__).resolve().parents[1] / "app"
     violations = []
@@ -158,6 +180,8 @@ def test_stage_training_after_evaluation_rebuilds_completion_callback(
     obs = torch.zeros(1, 1)
     runner.environment = cast(BaseEnv, SimpleNamespace(
         num_envs=1, reset=lambda: obs, close=lambda: None,
+        checkpoint_state_dict=lambda: {},
+        load_checkpoint_state_dict=lambda state: None,
         has_playback_render_mode=lambda: False,
         step=lambda action: (obs, obs, torch.ones(1), torch.ones(1, dtype=torch.bool),
                              torch.zeros(1, dtype=torch.bool), {"score": torch.ones(1)}),
@@ -220,6 +244,7 @@ def test_save_after_restore_preserves_completed_stage(
         checkpoint_state_dict=lambda: {},
         save_module_artifacts=lambda path: [],
     ))
+    runner.environment = cast(BaseEnv, SimpleNamespace(checkpoint_state_dict=lambda: {}))
     monkeypatch.setattr(runner, "_build_environment", lambda **kwargs: None)
     monkeypatch.setattr(runner, "_build_algorithm", lambda **kwargs: None)
     transition = [{"metric": "score", "method": "mean", "operator": ">=",

@@ -51,6 +51,7 @@ class OnPolicyRunner(BaseRunner):
         self._pending_checkpoint_payload: Mapping[str, Any] | None = None
         self._pending_callback_states: Sequence[Mapping[str, Any]] | None = None
         self._checkpoint_callback_snapshot: list[dict[str, Any]] | None = None
+        self._checkpoint_environment_snapshot: dict[str, Any] | None = None
         self.tracking_specs: tuple[TrackingSpec, ...] = ()
         
         self.current_iteration = -1
@@ -84,6 +85,7 @@ class OnPolicyRunner(BaseRunner):
         if previous_stage_index != stage_index:
             self._pending_callback_states = None
             self._checkpoint_callback_snapshot = None
+            self._checkpoint_environment_snapshot = None
         if (
             previous_stage_index != stage_index
             and self._pending_checkpoint_payload is None
@@ -337,6 +339,9 @@ class OnPolicyRunner(BaseRunner):
             raise RuntimeError("'rollout_length' is missing.")
 
         self.algorithm.set_train_mode()
+        if self._checkpoint_environment_snapshot is not None:
+            self.environment.load_checkpoint_state_dict(self._checkpoint_environment_snapshot)
+            self._checkpoint_environment_snapshot = None
         self._checkpoint_callback_snapshot = None
         obs = self.environment.reset()
         self.stop_callback.clear()
@@ -512,7 +517,9 @@ class OnPolicyRunner(BaseRunner):
         num_episodes: int,
     ) -> None:
 
-        self._snapshot_callbacks_before_evaluation()
+        if not hasattr(self, "environment"):
+            raise RuntimeError("environment is not instantiated.")
+        self._snapshot_before_evaluation()
         self._set_stage_transition(transition=None)
         self._pending_callback_states = None
 
@@ -522,9 +529,6 @@ class OnPolicyRunner(BaseRunner):
             or num_episodes <= 0
         ):
             raise ValueError("'num_episodes' must be a positive integer.")
-
-        if not hasattr(self, "environment"):
-            raise RuntimeError("environment is not instantiated.")
 
         if not hasattr(self, "algorithm"):
             raise RuntimeError("algorithm is not instantiated.")
@@ -629,12 +633,11 @@ class OnPolicyRunner(BaseRunner):
         playback_config: str | Path | None = None,
     ) -> None:
 
-        self._snapshot_callbacks_before_evaluation()
-        self._set_stage_transition(transition=None)
-        self._pending_callback_states = None
-        
         if not hasattr(self, "environment"):
             raise RuntimeError("environment is not instantiated.")
+        self._snapshot_before_evaluation()
+        self._set_stage_transition(transition=None)
+        self._pending_callback_states = None
         if mode not in {"configured", "human_ros2"}:
             raise ValueError(f"Unsupported playback mode: {mode!r}.")
         if mode == "human_ros2" and playback_config is None:
@@ -899,7 +902,10 @@ class OnPolicyRunner(BaseRunner):
         ]
 
 
-    def _snapshot_callbacks_before_evaluation(self) -> None:
+    def _snapshot_before_evaluation(self) -> None:
+
+        if self._checkpoint_environment_snapshot is None:
+            self._checkpoint_environment_snapshot = self.environment.checkpoint_state_dict()
         if (
             self._checkpoint_callback_snapshot is None
             and any(
@@ -915,6 +921,7 @@ class OnPolicyRunner(BaseRunner):
         self._pending_checkpoint_payload = None
         self._pending_callback_states = None
         self._checkpoint_callback_snapshot = None
+        self._checkpoint_environment_snapshot = None
         self._run_callbacks("_on_close")
 
         if hasattr(self, "environment"):
@@ -951,6 +958,11 @@ class OnPolicyRunner(BaseRunner):
             "current_iteration": self.current_iteration,
             "stage_index": self.stage_index,
             "algorithm": self.algorithm.checkpoint_state_dict(),
+            "environment": (
+                deepcopy(self._checkpoint_environment_snapshot)
+                if self._checkpoint_environment_snapshot is not None
+                else self.environment.checkpoint_state_dict()
+            ),
             "callbacks": (
                 deepcopy(self._checkpoint_callback_snapshot)
                 if self._checkpoint_callback_snapshot is not None
@@ -999,6 +1011,10 @@ class OnPolicyRunner(BaseRunner):
             runner_state["algorithm"],
             load_optimizer=(mode is not RestoreMode.EVALUATE),
         )
+        environment_state = runner_state.get("environment")
+        if environment_state is not None:
+            self.environment.load_checkpoint_state_dict(environment_state)
+        self._checkpoint_environment_snapshot = None
         self.current_iteration = current_iteration
         callback_states = runner_state.get("callbacks")
         self._checkpoint_callback_snapshot = (
@@ -1049,4 +1065,5 @@ class OnPolicyRunner(BaseRunner):
         self._pending_checkpoint_payload = payload
         self._pending_callback_states = None
         self._checkpoint_callback_snapshot = None
+        self._checkpoint_environment_snapshot = None
         return payload

@@ -1,5 +1,6 @@
 from copy import deepcopy
 from dataclasses import replace
+from types import SimpleNamespace
 from typing import cast
 
 import pytest
@@ -7,6 +8,11 @@ import torch
 
 from envs.tasks.managers.curriculum import CurriculumManager
 from envs.tasks.managers.curriculum.terms.command import BaseLpacCommandReward
+from envs import VectorEnv
+from envs.tasks import BaseTaskLogic
+from envs.tasks.locomotion import LocomotionTaskLogic
+from rl.algorithms import OnPolicyAlgorithm
+from runners import OnPolicyRunner, RestoreMode
 
 
 @pytest.fixture(params=[False, True], ids=["lpac", "fast_lpac"])
@@ -67,6 +73,50 @@ def warm_up(manager):
             buffer.assigned_cell_ids.copy_(torch.tensor([0, 1, 2]))
         update(manager, [1.0, 2.0, 3.0])
         manager.reset()
+
+
+@pytest.fixture
+def make_runner(runtime_context):
+    def make(manager=None):
+        runner = OnPolicyRunner(runtime_context)
+        runner.current_iteration = 4
+        runner.max_iterations = 5
+        runner.rollout_length = 1
+        obs = torch.zeros(3, 1)
+
+        def reset():
+            if manager is not None:
+                manager.reset()
+            return obs
+
+        def step(action):
+            if manager is not None:
+                update(manager, [10.0, 20.0, 30.0])
+                manager.reset()
+            return (obs, obs, torch.ones(3), torch.ones(3, dtype=torch.bool),
+                    torch.zeros(3, dtype=torch.bool), {})
+
+        environment = VectorEnv(runtime_context)
+        if manager is None:
+            environment.task = BaseTaskLogic(runtime_context)
+        else:
+            task = LocomotionTaskLogic(runtime_context)
+            task.curriculum_manager = manager
+            environment.task = task
+        environment.num_envs = 3
+        environment.reset = reset
+        environment.step = step
+        runner.environment = environment
+        runner.algorithm = cast(OnPolicyAlgorithm, SimpleNamespace(
+            checkpoint_state_dict=lambda: {},
+            load_checkpoint_state_dict=lambda state, load_optimizer: None,
+            save_module_artifacts=lambda path: [],
+            set_train_mode=lambda: None, set_eval_mode=lambda: None,
+            act=lambda obs, deterministic: SimpleNamespace(action=torch.zeros(3, 1)),
+            reset_policy_state=lambda env_ids: None,
+        ))
+        return runner
+    return make
 
 
 def assert_same_checkpoint(expected, actual):
@@ -278,3 +328,124 @@ def test_manager_validates_every_term_before_restoring_any(runtime_context, mode
     with pytest.raises(ValueError, match="tensor shape"):
         target.load_checkpoint_state_dict(state)
     assert_same_checkpoint(before, target.checkpoint_state_dict())
+
+
+@pytest.mark.parametrize("mode", list(RestoreMode))
+def test_runner_saves_and_loads_curriculum(make_manager, make_runner, tmp_path, mode):
+    source = make_manager()
+    warm_up(source)
+    # Keep both a completed partial batch and unfinished episodes at save time.
+    update(source, [4.0, 5.0, 6.0])
+    source.reset(torch.tensor([0]))
+    update(source, [7.0, 8.0, 9.0])
+    expected = source.checkpoint_state_dict()
+    path = make_runner(source).save(tmp_path / "runner.pt")
+    payload = torch.load(path, weights_only=False)
+    assert_same_checkpoint(expected, payload["runner"]["environment"]["task"]["curriculum"])
+
+    target = make_manager()
+    runner = make_runner(target)
+    runner.prepare_checkpoint_load(path)
+    runner.load(mode=mode)
+    assert runner.current_iteration == 4
+    assert_same_checkpoint(expected, target.checkpoint_state_dict())
+    term = get_term(target)
+    assert not term.episode_step_count.any()
+    for name, buffer in term.buffers.items():
+        assert (buffer.assigned_cell_ids == -1).all()
+        assert not term.episode_reward_sum[name].any()
+
+    # train() starts with an environment reset even when the budget is exhausted.
+    runner.train()
+    assert_same_checkpoint(expected, target.checkpoint_state_dict())
+    for buffer in term.buffers.values():
+        assert (buffer.assigned_cell_ids >= 0).all()
+
+
+def test_runner_rejects_incompatible_curriculum(make_manager, make_runner, tmp_path):
+    source = make_manager()
+    warm_up(source)
+    path = make_runner(source).save(tmp_path / "runner.pt")
+    target = make_manager(normalize_by_episode_steps=True)
+    before = target.checkpoint_state_dict()
+    runner = make_runner(target)
+    runner.prepare_checkpoint_load(path)
+    with pytest.raises(ValueError, match="configuration does not match"):
+        runner.load()
+    assert_same_checkpoint(before, target.checkpoint_state_dict())
+
+
+def test_runner_rejects_curriculum_state_without_manager(make_manager, make_runner, tmp_path):
+    path = make_runner(make_manager()).save(tmp_path / "runner.pt")
+    runner = make_runner()
+    runner.prepare_checkpoint_load(path)
+    with pytest.raises(ValueError, match="task does not support"):
+        runner.load()
+
+
+@pytest.mark.parametrize("has_key", [False, True])
+def test_runner_loads_without_curriculum_state(make_manager, make_runner, tmp_path, has_key):
+    state = make_runner().checkpoint_state_dict()
+    assert state["environment"] == {"task": {}}
+    state["environment"] = None
+    if not has_key:
+        state.pop("environment")
+    path = tmp_path / "runner.pt"
+    torch.save({"runner": state}, path)
+    target = make_manager()
+    runner = make_runner(target)
+    before = target.checkpoint_state_dict()
+    runner.prepare_checkpoint_load(path)
+    runner.load()
+    assert_same_checkpoint(before, target.checkpoint_state_dict())
+
+
+def test_evaluation_does_not_replace_training_curriculum_checkpoint(make_manager, make_runner, tmp_path):
+    manager = make_manager()
+    warm_up(manager)
+    runner = make_runner(manager)
+    expected = manager.checkpoint_state_dict()
+    runner.test(num_episodes=6)
+    assert get_term(manager).cell_statistics["motion"].revision.item() > 1
+    path = runner.save(tmp_path / "after_evaluation.pt")
+    saved = torch.load(path, weights_only=False)["runner"]["environment"]["task"]["curriculum"]
+    assert_same_checkpoint(expected, saved)
+    # Repeated evaluations keep the original training snapshot.
+    runner.test(num_episodes=6)
+    assert_same_checkpoint(expected, runner.checkpoint_state_dict()["environment"]["task"]["curriculum"])
+    runner.train()
+    assert runner._checkpoint_environment_snapshot is None
+    assert_same_checkpoint(expected, manager.checkpoint_state_dict())
+
+
+def test_new_checkpoint_load_discards_evaluation_snapshot(make_manager, make_runner, tmp_path):
+    source = make_manager()
+    warm_up(source)
+    path = make_runner(source).save(tmp_path / "runner.pt")
+    target = make_manager()
+    runner = make_runner(target)
+    runner.test(num_episodes=3)
+    assert runner._checkpoint_environment_snapshot is not None
+    runner.prepare_checkpoint_load(path)
+    runner.load()
+    runner.train()
+    assert_same_checkpoint(source.checkpoint_state_dict(), target.checkpoint_state_dict())
+
+
+@pytest.mark.parametrize("layer", ["environment", "task"])
+@pytest.mark.parametrize("state", [None, {"unknown": {}}])
+def test_checkpoint_layers_reject_invalid_state(make_manager, make_runner, layer, state):
+    runner = make_runner(make_manager())
+    target = runner.environment if layer == "environment" else runner.environment.task
+    with pytest.raises((TypeError, ValueError)):
+        target.load_checkpoint_state_dict(state)
+
+
+def test_task_without_persistent_state_uses_empty_checkpoint(runtime_context):
+    task = BaseTaskLogic(runtime_context)
+    assert task.checkpoint_state_dict() == {}
+    task.load_checkpoint_state_dict({})
+    with pytest.raises(TypeError, match="must be a mapping"):
+        task.load_checkpoint_state_dict(None)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="does not support"):
+        task.load_checkpoint_state_dict({"curriculum": {}})

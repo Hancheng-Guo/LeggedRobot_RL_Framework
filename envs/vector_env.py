@@ -271,6 +271,22 @@ class VectorEnv(BaseEnv):
             )
 
 
+    def checkpoint_state_dict(self) -> dict[str, Any]:
+        """Save task training state without simulator or unfinished episode state."""
+        return {"task": self.task.checkpoint_state_dict()}
+
+
+    def load_checkpoint_state_dict(
+        self,
+        state: Mapping[str, Any],
+    ) -> None:
+        if not isinstance(state, Mapping):
+            raise TypeError("Environment checkpoint must be a mapping.")
+        if set(state) != {"task"}:
+            raise ValueError("Vector environment checkpoint must contain task state.")
+        self.task.load_checkpoint_state_dict(state["task"])
+
+
     def reset(self) -> torch.Tensor:
 
         self.simulator.reset()

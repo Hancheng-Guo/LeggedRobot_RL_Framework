@@ -1,5 +1,7 @@
 import torch
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
+from typing import Any
 
 from .managers import (
     TaskStateManager,
@@ -144,6 +146,21 @@ class BaseTaskLogic(ABC):
             model_context=self.model_context,
             **termination_manager_config,
         )
+
+
+    def checkpoint_state_dict(self) -> dict[str, Any]:
+        """Save persistent training statistics, excluding unfinished episodes."""
+        return {}
+
+
+    def load_checkpoint_state_dict(
+        self,
+        state: Mapping[str, Any],
+    ) -> None:
+        if not isinstance(state, Mapping):
+            raise TypeError("Task checkpoint must be a mapping.")
+        if state:
+            raise ValueError("This task does not support the saved checkpoint state.")
 
 
     def reset(

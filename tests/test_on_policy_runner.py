@@ -138,6 +138,16 @@ class MinimalAlgorithm(OnPolicyAlgorithm):
         return None
 
 
+def test_environment_default_checkpoint_contract(runtime_context):
+    environment = TrackingEnvironment(runtime_context)
+    assert environment.checkpoint_state_dict() == {}
+    environment.load_checkpoint_state_dict({})
+    with pytest.raises(TypeError, match="must be a mapping"):
+        environment.load_checkpoint_state_dict(None)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="does not support"):
+        environment.load_checkpoint_state_dict({"task": {}})
+
+
 class StopAtStepStartCallback(BaseCallback):
     def __init__(self) -> None:
         self.runner = None
@@ -226,7 +236,9 @@ def test_stage_change_and_evaluation_clear_pending_callback_history(
     assert runner._pending_callback_states is None
 
     runner._pending_callback_states = [{"type": "StageCallback", "state": {}}]
-    runner.environment = cast(BaseEnv, SimpleNamespace(reset=lambda: None))
+    runner.environment = cast(BaseEnv, SimpleNamespace(
+        reset=lambda: None, checkpoint_state_dict=lambda: {},
+    ))
     runner.algorithm = cast(OnPolicyAlgorithm, SimpleNamespace(set_eval_mode=lambda: None))
     runner.callbacks = cast(
         list[BaseCallback], [SimpleNamespace(_on_test_start=lambda **kwargs: False)]

@@ -96,6 +96,10 @@ def make_checkpoint_runner(
     runner.current_iteration = 0
     runner.stage_index = stage_index
     runner.algorithm = cast(Any, DummyAlgorithm())
+    runner.environment = cast(Any, SimpleNamespace(
+        checkpoint_state_dict=lambda: {},
+        load_checkpoint_state_dict=lambda state: None,
+    ))
     return runner
 
 

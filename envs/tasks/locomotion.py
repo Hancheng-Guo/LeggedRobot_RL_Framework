@@ -1,5 +1,6 @@
 import torch
 from typing import Any
+from collections.abc import Mapping
 
 from .base import BaseTaskLogic
 from .managers import (
@@ -89,6 +90,23 @@ class LocomotionTaskLogic(BaseTaskLogic):
             model_context=self.model_context,
             **command_manager_config,
         )
+
+
+    def checkpoint_state_dict(self) -> dict[str, Any]:
+        return {
+            "curriculum": self.curriculum_manager.checkpoint_state_dict()
+        }
+
+
+    def load_checkpoint_state_dict(
+        self,
+        state: Mapping[str, Any],
+    ) -> None:
+        if not isinstance(state, Mapping):
+            raise TypeError("Task checkpoint must be a mapping.")
+        if set(state) != {"curriculum"}:
+            raise ValueError("Locomotion task checkpoint must contain curriculum state.")
+        self.curriculum_manager.load_checkpoint_state_dict(state["curriculum"])
 
 
     def reset(

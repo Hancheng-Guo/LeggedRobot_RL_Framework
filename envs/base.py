@@ -79,6 +79,21 @@ class BaseEnv(ABC):
         raise NotImplementedError
 
 
+    def checkpoint_state_dict(self) -> dict[str, Any]:
+        """Save training statistics; simulator and unfinished episodes are excluded."""
+        return {}
+
+
+    def load_checkpoint_state_dict(
+        self,
+        state: Mapping[str, Any],
+    ) -> None:
+        if not isinstance(state, Mapping):
+            raise TypeError("Environment checkpoint must be a mapping.")
+        if state:
+            raise ValueError("This environment does not support the saved checkpoint state.")
+
+
     @abstractmethod
     def step(
         self,

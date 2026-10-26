@@ -50,6 +50,7 @@ class OnPolicyRunner(BaseRunner):
         self._callback_configs: Sequence[str | Mapping[str, Any]] | None = None
         self._pending_checkpoint_payload: Mapping[str, Any] | None = None
         self._pending_callback_states: Sequence[Mapping[str, Any]] | None = None
+        self._environment_checkpoint_restored = False
         self._checkpoint_callback_snapshot: list[dict[str, Any]] | None = None
         self._checkpoint_environment_snapshot: dict[str, Any] | None = None
         self.tracking_specs: tuple[TrackingSpec, ...] = ()
@@ -84,6 +85,7 @@ class OnPolicyRunner(BaseRunner):
         self.stage_index = stage_index
         if previous_stage_index != stage_index:
             self._pending_callback_states = None
+            self._environment_checkpoint_restored = False
             self._checkpoint_callback_snapshot = None
             self._checkpoint_environment_snapshot = None
         if (
@@ -359,6 +361,12 @@ class OnPolicyRunner(BaseRunner):
             self._run_callbacks("_on_train_end")
             return self._train_result()
         self._load_pending_callback_states()
+        if any(
+            isinstance(callback, StageCallback) and callback.stop_training
+            for callback in self.callbacks
+        ):
+            self._run_callbacks("_on_train_end")
+            return self._train_result()
 
         for iteration in range(
             self.current_iteration + 1,
@@ -905,7 +913,7 @@ class OnPolicyRunner(BaseRunner):
     def _snapshot_before_evaluation(self) -> None:
 
         if self._checkpoint_environment_snapshot is None:
-            self._checkpoint_environment_snapshot = self.environment.checkpoint_state_dict()
+            self._checkpoint_environment_snapshot = self._environment_state_dict()
         if (
             self._checkpoint_callback_snapshot is None
             and any(
@@ -916,10 +924,23 @@ class OnPolicyRunner(BaseRunner):
             self._checkpoint_callback_snapshot = deepcopy(self._callback_state_entries())
 
 
+    def _environment_state_dict(self) -> dict[str, Any] | None:
+        if self._checkpoint_environment_snapshot is not None:
+            return deepcopy(self._checkpoint_environment_snapshot)
+        if (
+            self._checkpoint_callback_snapshot is not None
+            and not self._environment_checkpoint_restored
+        ):
+            # Keep loaded callback history paired with its missing environment state.
+            return None
+        return self.environment.checkpoint_state_dict()
+
+
     def close(self) -> None:
 
         self._pending_checkpoint_payload = None
         self._pending_callback_states = None
+        self._environment_checkpoint_restored = False
         self._checkpoint_callback_snapshot = None
         self._checkpoint_environment_snapshot = None
         self._run_callbacks("_on_close")
@@ -958,11 +979,7 @@ class OnPolicyRunner(BaseRunner):
             "current_iteration": self.current_iteration,
             "stage_index": self.stage_index,
             "algorithm": self.algorithm.checkpoint_state_dict(),
-            "environment": (
-                deepcopy(self._checkpoint_environment_snapshot)
-                if self._checkpoint_environment_snapshot is not None
-                else self.environment.checkpoint_state_dict()
-            ),
+            "environment": self._environment_state_dict(),
             "callbacks": (
                 deepcopy(self._checkpoint_callback_snapshot)
                 if self._checkpoint_callback_snapshot is not None
@@ -1012,8 +1029,10 @@ class OnPolicyRunner(BaseRunner):
             load_optimizer=(mode is not RestoreMode.EVALUATE),
         )
         environment_state = runner_state.get("environment")
+        self._environment_checkpoint_restored = False
         if environment_state is not None:
             self.environment.load_checkpoint_state_dict(environment_state)
+            self._environment_checkpoint_restored = True
         self._checkpoint_environment_snapshot = None
         self.current_iteration = current_iteration
         callback_states = runner_state.get("callbacks")
@@ -1048,7 +1067,13 @@ class OnPolicyRunner(BaseRunner):
             state = entry.get("state", {})
             if not isinstance(state, Mapping):
                 raise TypeError("Checkpoint callback state must be a mapping.")
-            callback.load_checkpoint_state_dict(state)
+            if isinstance(callback, StageCallback):
+                callback.load_checkpoint_state_dict(
+                    state,
+                    environment_restored=self._environment_checkpoint_restored,
+                )
+            else:
+                callback.load_checkpoint_state_dict(state)
         self._pending_callback_states = None
 
 
@@ -1063,6 +1088,7 @@ class OnPolicyRunner(BaseRunner):
             weights_only=False,
         )
         self._pending_checkpoint_payload = payload
+        self._environment_checkpoint_restored = False
         self._pending_callback_states = None
         self._checkpoint_callback_snapshot = None
         self._checkpoint_environment_snapshot = None

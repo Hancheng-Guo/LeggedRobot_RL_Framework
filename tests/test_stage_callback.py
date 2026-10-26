@@ -386,6 +386,80 @@ def test_stage_restore_discards_gated_windows_but_keeps_ordinary_windows():
     assert restored.stop_training
 
 
+@pytest.mark.parametrize("sample,validity", [(True, True), (True, False), (False, True)])
+def test_stage_restores_curriculum_window_with_environment(sample, validity):
+    options = {"sample_on_update": sample, "require_all_cells_valid": validity}
+    callback = make_cell_callback(window=3, **options)
+    callback._on_step_end(cell_info(revision=7))
+    restored = make_cell_callback(window=3, **options)
+    restored.load_checkpoint_state_dict(
+        callback.checkpoint_state_dict(), environment_restored=True,
+    )
+    condition = restored._conditions[0]
+    assert list(condition.values) == [3.0]
+    assert condition.last_revision == (7 if sample else None)
+    restored._on_step_end(cell_info(revision=7))
+    assert list(condition.values) == ([3.0] if sample else [3.0, 3.0])
+    restored._on_step_end(cell_info(revision=8))
+    assert restored.stop_training is (not sample)
+
+
+def test_stage_restores_revision_even_when_invalidity_cleared_window():
+    callback = make_cell_callback()
+    callback._on_step_end(cell_info(revision=4))
+    callback._on_step_end(cell_info(revision=5, valid=0))
+    restored = make_cell_callback()
+    restored.load_checkpoint_state_dict(
+        callback.checkpoint_state_dict(), environment_restored=True,
+    )
+    assert not restored._conditions[0].values
+    assert restored._conditions[0].last_revision == 5
+    restored._on_step_end(cell_info(revision=5))
+    assert not restored._conditions[0].values
+    restored._on_step_end(cell_info(revision=6))
+    assert list(restored._conditions[0].values) == [3.0]
+
+
+@pytest.mark.parametrize("event", ["duplicate_invalid", "rollback", "nan"])
+def test_stage_restored_window_still_checks_invalid_events(event):
+    callback = make_cell_callback(window=3)
+    callback._on_step_end(cell_info(revision=4))
+    restored = make_cell_callback(window=3)
+    restored.load_checkpoint_state_dict(
+        callback.checkpoint_state_dict(), environment_restored=True,
+    )
+    if event == "duplicate_invalid":
+        restored._on_step_end(cell_info(revision=4, valid=0))
+        assert not restored._conditions[0].values
+    elif event == "nan":
+        restored._on_step_end(cell_info(revision=5, value=float("nan")))
+        assert not restored._conditions[0].values
+    else:
+        restored._on_step_end(cell_info(revision=1, value=4.0))
+        assert list(restored._conditions[0].values) == [4.0]
+
+
+@pytest.mark.parametrize("revision", [-1, True, 1.5, float("nan"), "1", None])
+def test_stage_rejects_invalid_checkpoint_revision(revision):
+    callback = make_cell_callback()
+    callback._on_step_end(cell_info())
+    state = callback.checkpoint_state_dict()
+    state["condition_revisions"] = [revision]
+    with pytest.raises(ValueError, match="revision"):
+        make_cell_callback().load_checkpoint_state_dict(state, environment_restored=True)
+
+
+def test_stage_restores_completed_curriculum_condition():
+    callback = make_cell_callback(window=1)
+    callback._on_step_end(cell_info(revision=4))
+    restored = make_cell_callback(window=1)
+    restored.load_checkpoint_state_dict(
+        callback.checkpoint_state_dict(), environment_restored=True,
+    )
+    assert restored.stop_training
+    assert restored._conditions[0].last_revision == 4
+
+
 @pytest.mark.parametrize("optional", ["sample_on_update", "require_all_cells_valid"])
 def test_stage_control_options_can_be_used_independently(optional):
     config = {

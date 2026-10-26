@@ -90,9 +90,6 @@ class _StageCondition:
                 "Checkpoint condition values must map metric names to sample sequences."
             )
         self.reset()
-        # Curriculum statistics are not persisted yet; their windows start fresh.
-        if self.uses_curriculum_controls:
-            return
         for name, samples in saved.items():
             if name != self.metric:
                 raise ValueError(
@@ -446,12 +443,18 @@ class StageCallback(BaseCallback):
                 condition.get_values()
                 for condition in self._conditions
             ],
+            "condition_revisions": [
+                condition.last_revision
+                for condition in self._conditions
+            ],
         }
 
 
     def load_checkpoint_state_dict(
         self,
         state: Mapping[str, Any],
+        *,
+        environment_restored: bool = False,
     ) -> None:
 
         saved: Sequence[ConditionValues] = state.get(
@@ -462,11 +465,35 @@ class StageCallback(BaseCallback):
                 "Checkpoint stage-condition count does not match configuration."
             )
 
-        for condition, values in zip(self._conditions, saved):
-            condition.restore_values(values)
-        self.stop_training = bool(state.get("stop_training", False))
-        if any(
-            condition.uses_curriculum_controls
-            for condition in self._conditions
+        revisions = state.get("condition_revisions", [None] * len(self._conditions))
+        if not isinstance(revisions, Sequence) or len(revisions) != len(self._conditions):
+            raise ValueError("Checkpoint stage-condition revision count does not match configuration.")
+
+        discarded_history = False
+        for condition, values, revision in zip(self._conditions, saved, revisions):
+            if condition.uses_curriculum_controls and not environment_restored:
+                condition.reset()
+                discarded_history = True
+                continue
+            self._restore_condition(condition, values, revision)
+        self.stop_training = bool(state.get("stop_training", False)) and not discarded_history
+
+
+    def _restore_condition(
+        self,
+        condition: _StageCondition,
+        values: ConditionValues,
+        revision: Any,
+    ) -> None:
+        if revision is not None and (
+            not isinstance(revision, int)
+            or isinstance(revision, bool)
+            or revision < 0
         ):
-            self.stop_training = False
+            raise ValueError("Checkpoint stage revision must be a non-negative integer or None.")
+        condition.restore_values(values)
+        if not all(math.isfinite(value) for value in condition.values):
+            raise ValueError("Checkpoint stage samples must be finite.")
+        if condition.sample_on_update and condition.values and revision is None:
+            raise ValueError("Checkpoint stage samples require their last statistics revision.")
+        condition.last_revision = revision if condition.sample_on_update else None

@@ -879,7 +879,7 @@ LPAC/FastLPAC 通过 `normalize_by_episode_steps` 决定 episode 结束时如何
 
 Stage 可通过 `sample_on_update: true` 避免重复计入同一份结果，通过 `require_all_cells_valid: true` 要求同一 group 的全体 cell 评价有效，配置方式见 3.1 节。
 
-训练检查点会保存 curriculum 的采样状态和 cell 统计，续训时会校验配置并恢复；未结束 episode 的累计数据不会恢复，新 episode 按恢复后的概率采样。不含 curriculum 状态的检查点不会恢复这些数据。Stage 中启用 `sample_on_update` 或 `require_all_cells_valid` 的条件窗口目前仍会重新积累。
+训练检查点会保存 curriculum 的采样状态、cell 统计，以及 Stage 条件窗口和已采样的统计版本，续训时会校验配置并恢复；启用 `sample_on_update: true` 时，同一统计版本不会重复计入窗口。未结束 episode 的累计数据不会恢复，新 episode 按恢复后的概率采样。不含环境状态的检查点不会恢复 curriculum 数据，启用 `sample_on_update` 或 `require_all_cells_valid` 的条件窗口也会重新积累。
 
 ## 10. 完整组合示例
 

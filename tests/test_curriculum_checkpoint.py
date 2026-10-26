@@ -13,6 +13,8 @@ from envs.tasks import BaseTaskLogic
 from envs.tasks.locomotion import LocomotionTaskLogic
 from rl.algorithms import OnPolicyAlgorithm
 from runners import OnPolicyRunner, RestoreMode
+from runners.callbacks import StageCallback
+from runners.types import TrainStopReason
 
 
 @pytest.fixture(params=[False, True], ids=["lpac", "fast_lpac"])
@@ -449,3 +451,106 @@ def test_task_without_persistent_state_uses_empty_checkpoint(runtime_context):
         task.load_checkpoint_state_dict(None)  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="does not support"):
         task.load_checkpoint_state_dict({"curriculum": {}})
+
+
+def attach_stage(runner, manager, *, window=3):
+    name = next(iter(manager.terms))
+    callback = StageCallback(condition=[{
+        "metric": f"curriculum/{name}/motion/reward_min",
+        "method": "min", "operator": ">=", "threshold": 0.0,
+        "window": window, "sample_on_update": True,
+        "require_all_cells_valid": True,
+    }])
+    callback.set_runner(runner)
+    runner.callbacks = [callback]
+    callback._on_train_start()
+    return callback
+
+
+def test_runner_resumes_stage_window_and_revision_with_curriculum(make_manager, make_runner, tmp_path):
+    source = make_manager()
+    warm_up(source)
+    runner = make_runner(source)
+    callback = attach_stage(runner, source)
+    callback._on_step_end(source.collect_metrics())
+    path = runner.save(tmp_path / "stage.pt")
+
+    target = make_manager()
+    resumed_runner = make_runner(target)
+    resumed = attach_stage(resumed_runner, target)
+    resumed_runner.prepare_checkpoint_load(path)
+    resumed_runner.load()
+    resumed_runner.train()
+    assert list(resumed._conditions[0].values) == [2.0]
+    assert resumed._conditions[0].last_revision == 1
+    resumed._on_step_end(target.collect_metrics())
+    assert list(resumed._conditions[0].values) == [2.0]
+    for _ in range(2):
+        warm_up(target)
+        resumed._on_step_end(target.collect_metrics())
+    assert resumed.stop_training
+    assert resumed._conditions[0].last_revision == 3
+
+
+@pytest.mark.parametrize("resave", [False, True])
+def test_runner_discards_stage_curriculum_history_without_environment_state(make_manager, make_runner, tmp_path, resave):
+    source = make_manager()
+    warm_up(source)
+    runner = make_runner(source)
+    callback = attach_stage(runner, source, window=1)
+    callback._on_step_end(source.collect_metrics())
+    state = runner.checkpoint_state_dict()
+    state.pop("environment")
+    path = tmp_path / "no_environment.pt"
+    torch.save({"runner": state}, path)
+    target = make_manager()
+    resumed_runner = make_runner(target)
+    resumed = attach_stage(resumed_runner, target, window=1)
+    resumed_runner.prepare_checkpoint_load(path)
+    resumed_runner.load()
+    if resave:
+        path = resumed_runner.save(tmp_path / "resaved.pt")
+        assert torch.load(path, weights_only=False)["runner"]["environment"] is None
+        resumed_runner.prepare_checkpoint_load(path)
+        resumed_runner.load()
+    resumed_runner.train()
+    assert not resumed.stop_training
+    assert not resumed._conditions[0].values
+    assert resumed._conditions[0].last_revision is None
+
+
+def test_runner_restored_completed_stage_does_not_collect_more_steps(make_manager, make_runner, tmp_path):
+    source = make_manager()
+    warm_up(source)
+    runner = make_runner(source)
+    callback = attach_stage(runner, source, window=1)
+    callback._on_step_end(source.collect_metrics())
+    path = runner.save(tmp_path / "completed.pt")
+    target = make_manager()
+    resumed_runner = make_runner(target)
+    attach_stage(resumed_runner, target, window=1)
+    resumed_runner.max_iterations = 6
+    resumed_runner.prepare_checkpoint_load(path)
+    resumed_runner.load()
+    result = resumed_runner.train()
+    assert result.reason is TrainStopReason.STAGE_COMPLETED
+    assert result.current_iteration == 4
+    assert_same_checkpoint(source.checkpoint_state_dict(), target.checkpoint_state_dict())
+
+
+@pytest.mark.parametrize("mode", [RestoreMode.EVALUATE, RestoreMode.ADVANCE_STAGE])
+def test_runner_does_not_restore_stage_window_outside_resume(make_manager, make_runner, tmp_path, mode):
+    source = make_manager()
+    warm_up(source)
+    runner = make_runner(source)
+    callback = attach_stage(runner, source)
+    callback._on_step_end(source.collect_metrics())
+    path = runner.save(tmp_path / "stage.pt")
+    target = make_manager()
+    resumed_runner = make_runner(target)
+    resumed = attach_stage(resumed_runner, target)
+    resumed_runner.prepare_checkpoint_load(path)
+    resumed_runner.load(mode=mode)
+    resumed_runner.train()
+    assert not resumed._conditions[0].values
+    assert resumed._conditions[0].last_revision is None

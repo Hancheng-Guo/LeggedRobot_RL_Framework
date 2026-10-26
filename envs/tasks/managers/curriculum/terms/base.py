@@ -1,5 +1,7 @@
 import torch
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
+from typing import Any
 
 from envs.simulators.utils import ModelContext
 from utils import RuntimeContext
@@ -42,3 +44,18 @@ class BaseCurriculumTerm(ABC):
         env_ids: torch.Tensor | None = None
     ) -> None:
         pass
+
+
+    def checkpoint_state_dict(self) -> dict[str, Any]:
+        return {"type": type(self).__name__}
+
+
+    def validate_checkpoint_state_dict(self, state: Mapping[str, Any]) -> None:
+        if not isinstance(state, Mapping):
+            raise TypeError("Curriculum term checkpoint must be a mapping.")
+        if state.get("type") != type(self).__name__:
+            raise ValueError("Curriculum checkpoint term type does not match configuration.")
+
+
+    def load_checkpoint_state_dict(self, state: Mapping[str, Any]) -> None:
+        self.validate_checkpoint_state_dict(state)

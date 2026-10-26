@@ -4,6 +4,8 @@ from abc import ABC, abstractmethod
 from typing import Any
 from dataclasses import dataclass
 from numbers import Real
+from collections.abc import Mapping
+from copy import deepcopy
 
 from .base import BaseCurriculumTerm
 from .registry import register_curriculum
@@ -69,6 +71,8 @@ class CommandRewardCurriculum(BaseCurriculumTerm, ABC):
             self.spaces
         )
         self.buffers = self._build_buffer()
+        self._command_config = deepcopy(command_manager_config)
+        self._reward_config = deepcopy(reward_manager_config)
         
 
     def _parse_reward_sources(
@@ -568,6 +572,8 @@ class CommandRewardCurriculum(BaseCurriculumTerm, ABC):
 
 class BaseLpacCommandReward(CommandRewardCurriculum, ABC):
 
+    min_coverage: float
+
     def __init__(
         self,
         min_samples_per_cell: int = 5,
@@ -771,6 +777,144 @@ class BaseLpacCommandReward(CommandRewardCurriculum, ABC):
             "reward_std", "learning_progress",
         }
         return {f"{group}/{name}" for group in self.buffers for name in names}
+
+
+    def _checkpoint_config(self) -> dict[str, Any]:
+        return {
+            "command": self._command_config,
+            "reward": self._reward_config,
+            "reward_sources": self.reward_sources,
+            "temperature": self.temperature,
+            "exploration": self.exploration,
+            "min_samples_per_cell": self.min_samples_per_cell,
+            "normalize_by_episode_steps": self.normalize_by_episode_steps,
+            "min_coverage": self.min_coverage,
+        }
+
+
+    def _checkpoint_tensors(
+        self,
+        group: str,
+    ) -> dict[str, torch.Tensor]:
+
+        buffer = self.buffers[group]
+        stats = self.cell_statistics[group]
+        return {
+            "reward_sum": buffer.reward_sum,
+            "sample_count": buffer.sample_count,
+            "last_reward_mean": self.last_reward_mean[group],
+            "learning_progress": self.learning_progress[group],
+            "probabilities": self.probabilities[group],
+            "statistics_reward_sum": stats.reward_sum,
+            "statistics_sample_count": stats.sample_count,
+            "cell_reward_mean": stats.reward_mean,
+            "cell_valid": stats.valid,
+            "statistics_revision": stats.revision,
+        }
+
+
+    def checkpoint_state_dict(self) -> dict[str, Any]:
+        groups = {}
+        for name, buffer in self.buffers.items():
+            groups[name] = {
+                "dimension_names": buffer.dimension_names,
+                "term_slices": {
+                    key: (value.start, value.stop)
+                    for key, value in buffer.term_slices.items()
+                },
+                "cell_starts": buffer.cell_starts.detach().cpu().clone(),
+                "cell_interval": buffer.cell_interval.detach().cpu().clone(),
+                "tensors": {
+                    key: value.detach().cpu().clone()
+                    for key, value in self._checkpoint_tensors(name).items()
+                },
+            }
+        return super().checkpoint_state_dict() | {
+            "config": deepcopy(self._checkpoint_config()),
+            "groups": groups,
+        }
+
+
+    def validate_checkpoint_state_dict(
+        self,
+        state: Mapping[str, Any],
+    ) -> None:
+
+        super().validate_checkpoint_state_dict(state)
+        if state.get("config") != self._checkpoint_config():
+            raise ValueError(
+                "Curriculum checkpoint configuration does not match current configuration."
+            )
+        groups = state.get("groups")
+        if not isinstance(groups, Mapping) or set(groups) != set(self.buffers):
+            raise ValueError(
+                "Checkpoint curriculum groups must match configured groups."
+            )
+
+        for name, buffer in self.buffers.items():
+            saved = groups[name]
+            slices = {key: (value.start, value.stop) for key, value in buffer.term_slices.items()}
+            if (
+                not isinstance(saved, Mapping)
+                or saved.get("dimension_names") != buffer.dimension_names
+                or saved.get("term_slices") != slices
+            ):
+                raise ValueError(f"Checkpoint cell dimensions do not match group {name!r}.")
+            for key, current in (("cell_starts", buffer.cell_starts), ("cell_interval", buffer.cell_interval)):
+                value = saved.get(key)
+                if (
+                    not isinstance(value, torch.Tensor) or value.shape != current.shape
+                    or not torch.allclose(value.to(device="cpu", dtype=torch.float64), current.detach().to(device="cpu", dtype=torch.float64))
+                ):
+                    raise ValueError(f"Checkpoint {key} does not match group {name!r}.")
+            self._validate_checkpoint_tensors(name, saved.get("tensors"))
+
+
+    def _validate_checkpoint_tensors(
+        self,
+        group: str,
+        saved: Any,
+    ) -> None:
+
+        current = self._checkpoint_tensors(group)
+        if not isinstance(saved, Mapping) or set(saved) != set(current):
+            raise ValueError(f"Checkpoint tensor fields do not match group {group!r}.")
+        for key, target in current.items():
+            value = saved[key]
+            if not isinstance(value, torch.Tensor) or value.shape != target.shape:
+                raise ValueError(f"Invalid checkpoint tensor shape for {group!r}/{key}.")
+            if target.is_floating_point():
+                valid_dtype = value.is_floating_point()
+            else:
+                valid_dtype = value.dtype == target.dtype
+            if not valid_dtype:
+                raise ValueError(f"Invalid checkpoint tensor dtype for {group!r}/{key}.")
+            if key in {"sample_count", "statistics_sample_count", "statistics_revision"} and torch.any(value < 0):
+                raise ValueError(f"Checkpoint {group!r}/{key} must be non-negative.")
+        probabilities = saved["probabilities"]
+        if (
+            not torch.isfinite(probabilities).all() or torch.any(probabilities < 0)
+            or not torch.isclose(probabilities.sum(), probabilities.new_tensor(1.0))
+        ):
+            raise ValueError(f"Checkpoint probabilities are invalid for group {group!r}.")
+        if not torch.isfinite(saved["cell_reward_mean"][saved["cell_valid"]]).all():
+            raise ValueError(f"Checkpoint valid cell rewards must be finite for group {group!r}.")
+
+
+    def load_checkpoint_state_dict(self, state: Mapping[str, Any]) -> None:
+        self.validate_checkpoint_state_dict(state)
+        with torch.no_grad():
+            for name, buffer in self.buffers.items():
+                saved = state["groups"][name]["tensors"]
+                for key, target in self._checkpoint_tensors(name).items():
+                    target.copy_(saved[key].to(device=target.device, dtype=target.dtype))
+                buffer.assigned_cell_ids.fill_(-1)
+                self.episode_reward_sum[name].zero_()
+            self.episode_step_count.zero_()
+            self._cell_metrics = {
+                name: self._summarize_cell_statistics(name)
+                for name in self.buffers
+            }
 
 
     @abstractmethod

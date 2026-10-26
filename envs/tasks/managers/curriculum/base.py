@@ -1,5 +1,6 @@
 import torch
 from typing import Any
+from collections.abc import Mapping
 
 from envs.simulators.utils import ModelContext
 from envs.tasks.managers.curriculum.terms import (
@@ -134,3 +135,38 @@ class CurriculumManager:
         
         for term in self.terms.values():
             term.reset(env_ids)
+
+
+    def checkpoint_state_dict(self) -> dict[str, Any]:
+        return {
+            "terms": {
+                name: term.checkpoint_state_dict()
+                for name, term in self.terms.items()
+            },
+        }
+
+
+    def load_checkpoint_state_dict(
+        self,
+        state: Mapping[str, Any],
+    ) -> None:
+
+        if not isinstance(state, Mapping):
+            raise TypeError(
+                "Curriculum manager checkpoint must be a mapping."
+            )
+
+        terms = state.get("terms")
+        if (
+            not isinstance(terms, Mapping)
+            or set(terms) != set(self.terms)
+        ):
+            raise ValueError(
+                "Checkpoint curriculum terms must match configured terms."
+            )
+
+        # Reject incompatible states before restoring any term.
+        for name, term in self.terms.items():
+            term.validate_checkpoint_state_dict(terms[name])
+        for name, term in self.terms.items():
+            term.load_checkpoint_state_dict(terms[name])

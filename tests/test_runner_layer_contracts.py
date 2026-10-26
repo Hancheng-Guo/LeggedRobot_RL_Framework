@@ -71,7 +71,7 @@ def test_callback_checkpoint_state_overrides_directory_marker(
     torch.save({"runner": {
         "stage_index": 0, "current_iteration": 7,
         "callbacks": [{"type": "StageCallback", "state": {
-            "stop_training": completed, "condition_values": [[1.0]],
+            "stop_training": completed, "condition_values": [{"score": [1.0]}],
         }}],
     }}, path)
     (tmp_path / "stage_completed").touch()
@@ -104,7 +104,8 @@ def test_restore_mode_controls_optimizer_and_callback_history(
     torch.save({"runner": {
         "stage_index": 0, "current_iteration": 0, "algorithm": {},
         "callbacks": [{"type": "StageCallback", "state": {
-            "stop_training": False, "condition_values": [[7.0, 9.0]],
+            "stop_training": False,
+            "condition_values": [{"score": [7.0, 9.0]}],
         }}],
     }}, path)
     runner.prepare_checkpoint_load(path)
@@ -115,7 +116,8 @@ def test_restore_mode_controls_optimizer_and_callback_history(
     # RESUME must then restore history; advance/evaluate must not restore it.
     result = runner.train()
     state = runner.callbacks[-1].checkpoint_state_dict()
-    assert state["condition_values"] == ([[7.0, 9.0]] if mode is RestoreMode.RESUME else [[]])
+    expected_values = [7.0, 9.0] if mode is RestoreMode.RESUME else []
+    assert state["condition_values"] == [{"score": expected_values}]
     assert result.reason is TrainStopReason.MAX_ITERATIONS_REACHED
     assert result.current_iteration == 0
 
@@ -205,7 +207,7 @@ def test_save_after_restore_preserves_completed_stage(
     monkeypatch: pytest.MonkeyPatch, mode: RestoreMode,
 ) -> None:
     callbacks = [{"type": "StageCallback", "state": {
-        "stop_training": True, "condition_values": [[1.0]],
+        "stop_training": True, "condition_values": [{"score": [1.0]}],
     }}]
     source = tmp_path / "source.pt"
     torch.save({"runner": {

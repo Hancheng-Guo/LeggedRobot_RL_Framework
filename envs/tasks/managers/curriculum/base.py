@@ -119,6 +119,14 @@ class CurriculumManager:
         return info
 
 
+    def get_metric_names(self) -> set[str]:
+        return {
+            f"curriculum/{name}/{metric}"
+            for name, term in self.terms.items()
+            for metric in term.get_metric_names()
+        }
+
+
     def reset(
         self,
         env_ids: torch.Tensor | None = None

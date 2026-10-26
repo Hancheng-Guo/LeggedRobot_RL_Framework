@@ -12,6 +12,7 @@ from envs.tasks.managers.command import CommandManager
 from envs.tasks.managers.curriculum import CurriculumManager
 from envs.tasks.managers.reward import RewardManager
 from envs.tasks.utils import TaskContext, TaskStepResult
+from runners.callbacks.stage import StageCallback
 from envs.tasks.managers.curriculum.terms.command import (
     FastLpacCommandReward,
     LpacCommandReward,
@@ -701,6 +702,72 @@ def test_cell_statistics_use_equal_cell_weights_and_independent_groups(
     assert info[f"curriculum/{name}/motion/reward_mean"].item() == 6.0
     assert info[f"curriculum/{name}/posture/reward_mean"].item() == 4.25
     assert info[f"curriculum/{name}/motion/coverage"].item() == 1.0
+
+
+@pytest.mark.parametrize("fast", [False, True])
+def test_stage_consumes_only_fresh_fully_covered_cell_statistics(
+    runtime_context, model_context, fast,
+) -> None:
+    manager = make_manager(runtime_context, model_context, fast=fast)
+    name = "fast_lpac_command_reward" if fast else "lpac_command_reward"
+    term = cast(LpacCommandReward | FastLpacCommandReward, manager.get_term(name))
+    prefix = f"curriculum/{name}/motion/"
+    callback = StageCallback(condition=[{
+        "metric": prefix + "reward_min", "method": "min",
+        "operator": ">=", "threshold": 3.0, "window": 2,
+        "sample_on_update": True,
+        "require_all_cells_valid": True,
+    }])
+    buffer = term.buffers["motion"]
+    buffer.assigned_cell_ids.copy_(torch.tensor([0, 1, 2]))
+    reward = torch.full((3,), 3.0)
+    manager.update(
+        raw_term_rewards={"action_diff_l2": reward},
+        term_rewards={"action_diff_l2": reward}, total_reward=reward,
+    )
+    manager.reset(torch.tensor([0]))
+    callback._on_step_end(manager.collect_metrics())
+    assert not callback._conditions[0].values
+    manager.reset(torch.tensor([1, 2]))
+    info = manager.collect_metrics()
+    assert info[prefix + "all_cells_valid"].item() == 1.0
+    for _ in range(3):
+        callback._on_step_end(info)
+    assert list(callback._conditions[0].values) == [3.0]
+    assert not callback.stop_training
+
+    buffer.assigned_cell_ids.copy_(torch.tensor([0, 1, 2]))
+    reward = torch.full((3,), 4.0)
+    manager.update(
+        raw_term_rewards={"action_diff_l2": reward},
+        term_rewards={"action_diff_l2": reward}, total_reward=reward,
+    )
+    manager.reset()
+    callback._on_step_end(manager.collect_metrics())
+    assert callback.stop_training
+
+
+@pytest.mark.parametrize("fast", [False, True])
+def test_curriculum_metric_schema_allows_validation_before_first_evaluation(
+    runtime_context, model_context, fast,
+) -> None:
+    manager = make_manager(runtime_context, model_context, fast=fast)
+    name = "fast_lpac_command_reward" if fast else "lpac_command_reward"
+    prefix = f"curriculum/{name}/motion/"
+    assert prefix + "reward_min" not in manager.collect_metrics()
+    assert prefix + "reward_min" in manager.get_metric_names()
+    callback = StageCallback(condition=[{
+        "metric": prefix + "reward_min", "method": "min",
+        "operator": ">=", "threshold": 2.0, "window": 2,
+        "sample_on_update": True, "require_all_cells_valid": True,
+    }])
+    callback.set_runner(SimpleNamespace(environment=SimpleNamespace(
+        task=SimpleNamespace(curriculum_manager=manager),
+    )))
+    callback._on_train_start()
+    assert not callback._conditions[0].values
+    callback._on_step_end(manager.collect_metrics())
+    assert not callback.stop_training
 
 
 def test_lpac_uses_zero_as_first_reward_baseline(

@@ -32,6 +32,11 @@ class BaseCurriculumTerm(ABC):
         return {}
 
 
+    def get_metric_names(self) -> set[str]:
+        """Declare supported metrics even before their first values exist."""
+        return set()
+
+
     def reset(
         self,
         env_ids: torch.Tensor | None = None

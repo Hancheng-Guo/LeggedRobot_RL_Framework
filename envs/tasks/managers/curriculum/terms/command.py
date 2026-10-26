@@ -764,6 +764,15 @@ class BaseLpacCommandReward(CommandRewardCurriculum, ABC):
         }
 
 
+    def get_metric_names(self) -> set[str]:
+        names = {
+            "coverage", "valid_cell_count", "num_cells", "all_cells_valid",
+            "statistics_revision", "reward_mean", "reward_min", "reward_max",
+            "reward_std", "learning_progress",
+        }
+        return {f"{group}/{name}" for group in self.buffers for name in names}
+
+
     @abstractmethod
     def _update_space(self, space_name: str) -> None:
         raise NotImplementedError

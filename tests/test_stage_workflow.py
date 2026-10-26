@@ -270,7 +270,7 @@ def make_stage_manager(
                     "max_iterations": 5,
                     "transition": [{
                         "method": "min",
-                        "metric": "*/mean_len",
+                        "metric": "rollout/mean_len",
                         "operator": ">=",
                         "threshold": 4.0,
                         "window": 2,

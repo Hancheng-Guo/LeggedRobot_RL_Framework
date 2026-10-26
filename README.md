@@ -194,17 +194,48 @@ component:
 - `max_iterations`：正整数；
 - `transition`：非空条件列表，所有条件同时满足后进入下一阶段。
 
-每条 transition 必须恰好包含：
+每条 transition 必须包含以下字段，可额外配置布尔开关 `sample_on_update` 和 `require_all_cells_valid`：
 
 | 字段 | 可用值 | 含义 |
 |---|---|---|
-| `metric` | 指标名或唯一通配模式 | 如 `rollout/mean_len`、`*/approx_kl` |
+| `metric` | 明确的完整指标名，不支持通配符 | 如 `rollout/mean_len`、`reward/action_diff_l2` |
 | `method` | `mean`、`max`、`min` | 对最近窗口聚合 |
 | `operator` | `>`、`>=`、`<`、`<=`、`==`、`!=` | 与阈值比较 |
 | `threshold` | 数值 | 目标阈值 |
 | `window` | 正整数 | 连续记录窗口长度 |
+| `sample_on_update`（可选，仅 curriculum） | 布尔值，默认 `false` | 仅在同组 cell 统计更新时，向窗口记录一次评价 |
+| `require_all_cells_valid`（可选，仅 curriculum） | 布尔值，默认 `false` | 仅在同组全体 cell 的评价有效时记录；评价失效时清空窗口 |
 
-向量指标会先在环境维度取平均。通配模式必须最多匹配一个指标，否则会报错。
+每条条件只对应一个指标，维护自己的缓存窗口，并按 `method`、`operator` 和 `threshold` 判断。需要同时检查多个指标时，将它们分别写成多条 transition，所有条件都满足后才切换阶段。向量指标先在环境维度取平均。
+
+配置 `metric` 时包含通配符会立即报错。对于 `curriculum/` 开头的条件，Stage 还会在训练开始前检查 curriculum term、group 和指标名是否存在；即使首批 cell 评价尚未完成，也能校验名称。所有条件都会在初始化时建立缓存，无需等待指标值首次出现。
+
+`sample_on_update` 和 `require_all_cells_valid` 仅用于 curriculum 指标，不能用于普通 reward、rollout 等指标。只要任一开关为 `true`，`metric` 就必须采用 `curriculum/<term>/<group>/<metric>` 格式，否则配置校验会报错。Stage 会自动关联同组的统计更新版本和评价有效性，无需额外配置。普通指标保持这两个开关为 `false` 或省略即可。
+
+用于全空间 cell 评价的配置示例（阈值仅示意，需按奖励来源和 episode 归一化设置校准）：
+
+```yaml
+transition:
+  - metric: curriculum/fast_lpac_command_reward/velocity/reward_min
+    method: min
+    operator: ">="
+    threshold: 3000.0
+    window: 3
+    sample_on_update: true
+    require_all_cells_valid: true
+```
+
+上例要求全体 cell 都有有效评价，并且最近三次统计更新中的最弱 cell 分数均不低于 `3000.0`。其中，`reward_min` 取同组有效 cell 分数的最小值，`method: min` 再取窗口内三次评价的最小值。若改为 `method: mean`，则比较这三次评价的平均值。配置多条 transition 时，仍需所有条件同时满足才切换阶段。启用 `sample_on_update` 后，`window` 按统计更新次数计数；同一份统计不会重复入窗。上述 `window: 3` 不表示三个环境步，也不表示三轮完整的全空间重新采样，各 cell 的评价仍可能来自不同时刻。
+
+窗口的保留与清空规则如下：
+
+- 启用 `require_all_cells_valid` 后，若有 cell 的评价失效，清空该条件窗口；若同时启用 `sample_on_update`，从下一次有效的统计更新开始重新积累。
+- 已收到该条件的相关数据，但缺少已启用开关所需的同组 `statistics_revision` 或 `all_cells_valid` 时，直接报错，并提示缺失的完整指标名。
+- 启用 `sample_on_update` 后，版本号必须是有限的非负整数；NaN/Inf、负数或非整数会直接报错。
+- 启用 `require_all_cells_valid` 且有效性检查通过后，主指标缺失会直接报错；未启用时保留等待逻辑，允许首批评价尚未产生。主指标出现 NaN/Inf 时清空窗口。
+- 本次回调完全没有该条件的相关数据时，保持窗口不变，等待后续数据。
+
+<!-- 当前恢复训练时，cell 评价统计会重新采集。因此，只要启用了上述任一开关，对应的 Stage 窗口也会重新积累。未启用这两个开关的条件仍按原有方式恢复窗口。 -->
 
 ### 3.2 component 写法与多阶段继承
 
@@ -846,7 +877,7 @@ LPAC/FastLPAC 通过 `normalize_by_episode_steps` 决定 episode 结束时如何
 
 初始化时覆盖率为 0，尚无有效 cell 时不导出 `reward_*` 指标，避免用零分或估计值冒充真实结果。有限评价不会因采样窗口清空或新批次尚未完成而失效；若新一批评价为 NaN/Inf，则该 cell 标记为无效。各 cell 使用自己最后一次完成的批次评价，可能来自不同时刻。任务指标在本步 done 环境 reset、cell 结算完成后收集，返回的标量是独立快照。
 
-<!-- 两个内置 runner 配置已启用这些标量的 TensorBoard 记录；原有 learning progress 直方图保留。Stage 的版本采样与有效性约束尚未加入，因此本次不新增 curriculum transition 配置。后续以全空间表现判定阶段时，需要结合覆盖率与分数，并避免将同一个 `statistics_revision` 重复计入时间窗口。 -->
+Stage 可通过 `sample_on_update: true` 避免重复计入同一份结果，通过 `require_all_cells_valid: true` 要求同一 group 的全体 cell 评价有效，配置方式见 3.1 节。
 
 ## 10. 完整组合示例
 
@@ -880,7 +911,7 @@ pytest -q
 
 - **找不到配置**：`ApplicationEntry` 名称和 `configs/<name>.yaml` 必须一致；组件 `config` 名称也必须对应其默认目录中的文件。
 - **第一阶段缺组件**：stage 继承只能复用已经构建的实例，首个 stage 必须提供完整组件集合。
-- **阶段无法切换**：检查 metric 是否真实产生、通配符是否唯一、`window` 是否已积累满，以及所有 transition 是否同时满足。
+- **阶段无法切换**：检查 metric 是否真实产生、各条件的 `window` 是否已积累满，以及所有 transition 是否同时满足。Stage 不支持通配符；curriculum 指标名错误会在训练开始前报错。
 - **课程命令报错**：LPAC command 与 curriculum 类型必须配对；同组命令的格点乘积不能超过 `max_cells`。
 - **CUDA 不可用**：`runtime.device: cuda` 会严格检查 `torch.cuda.is_available()`，不会自动回退 CPU。
 - **确定性算法报错**：部分 CUDA/Isaac 操作不支持确定性实现，可将 `deterministic_ops` 设为 `false`。

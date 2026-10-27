@@ -18,6 +18,15 @@ stage:
         - {metric: "reward/track_linear_velocity_y_l2_exp_and_logcosh", method: mean, operator: ">=", threshold: 1.8, window: 100}
         - {metric: "reward/track_angular_velocity_z_l2_exp_and_logcosh", method: mean, operator: ">=", threshold: 0.9, window: 100}
         - {metric: "rollout/mean_len", method: mean, operator: ">=", threshold: 900.0, window: 100}
+        # Initial threshold: (1.8 + 1.8 + 0.9) * 900; calibrate using cell scores.
+        # Require the weakest cell to pass on three consecutive statistics updates.
+        - metric: curriculum/fast_lpac_command_reward/velocity/reward_min
+          method: min
+          operator: ">="
+          threshold: 4500.0
+          window: 3
+          sample_on_update: true
+          require_all_cells_valid: true
 
 
 component:

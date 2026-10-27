@@ -128,6 +128,8 @@ with ApplicationEntry(
 
 阶段是否完成由检查点中保存的 `StageCallback.stop_training` 状态判断；旧检查点若含 `runner.stage_completed` 字段，也会读取该字段。目录中的 `stage_completed` 标记不参与判断。fork 的 `resume_manifest.json` 记录来源检查点和创建信息，仅供查看，不参与检查点选择或恢复校验。`device` 覆盖只影响本次运行，不改写已归档的配置；运行仍需相应项目代码、仿真资源和外部依赖。
 
+普通续训会在环境 reset 前自动恢复 Python、NumPy、PyTorch CPU 及已初始化的 CUDA 全局随机数状态，无需额外配置。评估和阶段推进不恢复检查点中的随机数状态；CUDA 设备数量变化时，仅恢复当前可用的对应设备状态。不含随机数状态的检查点继续使用本次运行的随机数状态。
+
 `RuntimeContext` 位于 `utils/runtime.py`；`app/utils/run_workspace.py` 的 `select_checkpoint()` 负责选取文件，`inspect_checkpoint_metadata()` 从 PyTorch 检查点读取阶段元数据。runner 的 `RestoreMode.RESUME / ADVANCE_STAGE / EVALUATE` 分别用于续训、阶段推进与评估；阶段条件通过 `config_update(transition=...)` 传入，`train()` 返回 `TrainResult`。新检查点的阶段完成状态保存在阶段回调状态中，不再另存顶层 `stage_completed` 或 `checkpoint_version`。
 
 输出位于：
@@ -879,7 +881,7 @@ Stage 可通过 `sample_on_update: true` 避免重复计入同一份结果，通
 
 训练检查点会保存 curriculum 的采样状态、cell 统计，以及 Stage 条件窗口和已采样的统计版本，续训时会校验配置并恢复；启用 `sample_on_update: true` 时，同一统计版本不会重复计入窗口。
 
-未结束 episode 的累计数据不会恢复，新 episode 按恢复后的概率采样。检查点不保存模拟器或全局随机数状态，因此不保证续训后的仿真轨迹与连续训练逐步一致。不含环境状态的检查点不会恢复 curriculum 数据，启用 `sample_on_update` 或 `require_all_cells_valid` 的条件窗口也会重新积累。
+未结束 episode 的累计数据不会恢复，新 episode 按恢复后的概率采样。由于模拟器状态没有恢复，且新 episode 的初始化会消耗随机数，仍不保证续训后的仿真轨迹与连续训练逐步一致。不含环境状态的检查点不会恢复 curriculum 数据，启用 `sample_on_update` 或 `require_all_cells_valid` 的条件窗口也会重新积累。
 
 ## 10. 完整组合示例
 

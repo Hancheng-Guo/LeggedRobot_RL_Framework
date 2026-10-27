@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import warnings
 import time
+import random
 import torch
 import numpy as np
 from contextlib import ExitStack
@@ -53,6 +54,8 @@ class OnPolicyRunner(BaseRunner):
         self._environment_checkpoint_restored = False
         self._checkpoint_callback_snapshot: list[dict[str, Any]] | None = None
         self._checkpoint_environment_snapshot: dict[str, Any] | None = None
+        self._pending_rng_state: dict[str, Any] | None = None
+        self._checkpoint_rng_snapshot: dict[str, Any] | None = None
         self.tracking_specs: tuple[TrackingSpec, ...] = ()
         
         self.current_iteration = -1
@@ -88,6 +91,8 @@ class OnPolicyRunner(BaseRunner):
             self._environment_checkpoint_restored = False
             self._checkpoint_callback_snapshot = None
             self._checkpoint_environment_snapshot = None
+            self._pending_rng_state = None
+            self._checkpoint_rng_snapshot = None
         if (
             previous_stage_index != stage_index
             and self._pending_checkpoint_payload is None
@@ -345,6 +350,13 @@ class OnPolicyRunner(BaseRunner):
             self.environment.load_checkpoint_state_dict(self._checkpoint_environment_snapshot)
             self._checkpoint_environment_snapshot = None
         self._checkpoint_callback_snapshot = None
+        rng_state = self._pending_rng_state
+        if rng_state is None:
+            rng_state = self._checkpoint_rng_snapshot
+        if rng_state is not None:
+            self._restore_rng_state(rng_state)
+        self._pending_rng_state = None
+        self._checkpoint_rng_snapshot = None
         obs = self.environment.reset()
         self.stop_callback.clear()
         self._recent_rollout_lengths = deque(
@@ -912,6 +924,8 @@ class OnPolicyRunner(BaseRunner):
 
     def _snapshot_before_evaluation(self) -> None:
 
+        if self._checkpoint_rng_snapshot is None:
+            self._checkpoint_rng_snapshot = self._rng_state_dict()
         if self._checkpoint_environment_snapshot is None:
             self._checkpoint_environment_snapshot = self._environment_state_dict()
         if (
@@ -936,6 +950,45 @@ class OnPolicyRunner(BaseRunner):
         return self.environment.checkpoint_state_dict()
 
 
+    def _rng_state_dict(self) -> dict[str, Any]:
+        if self._pending_rng_state is not None:
+            return deepcopy(self._pending_rng_state)
+        if self._checkpoint_rng_snapshot is not None:
+            return deepcopy(self._checkpoint_rng_snapshot)
+        return {
+            "python": random.getstate(),
+            "numpy": np.random.get_state(),
+            "torch_cpu": torch.get_rng_state().clone(),
+            # Do not initialize CUDA solely to save a CPU training checkpoint.
+            "torch_cuda": (
+                [state.clone() for state in torch.cuda.get_rng_state_all()]
+                if torch.cuda.is_initialized() else []
+            ),
+        }
+
+
+    def _restore_rng_state(
+        self,
+        state: Mapping[str, Any],
+    ) -> None:
+        random.setstate(state["python"])
+        np.random.set_state(state["numpy"])
+        # torch.load(map_location=...) may have moved RNG tensors to CUDA.
+        torch.set_rng_state(state["torch_cpu"].cpu())
+        cuda_states = state["torch_cuda"]
+        if not cuda_states:
+            return
+        device_count = torch.cuda.device_count()
+        if len(cuda_states) != device_count:
+            LOGGER.warning(
+                "CUDA device count changed from %d to %d; restoring RNG state "
+                "only for matching device indices.",
+                len(cuda_states), device_count,
+            )
+        for index, cuda_state in enumerate(cuda_states[:device_count]):
+            torch.cuda.set_rng_state(cuda_state.cpu(), device=index)
+
+
     def close(self) -> None:
 
         self._pending_checkpoint_payload = None
@@ -943,6 +996,8 @@ class OnPolicyRunner(BaseRunner):
         self._environment_checkpoint_restored = False
         self._checkpoint_callback_snapshot = None
         self._checkpoint_environment_snapshot = None
+        self._pending_rng_state = None
+        self._checkpoint_rng_snapshot = None
         self._run_callbacks("_on_close")
 
         if hasattr(self, "environment"):
@@ -985,6 +1040,7 @@ class OnPolicyRunner(BaseRunner):
                 if self._checkpoint_callback_snapshot is not None
                 else self._callback_state_entries()
             ),
+            "rng": self._rng_state_dict(),
         }
 
 
@@ -1045,6 +1101,14 @@ class OnPolicyRunner(BaseRunner):
             if not isinstance(callback_states, Sequence):
                 raise TypeError("Checkpoint 'callbacks' must be a sequence.")
             self._pending_callback_states = callback_states
+        self._pending_rng_state = None
+        self._checkpoint_rng_snapshot = None
+        if mode is RestoreMode.RESUME:
+            rng_state = runner_state.get("rng")
+            if rng_state is not None:
+                if not isinstance(rng_state, Mapping):
+                    raise TypeError("Checkpoint RNG state must be a mapping.")
+                self._pending_rng_state = deepcopy(dict(rng_state))
         self._pending_checkpoint_payload = None
 
 
@@ -1092,4 +1156,6 @@ class OnPolicyRunner(BaseRunner):
         self._pending_callback_states = None
         self._checkpoint_callback_snapshot = None
         self._checkpoint_environment_snapshot = None
+        self._pending_rng_state = None
+        self._checkpoint_rng_snapshot = None
         return payload

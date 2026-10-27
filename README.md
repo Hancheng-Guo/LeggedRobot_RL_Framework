@@ -110,6 +110,20 @@ conda install -c conda-forge -c robostack-jazzy --file requirements/ros2.txt
 
 ### 从历史检查点续训
 
+在 VS Code 中执行 **Tasks: Run Task → Run: Resume Training**，依次输入：
+
+1. 历史运行目录名或路径，例如 `unitree_go1_mujoco_cpu_velocity_only_2026-10-04_22-55-48`；留空选择时间最新的运行目录。
+2. 检查点路径，例如 `stage_000/checkpoint_00003500.pt`；留空按下文规则自动选择。
+3. 输出方式：`fork` 创建新的续训目录（默认），`inplace` 写回原运行目录。
+
+此 Task 使用当前选择的 Python 解释器，读取历史运行归档的配置，续训结束后保存检查点。也可在项目根目录直接执行：
+
+```powershell
+python -m tools.resume_training unitree_go1_mujoco_cpu_velocity_only_2026-10-04_22-55-48
+```
+
+命令行可通过 `--checkpoint stage_000/checkpoint_00003500.pt` 指定检查点，通过 `--resume-mode inplace` 写回原目录。
+
 `train_time` 是 `checkpoints/<app_name>_<time>/` 目录名中的 `<time>`，格式为 `YYYY-MM-DD_HH-MM-SS`。历史目录需要包含 `configs/<app_name>.yaml`、所引用的组件配置以及可读取的检查点。默认 `resume_mode="fork"`：调用 `train()` 时创建新的时间目录，复制选定检查点为新目录的 `checkpoints/resume.pt`，归档本次使用的配置，并在新目录写入训练日志和后续检查点；原目录不会被续训写入。
 
 ```python

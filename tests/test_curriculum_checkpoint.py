@@ -13,7 +13,7 @@ from envs.tasks import BaseTaskLogic
 from envs.tasks.locomotion import LocomotionTaskLogic
 from rl.algorithms import OnPolicyAlgorithm
 from runners import OnPolicyRunner, RestoreMode
-from runners.callbacks import StageCallback
+from runners.callbacks import BaseCallback, StageCallback
 from runners.types import TrainStopReason
 
 
@@ -554,3 +554,163 @@ def test_runner_does_not_restore_stage_window_outside_resume(make_manager, make_
     resumed_runner.train()
     assert not resumed._conditions[0].values
     assert resumed._conditions[0].last_revision is None
+
+
+def make_scripted_training(make_runner, manager, *, normalize, invalidate_step=None):
+    runner = make_runner(manager)
+    runner.current_iteration = -1
+    runner.max_iterations = 24
+    name = next(iter(manager.terms))
+    stage = StageCallback(condition=[
+        {
+            "metric": f"curriculum/{name}/motion/reward_min",
+            "method": "min", "operator": ">=", "threshold": 0.0,
+            "window": 3, "sample_on_update": True, "require_all_cells_valid": True,
+        },
+        {
+            "metric": f"curriculum/{name}/posture/reward_min",
+            "method": "min", "operator": ">=",
+            "threshold": 1.25 if normalize else 2.5,
+            "window": 2, "sample_on_update": True, "require_all_cells_valid": True,
+        },
+        {
+            "metric": "rollout/test_score", "method": "mean",
+            "operator": ">=", "threshold": 1.0, "window": 2,
+        },
+    ])
+    stage.set_runner(runner)
+    trace = []
+
+    class TrainingTrace(BaseCallback):
+        def __init__(self):
+            self.runner = runner
+
+        def _on_iteration_end(self, *args, **kwargs):
+            term = get_term(manager)
+            trace.append({
+                "iteration": runner.current_iteration,
+                "curriculum": manager.checkpoint_state_dict(),
+                "stage": stage.checkpoint_state_dict(),
+                "metrics": manager.collect_metrics(),
+                "assignments": {
+                    group: buffer.assigned_cell_ids.clone()
+                    for group, buffer in term.buffers.items()
+                },
+                "episode_steps": term.episode_step_count.clone(),
+            })
+            return True
+
+    runner.callbacks = [stage, TrainingTrace()]
+    runner.algorithm.process_transition = lambda **kwargs: None
+    runner.algorithm.compute_returns = lambda **kwargs: None
+    runner.algorithm.update = lambda: {"rollout/test_score": 1.0}
+
+    def step(action):
+        index = runner.current_iteration
+        term = get_term(manager)
+        if index % 2 == 0:
+            # Prescribed episode inputs isolate persistence from simulator/RNG state.
+            term.buffers["motion"].assigned_cell_ids.copy_(torch.tensor([0, 1, 2]))
+            term.buffers["posture"].assigned_cell_ids.copy_(torch.tensor([2, 1, 0]))
+        strength = index // 4 + 1
+        update(manager, [strength, 2 * strength, 3 * strength])
+        done = index % 2 == 1
+        if done:
+            torch.manual_seed(1000 + index)
+            manager.reset()
+        if index == invalidate_step:
+            # Evaluation batches are independent of LPAC's sampling windows.
+            # Inject a failed evaluation without changing the sampling rewards.
+            term._record_cell_statistics(
+                "motion", torch.tensor([0, 0]), torch.tensor([float("nan"), float("nan")]),
+            )
+        obs = torch.full((3, 1), float(index + 1))
+        return (
+            obs, obs, torch.ones(3), torch.full((3,), done, dtype=torch.bool),
+            torch.zeros(3, dtype=torch.bool), manager.collect_metrics(),
+        )
+
+    runner.environment.step = step
+    return runner, stage, trace
+
+
+def assert_same_training_trace(expected, actual):
+    assert len(expected) == len(actual)
+    for before, after in zip(expected, actual):
+        assert before["iteration"] == after["iteration"]
+        assert before["stage"] == after["stage"]
+        assert_same_checkpoint(before["curriculum"], after["curriculum"])
+        for key in ("metrics", "assignments"):
+            assert before[key].keys() == after[key].keys()
+            for name in before[key]:
+                torch.testing.assert_close(before[key][name], after[key][name], equal_nan=True)
+        torch.testing.assert_close(before["episode_steps"], after["episode_steps"])
+
+
+@pytest.mark.parametrize("normalize", [False, True])
+@pytest.mark.parametrize("checkpoint_step", [2, 6, 14])
+def test_continuous_and_resumed_training_match_every_iteration(
+    make_manager, make_runner, tmp_path, normalize, checkpoint_step,
+):
+    continuous_manager = make_manager(normalize_by_episode_steps=normalize)
+    continuous, _, expected_trace = make_scripted_training(
+        make_runner, continuous_manager, normalize=normalize,
+    )
+    expected_result = continuous.train()
+    assert expected_result.reason is TrainStopReason.STAGE_COMPLETED
+    assert expected_result.current_iteration == 15
+    assert len(expected_trace) == 16
+
+    interrupted_manager = make_manager(normalize_by_episode_steps=normalize)
+    interrupted, _, prefix = make_scripted_training(
+        make_runner, interrupted_manager, normalize=normalize,
+    )
+    interrupted.max_iterations = checkpoint_step
+    assert interrupted.train().reason is TrainStopReason.MAX_ITERATIONS_REACHED
+    term = get_term(interrupted_manager)
+    assert not term.episode_step_count.any()
+    assert all((stats.sample_count == 1).all() for stats in term.cell_statistics.values())
+    path = interrupted.save(tmp_path / "interrupted.pt")
+
+    resumed_manager = make_manager(normalize_by_episode_steps=normalize)
+    resumed, _, suffix = make_scripted_training(
+        make_runner, resumed_manager, normalize=normalize,
+    )
+    resumed.prepare_checkpoint_load(path)
+    resumed.load()
+    assert resumed.train() == expected_result
+    assert_same_training_trace(expected_trace, prefix + suffix)
+    assert_same_checkpoint(continuous_manager.checkpoint_state_dict(), resumed_manager.checkpoint_state_dict())
+
+
+@pytest.mark.parametrize("checkpoint_step", [6, 8])
+def test_invalid_cell_evaluation_recovers_identically_after_resume(
+    make_manager, make_runner, tmp_path, checkpoint_step,
+):
+    continuous_manager = make_manager()
+    continuous, _, expected_trace = make_scripted_training(
+        make_runner, continuous_manager, normalize=False, invalidate_step=5,
+    )
+    expected_result = continuous.train()
+    assert expected_result.reason is TrainStopReason.STAGE_COMPLETED
+
+    interrupted_manager = make_manager()
+    interrupted, stage, prefix = make_scripted_training(
+        make_runner, interrupted_manager, normalize=False, invalidate_step=5,
+    )
+    interrupted.max_iterations = checkpoint_step
+    interrupted.train()
+    assert not get_term(interrupted_manager).cell_statistics["motion"].valid[0]
+    assert not stage._conditions[0].values
+    assert stage._conditions[1].values
+    path = interrupted.save(tmp_path / "invalid_evaluation.pt")
+
+    resumed_manager = make_manager()
+    resumed, _, suffix = make_scripted_training(
+        make_runner, resumed_manager, normalize=False, invalidate_step=5,
+    )
+    resumed.prepare_checkpoint_load(path)
+    resumed.load()
+    assert resumed.train() == expected_result
+    assert_same_training_trace(expected_trace, prefix + suffix)
+    assert get_term(resumed_manager).cell_statistics["motion"].valid.all()

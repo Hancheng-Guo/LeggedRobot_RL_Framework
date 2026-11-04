@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import cast
 
 from .base import BaseSimulator
+from .terrain import TerrainConfig
 from .isaac_sim_backend import IsaacSimBackend, IsaacSimResetState
 from .utils import ModelContext, SimulatorState
 from utils import Component, RuntimeContext, update_attributes
@@ -91,8 +92,18 @@ class IsaacSimSimulator(BaseSimulator):
         joint_stiffness: float | Mapping[str, float] | None = None,
         joint_damping: float | Mapping[str, float] | None = None,
         reset_state: Mapping[str, object] | None = None,
+        terrain: Mapping[str, object] | None = None,
     ) -> None:
 
+        terrain_config = (
+            TerrainConfig.from_mapping(terrain)
+            if terrain is not None or model_path is not None
+            else self.terrain_config
+        )
+        if not terrain_config.is_plane:
+            raise NotImplementedError(
+                "Isaac Sim geometric terrain is not implemented yet."
+            )
         backend_configuration_changed = any(
             value is not None
             for value in (
@@ -115,6 +126,7 @@ class IsaacSimSimulator(BaseSimulator):
                 joint_stiffness,
                 joint_damping,
                 reset_state,
+                terrain,
             )
         )
         if (
@@ -130,6 +142,8 @@ class IsaacSimSimulator(BaseSimulator):
                 "Reconfiguring the Isaac Sim backend would restart SimulationApp "
                 "in the same process, which is not supported now."
             )
+
+        self.terrain_config = terrain_config
 
         if num_envs is not None and num_envs <= 0:
             raise ValueError("'num_envs' must be greater than 0.")

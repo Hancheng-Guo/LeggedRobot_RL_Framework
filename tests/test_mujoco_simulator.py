@@ -89,6 +89,16 @@ def test_mujoco_rejects_unsupported_render_mode(runtime_context):
         simulator.close()
 
 
+def test_mujoco_rejects_unimplemented_terrain_before_model_load(runtime_context):
+    simulator = MujocoSimulator(runtime_context)
+    with pytest.raises(NotImplementedError, match="not implemented"):
+        simulator.config_update(
+            component=Component(None, None, None, None, None, None),
+            terrain={"types": ["rough"], "max_height": 0.1},
+        )
+    assert simulator.terrain_config.is_plane
+
+
 def test_human_playback_switches_render_mode_temporarily(runtime_context, monkeypatch):
     simulator = _configure_go1_simulator(runtime_context)
     rendered: list[bool] = []

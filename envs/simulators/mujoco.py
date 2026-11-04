@@ -8,6 +8,7 @@ if os.name == "nt":
 import mujoco
 import torch
 import numpy as np
+from collections.abc import Mapping
 from mujoco import viewer
 from dataclasses import dataclass, fields
 from pathlib import Path
@@ -15,6 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Generic, TypeVar
 
 from .base import BaseSimulator
+from .terrain import TerrainConfig
 from .utils import ModelContext, SimulatorState
 from utils import Component, RuntimeContext, update_attributes
 
@@ -92,7 +94,19 @@ class MujocoSimulator(BaseSimulator):
         leg_joint_names: list[str] | tuple[str, ...] | None = None,
         foot_contact_force_threshold: float | None = None,
         reset_keyframe: str | None = None,
+        terrain: Mapping[str, object] | None = None,
     ) -> None:
+
+        terrain_config = (
+            TerrainConfig.from_mapping(terrain)
+            if terrain is not None or model_path is not None
+            else self.terrain_config
+        )
+        if not terrain_config.is_plane:
+            raise NotImplementedError(
+                "MuJoCo geometric terrain is not implemented yet."
+            )
+        self.terrain_config = terrain_config
 
         if num_envs is not None and num_envs <= 0:
             raise ValueError(

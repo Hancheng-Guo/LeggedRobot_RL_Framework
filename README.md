@@ -557,7 +557,7 @@ MuJoCo 会为每个环境建立实例，数量过大会明显增加 CPU/内存�
 
 ## 8. 仿真器配置
 
-### 8.1 MuJoCo
+### 8.1 MuJoCo 基础配置
 
 ```yaml
 model_path: ./assets/unitree_go1/MJCF/scene.xml # 必填
@@ -574,7 +574,7 @@ reset_keyframe: home                           # 可选，MJCF keyframe 名
 
 控制周期为 `sim_dt × frame_skip`。`rgb_array` 用于无窗口录制，`human` 用于交互显示。
 
-### 8.2 Isaac Sim
+### 8.2 Isaac Sim 基础配置
 
 ```yaml
 model_path: ./assets/unitree_go1/USD/go1/go1.usda
@@ -615,6 +615,17 @@ reset_state:
 在 Windows、Isaac Sim 6.1.0.0 的当前测试环境中，`SimulationApp.close()` 返回后，Python 进程仍可能在原生插件的退出清理阶段以 `0xC0000005`（PowerShell 中通常显示为 `-1073741819`）结束。最小化的 `SimulationApp` 脚本也能复现；原生转储将故障定位到 `isaacsim.core.simulation_manager.plugin.dll + 0x1c5fe`。这属于尚未解决的退出异常，**不能将非零退出码当作正常成功**，也不能仅凭退出码断定训练阶段没有完成。诊断过程见 [手动测试说明](tests/manual/README.md#isaac-sim-关闭诊断)。
 
 判断一次训练是否已经留下可用产物，应检查同一次运行的 `checkpoints/<app_name>_<time>/`：`logs/<file_name>` 中出现 `All training stages completed.`，对应 `checkpoints/stage_XXX/latest.pt` 中的阶段回调状态记录完成，且 `configs/` 有本次配置快照。阶段完成时项目会保存包含回调状态的检查点；目录中的 `stage_completed` 标记不参与恢复判断。若只是达到最大迭代数或被回调停止，不能把日志中已运行的迭代数当作阶段完成；若需要确认检查点可用于继续训练，应在受信任的本地产物上实际执行一次续训加载。播放结果另看 `videos/` 下生成的文件和播放脚本的完成标记。即使这些检查都通过，退出码异常仍须单独记录，自动化任务也应将该进程视为退出失败。
+
+### 8.3 地形配置
+
+两个仿真器默认使用平地，无需添加地形配置。也可以在仿真器 YAML 中显式指定：
+
+```yaml
+terrain:
+  types: [plane]
+```
+
+当前版本仅支持平地。配置 `slope` 或 `rough` 会在启动时提示尚未实现，不会静默退回平地。
 
 ## 9. locomotion 任务配置
 

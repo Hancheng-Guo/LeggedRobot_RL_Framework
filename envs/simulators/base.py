@@ -5,6 +5,7 @@ from typing import Any
 from abc import ABC, abstractmethod
 
 from .utils import ModelContext, SimulatorState
+from .terrain import TerrainConfig
 from utils import RuntimeContext
 
 
@@ -26,6 +27,7 @@ class BaseSimulator(ABC):
         self.frame_skip: int
         self.render_mode: str | None
         self.model_context: ModelContext
+        self.terrain_config = TerrainConfig()
 
 
     @abstractmethod
@@ -67,6 +69,26 @@ class BaseSimulator(ABC):
 
     def has_playback_render_mode(self) -> bool:
         return self.render_mode is not None
+
+
+    def get_ground_heights(
+        self,
+        xy: torch.Tensor,
+        env_ids: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Sample world-frame ground z for [env, sample, xy] query points.
+
+        A subset query uses rows in the same order as ``env_ids``. Backends
+        override this when their ground is not the z=0 plane.
+        """
+        if xy.ndim != 3 or xy.shape[-1] != 2:
+            raise ValueError("Ground queries must have shape [env, sample, 2].")
+        expected = self.num_envs if env_ids is None else env_ids.numel()
+        if xy.shape[0] != expected:
+            raise ValueError("Ground query rows must match the selected environments.")
+        if not self.terrain_config.is_plane:
+            raise NotImplementedError("Ground sampling requires a terrain backend.")
+        return torch.zeros(xy.shape[:2], dtype=xy.dtype, device=xy.device)
 
 
     def prepare_playback(

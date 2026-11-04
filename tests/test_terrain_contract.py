@@ -1,7 +1,12 @@
 import pytest
 import torch
+import json
+import random
+from copy import deepcopy
 
-from envs.simulators.terrain import TerrainConfig, terrain_patch_seed
+from envs.simulators.terrain import (
+    TerrainConfig, TerrainAssignments, generate_terrain_patch, terrain_patch_seed,
+)
 from envs.simulators.isaac_sim import IsaacSimSimulator
 from utils import Component
 
@@ -70,3 +75,84 @@ def test_isaac_rejects_unimplemented_geometry_without_mutating_config(runtime_co
             terrain={"types": ["rough"], "max_height": 0.1},
         )
     assert simulator.terrain_config.is_plane
+
+
+@pytest.mark.parametrize("kind", ["plane", "slope", "rough"])
+def test_reference_geometry_bounds_spawn_and_reproducibility(kind):
+    config = TerrainConfig.from_mapping(dict(types=[kind], max_height=0.15,
+                                             max_slope=0.3, difficulty_levels=[0, 0.5, 1]))
+    patch = generate_terrain_patch(config, 42, 3, 1)
+    assert patch == generate_terrain_patch(config, 42, 3, 1)
+    assert len(patch.heights) == len(patch.y)
+    assert all(len(row) == len(patch.x) for row in patch.heights)
+    assert abs(patch.slope) <= 0.15
+    if kind == "rough":
+        assert all(abs(h) <= 0.075 + 1e-12 for row in patch.heights for h in row)
+    for j, y in enumerate(patch.y):
+        for i, x in enumerate(patch.x):
+            if abs(x) <= config.spawn_size[0] / 2 or kind == "plane":
+                if abs(y) <= config.spawn_size[1] / 2 or kind != "rough":
+                    assert patch.heights[j][i] == 0
+    flat = generate_terrain_patch(config, 42, 3, 0)
+    assert all(h == 0 for row in flat.heights for h in row)
+
+
+def test_allocation_partial_reset_order_and_checkpoint_continuation():
+    config = TerrainConfig.from_mapping(dict(types=["plane", "slope", "rough"],
+        max_height=0.1, max_slope=0.2, difficulty_levels=[0.25, 1]))
+    allocations = TerrainAssignments(config, 17, 4)
+    untouched = allocations.patch(1)
+    allocations.reset([3, 0], [1, 1])
+    assert allocations.patch(1) == untouched
+    other = TerrainAssignments(config, 17, 4)
+    other.reset([0, 3], [1, 1])
+    assert allocations.state_dict() == other.state_dict()
+    restored = TerrainAssignments(config, 17, 4)
+    restored.load_state_dict(json.loads(json.dumps(allocations.state_dict())))
+    for instance in (allocations, restored):
+        instance.reset([0, 2], [0, 1])
+    assert [allocations.patch(i) for i in range(4)] == [restored.patch(i) for i in range(4)]
+    saved = restored.state_dict()
+    invalid = deepcopy(saved)
+    invalid["generations"][0] = -1
+    with pytest.raises(ValueError):
+        restored.load_state_dict(invalid)
+    assert restored.state_dict() == saved
+    with pytest.raises(ValueError):
+        restored.reset([1, 1])
+    assert restored.state_dict() == saved
+
+
+def test_terrain_does_not_consume_global_rngs():
+    python_state, torch_state = random.getstate(), torch.get_rng_state().clone()
+    allocations = TerrainAssignments(TerrainConfig(), 7, 3)
+    allocations.reset([1])
+    allocations.patch(1)
+    assert random.getstate() == python_state
+    assert torch.equal(torch.get_rng_state(), torch_state)
+
+
+def test_reference_rough_golden_vertex_and_seed_override():
+    config = TerrainConfig.from_mapping(dict(types=["rough"], max_height=0.1, seed=17))
+    patch = generate_terrain_patch(config, 99, 2)
+    assert patch.seed == 7592564718643782160
+    assert patch.heights[0][0] == 0.07404575023805203
+    assert patch == generate_terrain_patch(config, 0, 2)
+
+
+def test_invalid_allocation_checkpoint_schema_is_atomic():
+    assignments = TerrainAssignments(TerrainConfig(), 0, 2)
+    state = assignments.state_dict()
+    with pytest.raises(ValueError):
+        assignments.load_state_dict({})
+    assert assignments.state_dict() == state
+
+
+@pytest.mark.parametrize("configuration", [
+    {"difficulty_levels": []}, {"difficulty_levels": [1.1]},
+    {"difficulty_levels": [0, 0]}, {"spawn_size": [4, 1]},
+    {"spawn_size": [0, 1]}, {"spawn_size": [1]},
+])
+def test_invalid_difficulty_and_safe_spawn(configuration):
+    with pytest.raises(ValueError):
+        TerrainConfig.from_mapping(configuration)

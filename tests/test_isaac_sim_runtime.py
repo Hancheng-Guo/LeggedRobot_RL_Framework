@@ -5,7 +5,7 @@ import math
 import sys
 import threading
 from types import ModuleType, SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 import numpy as np
@@ -14,9 +14,34 @@ import torch
 from envs.simulators.isaac_sim_runtime import IsaacSimRuntime
 from envs.simulators.isaac_sim_model import IsaacSimModelConverter
 from envs.simulators import isaac_sim_runtime
+from envs.simulators.isaac_sim_backend import IsaacSimResetState
 
 
 pytestmark = pytest.mark.isaacsim
+
+
+def test_default_reset_pose_owns_storage(runtime_context):
+    runtime = IsaacSimRuntime(runtime_context)
+    positions = torch.tensor([[0.0, 0.0, 0.4]])
+    orientations = torch.tensor([[1.0, 0.0, 0.0, 0.0]])
+    joints = torch.tensor([[0.2]])
+    runtime._articulation = SimpleNamespace(
+        get_world_poses=lambda: (positions, orientations),
+        get_dof_positions=lambda: joints,
+    )
+    runtime.metadata = cast(Any, SimpleNamespace(dof_names=("joint",),
+        joint_default_pos=torch.zeros(1), actuator_default_ctrl=torch.zeros(1)))
+    runtime.reset_state = IsaacSimResetState(base_position=(0, 0, 0.3),
+        joint_positions={"joint": 0.5})
+    runtime._capture_default_state()
+    assert positions[0, 2] == 0.4
+    assert joints[0, 0] == 0.2
+    positions.zero_()
+    orientations.zero_()
+    joints.zero_()
+    torch.testing.assert_close(runtime._default_root_positions, torch.tensor([[0., 0., 0.3]]))
+    torch.testing.assert_close(runtime._default_root_orientations, torch.tensor([[1., 0., 0., 0.]]))
+    torch.testing.assert_close(runtime._default_joint_positions, torch.tensor([[0.5]]))
 
 
 @pytest.fixture

@@ -627,6 +627,8 @@ terrain:
 
 当前版本仅支持平地。配置 `slope` 或 `rough` 会在启动时提示尚未实现，不会静默退回平地。
 
+公共参考生成器已定义坡面与随机起伏的确定性网格、难度等级、平坦出生区及按环境分配状态。它尚未接入非平地碰撞或训练检查点。
+
 ## 9. locomotion 任务配置
 
 任务文件必须提供以下八个顶层字段。`event_manager_config` 和 `randomization_manager_config` 当前为预留项，尚未构建对应 Manager，写 `{}` 即可。

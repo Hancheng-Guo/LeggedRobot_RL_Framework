@@ -618,8 +618,10 @@ class IsaacSimRuntime:
     def _capture_default_state(self) -> None:
 
         root_positions, root_orientations = self._articulation.get_world_poses()
-        self._default_root_positions = self._tensor(root_positions)
-        self._default_root_orientations = self._tensor(root_orientations)
+        # Experimental getters may expose live PhysX/Warp storage. Reset poses
+        # must own their memory so stepping cannot overwrite the defaults.
+        self._default_root_positions = self._tensor(root_positions).clone()
+        self._default_root_orientations = self._tensor(root_orientations).clone()
         if self._camera is not None:
             self._camera_env_index = int(
                 self._default_root_positions[:, :2]
@@ -630,7 +632,7 @@ class IsaacSimRuntime:
             )
         self._default_joint_positions = self._tensor(
             self._articulation.get_dof_positions()
-        )
+        ).clone()
         if self.reset_state.base_position is not None:
             base_position = torch.tensor(
                 self.reset_state.base_position,

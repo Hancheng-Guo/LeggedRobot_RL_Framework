@@ -1,7 +1,9 @@
 import hashlib
 import json
 import re
+from datetime import datetime
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 import torch
@@ -113,6 +115,10 @@ def test_invalid_time_fails_without_creating_run(tmp_path: Path, monkeypatch: py
 def test_failed_archive_does_not_publish_or_switch_run(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Directory collision is intentional; both attempts must use the same time.
+    clock = Mock(wraps=datetime)
+    clock.now.return_value = datetime(2026, 1, 3, 4, 5, 6)
+    monkeypatch.setattr("app.application_entry.datetime", clock)
     monkeypatch.chdir(tmp_path)
     source = source_run(tmp_path)
     with ApplicationEntry("app", STAMP) as app:
@@ -136,6 +142,7 @@ def test_failed_archive_does_not_publish_or_switch_run(
         assert len(pending) == 1
         manifest = json.loads((pending[0] / "resume_manifest.json").read_text())
         assert manifest["status"] == "preparing"
+        assert manifest["run_time"] == "2026-01-03_04-05-06"
         with pytest.raises(FileExistsError):
             app._prepare_fork()
         assert app.load_dir.resolve() == source

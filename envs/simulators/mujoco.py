@@ -8,20 +8,33 @@ if os.name == "nt":
 import mujoco
 import torch
 import numpy as np
-from collections.abc import Mapping
+from collections.abc import Sequence
 from mujoco import viewer
 from dataclasses import dataclass, fields
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
-from typing import Generic, TypeVar
+from contextlib import nullcontext
+from typing import Any, Generic, TypeVar
+from copy import copy
 
 from .base import BaseSimulator
-from .terrain import TerrainConfig
+from .terrain import TerrainGeometry, TerrainPatch, TerrainSpawnGeometry
+from .mujoco_terrain import MujocoTerrain
 from .utils import ModelContext, SimulatorState
 from utils import Component, RuntimeContext, update_attributes
 
 
 BufferType = TypeVar("BufferType", np.ndarray, torch.Tensor)
+_TERRAIN_UNCHANGED = object()
+
+
+@dataclass
+class _MujocoResetSnapshot:
+    env_ids_tuple: tuple[int, ...]
+    models: tuple[Any, ...]
+    datas: tuple[Any, ...]
+    hfields: tuple[np.ndarray, ...]
+    grids: tuple[np.ndarray, ...]
 
 
 @dataclass
@@ -64,6 +77,9 @@ class MujocoSimulator(BaseSimulator):
         self.render_mode: str | None = None
         self.reset_keyframe: str | None = None
         self.reset_keyframe_id: int = -1
+        self._terrain: MujocoTerrain | None = None
+        self.terrain_geometry: TerrainGeometry | None = None
+        self._terrain_render_dirty = False
 
         self.models: list[mujoco.MjModel] = []  # pyright: ignore[reportAttributeAccessIssue]
         self.datas: list[mujoco.MjData] = []    # pyright: ignore[reportAttributeAccessIssue]
@@ -94,19 +110,15 @@ class MujocoSimulator(BaseSimulator):
         leg_joint_names: list[str] | tuple[str, ...] | None = None,
         foot_contact_force_threshold: float | None = None,
         reset_keyframe: str | None = None,
-        terrain: Mapping[str, object] | None = None,
+        terrain_geometry: TerrainGeometry | None | object = _TERRAIN_UNCHANGED,
     ) -> None:
 
-        terrain_config = (
-            TerrainConfig.from_mapping(terrain)
-            if terrain is not None or model_path is not None
-            else self.terrain_config
-        )
-        if not terrain_config.is_plane:
-            raise NotImplementedError(
-                "MuJoCo geometric terrain is not implemented yet."
-            )
-        self.terrain_config = terrain_config
+        if terrain_geometry is not _TERRAIN_UNCHANGED:
+            if terrain_geometry is not None and not isinstance(terrain_geometry, TerrainGeometry):
+                raise TypeError("terrain_geometry must be a TerrainGeometry or None.")
+            self.terrain_geometry = terrain_geometry
+        elif model_path is not None:
+            self.terrain_geometry = None
 
         if num_envs is not None and num_envs <= 0:
             raise ValueError(
@@ -167,12 +179,27 @@ class MujocoSimulator(BaseSimulator):
                 raise ValueError(f"Unsupported render mode: {render_mode!r}.")
             self.render_mode = render_mode
 
-        self.models = [
-            mujoco.MjModel.from_xml_path(   # pyright: ignore[reportAttributeAccessIssue]
-                str(self.model_path)
+        if self.viewer is not None:
+            self.viewer.close()
+            self.viewer = None
+        if self.renderer is not None:
+            self.renderer.close()
+            self.renderer = None
+            self._render_camera = None
+
+        self._terrain_render_dirty = False
+        if self.terrain_geometry is None:
+            self._terrain = None
+            self.models = [
+                mujoco.MjModel.from_xml_path(str(self.model_path))  # pyright: ignore[reportAttributeAccessIssue]
+                for _ in range(self.num_envs)
+            ]
+        else:
+            self._terrain = MujocoTerrain(
+                self.terrain_geometry,
+                self.num_envs,
             )
-            for _ in range(self.num_envs)
-        ]
+            self.models = self._terrain.build_models(self.model_path, self.floor_geom_names)
         for model in self.models:
             model.opt.timestep = self.sim_dt
 
@@ -423,31 +450,207 @@ class MujocoSimulator(BaseSimulator):
         return joint_pos_limits
 
 
+    def _viewer_lock(self, env_id: int):
+        if self.viewer is not None and env_id == self.playback_env_index:
+            return self.viewer.lock()
+        return nullcontext()
+
+
     def reset(
         self,
         env_ids: torch.Tensor | None = None,
     ) -> None:
-
-        if env_ids is None:
-            env_ids = torch.arange(
-                self.num_envs,
-                dtype=torch.long,
-            )
-
-        for env_id in env_ids.tolist():
+        env_ids_list = self._validated_env_ids(env_ids)
+        for env_id in env_ids_list:
             model = self.models[env_id]
             data = self.datas[env_id]
+            with self._viewer_lock(env_id):
+                if self.reset_keyframe_id == -1:
+                    mujoco.mj_resetData(model, data)  # pyright: ignore[reportAttributeAccessIssue]
+                else:
+                    mujoco.mj_resetDataKeyframe(model, data, self.reset_keyframe_id)  # pyright: ignore[reportAttributeAccessIssue]
+                mujoco.mj_forward(model, data)  # pyright: ignore[reportAttributeAccessIssue]
 
-            if self.reset_keyframe_id == -1:
-                mujoco.mj_resetData(model, data)    # pyright: ignore[reportAttributeAccessIssue]
-            else:
-                mujoco.mj_resetDataKeyframe(        # pyright: ignore[reportAttributeAccessIssue]
-                    model,
-                    data,
-                    self.reset_keyframe_id
+
+    def apply_terrain(
+        self,
+        env_ids_tensor: torch.Tensor,
+        patches: Sequence[TerrainPatch],
+    ) -> None:
+
+        if self._terrain is None:
+            raise ValueError("Configure terrain collision geometry before applying patches.")
+        env_ids_list = self._validated_env_ids(env_ids_tensor)
+        if len(env_ids_list) != len(patches):
+            raise ValueError("Terrain patches must match the selected environments.")
+
+        # Validate every supplied grid before changing any model or render state.
+        for patch in patches:
+            self._terrain.validate_patch(patch)
+        old_heights = [self.models[env_id].hfield_data.copy() for env_id in env_ids_list]
+        old_grids = [self._terrain.grids[env_id] for env_id in env_ids_list]
+
+        try:
+            for env_id, patch in zip(env_ids_list, patches):
+                with self._viewer_lock(env_id):
+                    self._terrain.grids[env_id] = self._terrain.install(self.models[env_id], patch)
+            self._terrain_changed(env_ids_list)
+
+        except Exception as error:
+            for env_id, heights, grid in zip(env_ids_list, old_heights, old_grids):
+                with self._viewer_lock(env_id):
+                    self.models[env_id].hfield_data[:] = heights
+                    self._terrain.grids[env_id] = grid
+            try:
+                self._terrain_changed(env_ids_list)
+            except Exception as rollback_error:
+                raise ExceptionGroup(
+                    "Terrain application and visual rollback failed",
+                    [error, rollback_error]
+                ) from error
+            raise
+
+
+    def _terrain_changed(self, env_ids_list: Sequence[int]) -> None:
+        if self.playback_env_index in env_ids_list:
+            self._terrain_render_dirty = True
+            if self.viewer is not None and self._terrain is not None:
+                self.viewer.update_hfield(self._terrain.hfield_id)
+
+
+    def capture_reset_state(self, env_ids_tensor: torch.Tensor) -> object:
+        env_ids_tuple = tuple(self._validated_env_ids(env_ids_tensor))
+        return _MujocoResetSnapshot(
+            env_ids_tuple=env_ids_tuple,
+            models=tuple(self.models[env_id] for env_id in env_ids_tuple),
+            datas=tuple(copy(self.datas[env_id]) for env_id in env_ids_tuple),
+            hfields=tuple(self.models[env_id].hfield_data.copy() for env_id in env_ids_tuple),
+            grids=(
+                () if self._terrain is None
+                else tuple(self._terrain.grids[env_id].copy() for env_id in env_ids_tuple)
+            ),
+        )
+
+
+    def restore_reset_state(self, state: object) -> None:
+
+        if not isinstance(state, _MujocoResetSnapshot):
+            raise TypeError("Invalid MuJoCo reset snapshot.")
+        if any(
+            env_id >= self.num_envs
+            or self.models[env_id] is not model
+            for env_id, model in zip(state.env_ids_tuple, state.models)
+        ):
+            raise ValueError("Reset snapshot belongs to a different model configuration.")
+
+        for index, (env_id, model, data, heights) in enumerate(
+            zip(state.env_ids_tuple, state.models, state.datas, state.hfields)
+        ):
+            with self._viewer_lock(env_id):
+                model.hfield_data[:] = heights
+                mujoco.mj_copyData(self.datas[env_id], model, data)  # pyright: ignore[reportAttributeAccessIssue]
+            if self._terrain is not None:
+                self._terrain.grids[env_id] = state.grids[index]
+        if self._terrain is not None:
+            self._terrain_changed(state.env_ids_tuple)
+
+
+    def get_terrain_spawn_geometry(self) -> TerrainSpawnGeometry:
+
+        if self._terrain is None:
+            raise ValueError("Terrain collision geometry is not configured.")
+        model = self.models[0]
+        data = mujoco.MjData(model)  # pyright: ignore[reportAttributeAccessIssue]
+        if self.reset_keyframe_id < 0:
+            mujoco.mj_resetData(model, data)  # pyright: ignore[reportAttributeAccessIssue]
+        else:
+            mujoco.mj_resetDataKeyframe(    # pyright: ignore[reportAttributeAccessIssue]
+                model,
+                data,
+                self.reset_keyframe_id
+            )
+        mujoco.mj_forward(model, data)  # pyright: ignore[reportAttributeAccessIssue]
+
+        robot_ids = np.flatnonzero((model.geom_bodyid != 0)
+                                  & ((model.geom_contype != 0) | (model.geom_conaffinity != 0)))
+        if robot_ids.size == 0:
+            raise ValueError("Reset bounds require at least one robot collision shape.")
+
+        rotations = data.geom_xmat[robot_ids].reshape(-1, 3, 3)
+        boxes = model.geom_aabb[robot_ids]
+        centres = data.geom_xpos[robot_ids] + np.einsum("nij,nj->ni", rotations, boxes[:, :3])
+        radii = np.einsum("nij,nj->ni", np.abs(rotations), boxes[:, 3:])
+        base_adr = self._find_base_joint_info(model)[1]
+        base = data.qpos[base_adr:base_adr + 3]
+        lower, upper = (centres - radii).min(axis=0) - base, (centres + radii).max(axis=0) - base
+        return TerrainSpawnGeometry(
+            tuple(self._terrain.origin.tolist()),
+            tuple(base.tolist()),
+            tuple(lower.tolist()),
+            tuple(upper.tolist())
+        )
+
+
+    def set_root_positions(
+        self,
+        env_ids_tensor: torch.Tensor,
+        positions: torch.Tensor,
+    ) -> None:
+
+        env_ids_list = self._validated_env_ids(env_ids_tensor)
+        if (
+            positions.shape != (len(env_ids_list), 3)
+            or not positions.is_floating_point()
+            or not torch.isfinite(positions).all()
+        ):
+            raise ValueError(
+                "Root positions must be finite floating-point data with shape [env, 3]."
+            )
+
+        values = positions.detach().cpu().double().numpy()
+        base_adr = self._find_base_joint_info(self.models[0])[1]
+        for env_id, position in zip(env_ids_list, values):
+            with self._viewer_lock(env_id):
+                self.datas[env_id].qpos[base_adr:base_adr + 3] = position
+                mujoco.mj_forward(  # pyright: ignore[reportAttributeAccessIssue]
+                    self.models[env_id],
+                    self.datas[env_id]
                 )
 
-            mujoco.mj_forward(model, data)      # pyright: ignore[reportAttributeAccessIssue]
+
+    def _validated_env_ids(self, env_ids: torch.Tensor | None) -> list[int]:
+        if env_ids is None:
+            return list(range(self.num_envs))
+        if env_ids.ndim != 1 or env_ids.dtype != torch.long:
+            raise ValueError("Environment IDs must be a one-dimensional long tensor.")
+        env_ids_list = env_ids.tolist()
+        if (
+            len(set(env_ids_list)) != len(env_ids_list)
+            or any(env_id < 0 or env_id >= self.num_envs for env_id in env_ids_list)
+        ):
+            raise ValueError("Environment IDs must be unique and in range.")
+        return env_ids_list
+
+
+    def get_ground_heights(
+        self,
+        xy: torch.Tensor,
+        env_ids: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+
+        env_ids_list = self._validated_env_ids(env_ids)
+        if xy.ndim != 3 or xy.shape[-1] != 2 or xy.shape[0] != len(env_ids_list):
+            raise ValueError("Ground query rows must match environments with shape [env, sample, 2].")
+        if not xy.is_floating_point() or not torch.isfinite(xy).all():
+            raise ValueError("Ground queries must contain finite floating-point coordinates.")
+
+        if self._terrain is None:
+            return super().get_ground_heights(xy, env_ids)
+        points = xy.detach().cpu().double().numpy()
+        result = np.empty(xy.shape[:2], dtype=np.float64)
+        for row, env_id in enumerate(env_ids_list):
+            result[row] = self._terrain.heights(env_id, points[row])
+        return torch.as_tensor(result, dtype=xy.dtype, device=xy.device)
 
 
     def step(
@@ -524,8 +727,8 @@ class MujocoSimulator(BaseSimulator):
 
         if self.viewer is None:
             self.viewer = viewer.launch_passive(
-                self.models[0],
-                self.datas[0],
+                self.models[self.playback_env_index],
+                self.datas[self.playback_env_index],
             )
             with self.viewer.lock():
                 self.viewer.cam.type = mujoco.mjtCamera.mjCAMERA_TRACKING  # pyright: ignore[reportAttributeAccessIssue]
@@ -537,16 +740,29 @@ class MujocoSimulator(BaseSimulator):
         
         if self.renderer is None:
             self.renderer = mujoco.Renderer(
-                self.models[0],
+                self.models[self.playback_env_index],
             )
             self._render_camera = mujoco.MjvCamera()  # pyright: ignore[reportAttributeAccessIssue]
             mujoco.mjv_defaultFreeCamera(  # pyright: ignore[reportAttributeAccessIssue]
-                self.models[0], self._render_camera
+                self.models[self.playback_env_index], self._render_camera
             )
             self._render_camera.type = mujoco.mjtCamera.mjCAMERA_TRACKING  # pyright: ignore[reportAttributeAccessIssue]
             self._render_camera.trackbodyid = self.model_context.base_id
+            self._terrain_render_dirty = False
 
-        self.renderer.update_scene(self.datas[0], camera=self._render_camera)
+        if self._terrain_render_dirty:
+            # MuJoCo 3.11 Renderer has no public heightfield-upload method.
+            if self.renderer._gl_context is not None:
+                self.renderer._gl_context.make_current()
+            assert self._terrain is not None
+            mujoco.mjr_uploadHField(    # pyright: ignore[reportAttributeAccessIssue]
+                self.models[self.playback_env_index],
+                self.renderer._mjr_context,
+                self._terrain.hfield_id,
+            )
+            self._terrain_render_dirty = False
+
+        self.renderer.update_scene(self.datas[self.playback_env_index], camera=self._render_camera)
         return self.renderer.render()
 
 
@@ -589,14 +805,14 @@ class MujocoSimulator(BaseSimulator):
             numpy_buffers = self._full_state_numpy_buffers
             tensor_buffers = self._full_state_tensor_buffers
         else:
-            indices = env_ids.detach().cpu().tolist()
+            env_ids_list = env_ids.detach().cpu().tolist()
             datas = [
-                self.datas[i]
-                for i in indices
+                self.datas[env_id]
+                for env_id in env_ids_list
             ]
             models = [
-                self.models[i]
-                for i in indices
+                self.models[env_id]
+                for env_id in env_ids_list
             ]
             numpy_buffers = self._reset_state_numpy_buffers
             tensor_buffers = self._reset_state_tensor_buffers
@@ -744,16 +960,19 @@ class MujocoSimulator(BaseSimulator):
             ((geom1 == foot_ids) & torch.isin(geom2, floor_ids))
             | ((geom2 == foot_ids) & torch.isin(geom1, floor_ids))
         )
-        normal_force = contact_forces[..., 0].abs()
+        normal_force = contact_forces[..., 0].abs().unsqueeze(-1)
+        if self._terrain is not None:
+            # Heightfields split support across triangle contacts. Thresholding
+            # each triangle separately can mark a supported foot as airborne.
+            normal_force = (normal_force * foot_ground_pair).sum(dim=1, keepdim=True)
+            foot_ground_pair = foot_ground_pair.any(dim=1, keepdim=True)
         forceful_contact = (
             (normal_force > 0.0)
             & (normal_force >= self.foot_contact_force_threshold)
         )
-        valid_contact = foot_ground_pair & forceful_contact.unsqueeze(-1)
+        valid_contact = foot_ground_pair & forceful_contact
         foot_ground_contact = valid_contact.any(dim=1)
-        foot_contact_normal_force = (
-            normal_force.unsqueeze(-1) * valid_contact
-        ).sum(dim=1)
+        foot_contact_normal_force = (normal_force * valid_contact).sum(dim=1)
 
         return {
             "foot_ground_contact": foot_ground_contact,

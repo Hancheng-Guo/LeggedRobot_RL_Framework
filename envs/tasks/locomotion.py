@@ -6,7 +6,6 @@ from .base import BaseTaskLogic
 from .managers import (
     CommandManager,
     CurriculumManager,
-    # RandomizationManager,
 )
 from .utils import TaskContext, TaskStepResult
 
@@ -19,7 +18,6 @@ class LocomotionTaskLogic(BaseTaskLogic):
 
         self.curriculum_manager: CurriculumManager
         # self.event_manager: EventManager
-        # self.randomization_manager: RandomizationManager
 
 
     def _build_managers(
@@ -47,7 +45,6 @@ class LocomotionTaskLogic(BaseTaskLogic):
             manager_configs=manager_configs,
         )
         # self._build_event_manager(event_manager_config)
-        # self._build_randomization_manager(randomization_manager_config)
         
         super()._build_managers(
             action_manager_config=action_manager_config,
@@ -55,6 +52,7 @@ class LocomotionTaskLogic(BaseTaskLogic):
             observation_manager_config=observation_manager_config,
             reward_manager_config=reward_manager_config,
             termination_manager_config=termination_manager_config,
+            randomization_manager_config=randomization_manager_config,
             *args, **kwargs,
         )
 
@@ -113,10 +111,11 @@ class LocomotionTaskLogic(BaseTaskLogic):
         self,
         env_ids: torch.Tensor | None = None,
     ) -> None:
+        """Reset curriculum episode bookkeeping and task managers only."""
 
         self.curriculum_manager.reset(env_ids)
         # self.event_manager.reset(env_ids)
-        # self.randomization_manager.reset(env_ids)
+        # Environment reset hooks have already applied physical randomization.
         super().reset(env_ids)
 
 

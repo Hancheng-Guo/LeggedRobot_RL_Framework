@@ -10,9 +10,11 @@ from .managers import (
     ObservationManager,
     RewardManager,
     TerminationManager,
+    RandomizationManager,
 )
 from .utils import TaskContext, TaskStepResult
 from envs.simulators.utils import ModelContext, SimulatorState
+from .managers.randomization import RandomizationBackend
 from utils import Component, RuntimeContext, update_attributes
 
 
@@ -23,6 +25,7 @@ class BaseTaskLogic(ABC):
         context: RuntimeContext,
     ) -> None:
         self.context = context
+        self._simulator_requirements: dict[str, Any]
 
         self.num_envs: int
         self.model_context: ModelContext
@@ -33,6 +36,7 @@ class BaseTaskLogic(ABC):
         self.observation_manager: ObservationManager
         self.reward_manager: RewardManager
         self.termination_manager: TerminationManager
+        self.randomization_manager: RandomizationManager
 
 
     def config_update(
@@ -59,14 +63,88 @@ class BaseTaskLogic(ABC):
         termination_manager_config: dict,
         constants: dict,
         task_state_manager_config: dict | None = None,
+        randomization_manager_config: dict | None = None,
     ) -> None:
 
+        self._build_randomization_manager(randomization_manager_config)
         self._build_task_state_manager(task_state_manager_config)
         self._build_action_manager(action_manager_config)
         self._build_command_manager(command_manager_config)
         self._build_observation_manager(observation_manager_config)
         self._build_reward_manager(reward_manager_config)
         self._build_termination_manager(termination_manager_config)
+
+
+    def prepare(
+        self,
+        config: Mapping[str, Any],
+    ) -> None:
+        """Prepare requirements before a simulator/ModelContext exists.
+
+        Subclasses may extend this hook for other pre-scene task resources.
+        Only configuration is inspected here. All managers are built later in
+        config_update once simulator metadata is available.
+        """
+        randomization_config = config.get("randomization_manager_config") or {}
+        self._simulator_requirements = RandomizationManager.get_simulator_requirements(
+            **randomization_config)
+
+
+    def _build_randomization_manager(
+        self,
+        randomization_manager_config: Mapping[str, Any] | None,
+    ) -> None:
+        """Build randomization with the other managers; retain unchanged state."""
+
+        selected = randomization_manager_config or {}
+        if (
+            hasattr(self, "randomization_manager")
+            and self.randomization_manager.matches_config(self.num_envs, **selected)
+        ):
+            return
+
+        self.randomization_manager = RandomizationManager(
+            num_envs=self.num_envs,
+            context=self.context,
+            **selected,
+        )
+
+
+    def get_simulator_requirements(self) -> dict[str, Any]:
+        """Expose physical configuration requirements without manager internals.
+
+        Keys must be distinct from simulator YAML fields; duplicates are errors.
+        """
+        return dict(self._simulator_requirements)
+
+
+    def bind(
+        self,
+        simulator: RandomizationBackend,
+    ) -> None:
+        """Bind task resources after simulator and task configuration complete."""
+        self.randomization_manager.bind(simulator)
+
+
+    def before_simulator_reset(
+        self,
+        env_ids: torch.Tensor | None = None,
+    ) -> None:
+        """Prepare task changes before the environment resets physics."""
+        self.randomization_manager.before_simulator_reset(env_ids)
+
+
+    def after_simulator_reset(
+        self,
+        env_ids: torch.Tensor | None = None,
+    ) -> None:
+        """Apply task changes after the environment resets physics."""
+        self.randomization_manager.after_simulator_reset(env_ids)
+
+
+    def abort_simulator_reset(self, env_ids: torch.Tensor | None = None) -> None:
+        """Restore task-owned physical changes when a reset fails."""
+        self.randomization_manager.abort_simulator_reset(env_ids)
 
 
     def _build_action_manager(

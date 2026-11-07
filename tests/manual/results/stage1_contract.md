@@ -6,7 +6,7 @@
 
 ## 公共语义（terrain-v1）
 
-入口为 `envs/simulators/terrain.py`。所有长度为米，坡度为 rise/run，局部地形中心为 `(0,0)`。`patch_size` 是 x/y 全长，`resolution` 是最大网格间距；每轴使用 `ceil(length/resolution)` 个等长网格。高度行索引是 y，列索引是 x；碰撞和查询都必须沿每格左下到右上的对角线划分三角形。
+几何数据契约位于 `envs/simulators/terrain.py`；配置、参考生成和分配状态现已按职责移入 `envs/tasks/managers/randomization/terms/terrain.py`。所有长度为米，坡度为 rise/run，局部地形中心为 `(0,0)`。`patch_size` 是 x/y 全长，`resolution` 是最大网格间距；每轴使用 `ceil(length/resolution)` 个等长网格。高度行索引是 y，列索引是 x；碰撞和查询都必须沿每格左下到右上的对角线划分三角形。
 
 `types` 是 plane/slope/rough 的不重复序列；`weights` 是对应的正采样权重，内部归一化。`difficulty_levels` 是 [0,1] 内的不重复等级值，默认 `[1]`；难度同时缩放 `max_height` 和 `max_slope`。`seed` 非空时覆盖运行种子。固定配置、种子、patch ID、难度索引产生相同的类型、坡度和高度数据，与后端和调用顺序无关。
 

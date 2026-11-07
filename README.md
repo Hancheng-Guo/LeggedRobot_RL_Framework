@@ -618,20 +618,11 @@ reset_state:
 
 ### 8.3 地形配置
 
-两个仿真器默认使用平地，无需添加地形配置。也可以在仿真器 YAML 中显式指定：
-
-```yaml
-terrain:
-  types: [plane]
-```
-
-当前版本仅支持平地。配置 `slope` 或 `rough` 会在启动时提示尚未实现，不会静默退回平地。
-
-公共参考生成器已定义坡面与随机起伏的确定性网格、难度等级、平坦出生区及按环境分配状态。它尚未接入非平地碰撞或训练检查点。
+地形随机化由 task 的 Randomization Manager 控制，配置见 [9.8 Randomization Manager](#98-randomization-manager)。
 
 ## 9. locomotion 任务配置
 
-任务文件必须提供以下八个顶层字段。`event_manager_config` 和 `randomization_manager_config` 当前为预留项，尚未构建对应 Manager，写 `{}` 即可。
+任务文件必须提供以下八个顶层字段。`event_manager_config` 当前仍为预留项，写 `{}` 即可。`randomization_manager_config` 已接入 task，目前支持 `terms.terrain`；不启用随机化时写 `{}`。
 
 ```yaml
 action_manager_config: {terms: {}}
@@ -909,6 +900,39 @@ Stage 可通过 `sample_on_update: true` 避免重复计入同一份结果，通
 训练检查点会保存 curriculum 的采样状态、cell 统计，以及 Stage 条件窗口和已采样的统计版本，续训时会校验配置并恢复；启用 `sample_on_update: true` 时，同一统计版本不会重复计入窗口。
 
 未结束 episode 的累计数据不会恢复，新 episode 按恢复后的概率采样。由于模拟器状态没有恢复，且新 episode 的初始化会消耗随机数，仍不保证续训后的仿真轨迹与连续训练逐步一致。不含环境状态的检查点不会恢复 curriculum 数据，启用 `sample_on_update` 或 `require_all_cells_valid` 的条件窗口也会重新积累。
+
+### 9.8 Randomization Manager
+
+`randomization_manager_config` 控制 task 的随机化，目前支持 `terrain` 项；写 `{}` 时不启用随机化，两个仿真器均使用默认平地。地形参数放在 **task YAML** 中：
+
+```yaml
+randomization_manager_config:
+  terms:
+    terrain:
+      types: [plane, slope, rough]
+      max_height: 0.04
+      max_slope: 0.15
+      spawn_size: [1.0, 1.0]
+      seed: 0
+```
+
+MuJoCo 已支持 `plane`、`slope` 和 `rough`，使用相同的公共网格规则生成独立高度场。Isaac Sim 当前仍只支持平地，非平地配置会明确报错。
+
+MuJoCo 示例配对使用 `configs/tasks/locomotion_unitree_go1_standing_terrain.yaml` 与 `configs/simulators/mujoco_unitree_go1_rgb_array.yaml`。仿真器 YAML 只保留模型和物理参数；原先位于仿真器 YAML 根部的 `terrain:` 应迁移到上面的 task 随机化项，否则启动时会明确报错。启用非平地时，须指定一个世界坐标轴对齐的地面 plane（`floor_geom_names`），它会原位替换为高度场，保留名称、ID、材质、摩擦和接触参数。`spawn_size` 是中央平坦区的全尺寸，必须容纳 reset 姿态下机器人所有碰撞形状的水平包围盒；Go1 示例使用 `[1.0, 1.0]`。尺寸不足、额外 plane 或倾斜地面会在构建时被拒绝。
+
+`MujocoSimulator.get_ground_heights(xy, env_ids)` 按碰撞三角形查询世界高度；超出有限地形块会报错。task 的 `randomization_manager.terms["terrain"]` 持有地形分配、难度和出生采样状态。`VectorEnv` 在建场景前向 task 取得碰撞布局需求，并在完整/局部 reset 时先调用 task 的物理随机化钩子，再清理其他任务状态。纯平地配置继续走原有无限平面路径。
+
+`envs/simulators/terrain.py` 定义后端共用的几何数据和物理接口；其中 `TerrainPatch` 只含坐标与高度，种子、类型、难度及出生元数据保留在 task 的 `TerrainAssignment` 中。`envs/tasks/managers/randomization/terms/terrain.py` 定义 `TerrainRandomizationTerm`，负责配置校验、确定性生成、分配状态、难度和出生规则，由 task 的 `RandomizationManager` 控制。仿真器只接收 `terrain_geometry` 碰撞布局，通过 `apply_terrain` 应用给定网格，通过 `set_root_positions` 执行给定出生位置。单独调用 `simulator.reset()` 不再采样或更换地形。
+
+任务初始化使用通用接口：`VectorEnv._prepare_task()` 读取配置、创建或复用 task，并调用 `task.prepare(config)`；环境通过 `task.get_simulator_requirements()` 取得物理配置需求。仿真器构建后，`_build_task()` 使用同一份配置和 `ModelContext` 完成初始化，最后调用 `task.bind(simulator)` 绑定任务资源。env 不直接访问 task 内部的随机化管理器。其他需要在建场景前准备资源的 task 可重写 `prepare()`，并调用父类实现；该钩子此时不能依赖 `ModelContext`。
+
+`prepare()` 只解析配置和声明碰撞布局，不创建 manager、地形分配状态或随机化项。`RandomizationManager` 与其他 manager 统一在 `_build_managers()` 阶段构建；布局声明和实际构建共用同一套配置校验与布局计算规则。
+
+`RandomizationManager` 通过 `BaseRandomizationTerm` 和注册表构建、调度各随机化项，不内置 terrain 分支。空配置不向后端传地形参数；环境仅记录已使用的资源键，在同一后端不再需要该资源时发送显式 `None` 清除请求。`bind()` 只绑定资源与校验物理尺寸，首次 reset 才生成并应用地形；后续回合 reset 复用当前地形，仅在请求的难度变化时重新生成对应环境的地形。
+
+回合 reset 复用已有地形并恢复机器人出生位置；首次使用或难度变化时，先生成候选分配并应用网格，再重置物理状态并设置出生位置；所有项的后置操作成功后才提交分配代数。任一步骤失败，通过 `abort_simulator_reset()` 恢复所选环境的物理数据和高度缓冲，分配代数及难度请求不被消耗。难度请求通过 terrain term 的 `set_difficulty(env_ids, difficulty_indices)` 设置；通用 manager 钩子只接收环境索引。MuJoCo 离屏渲染保持 renderer 和相机，在下一次绘制前上传变化的高度场。
+
+<!-- 阶段 2 仅完成仿真链路，任务的离地高度信号与正式训练检查点接入分别属于阶段 3、5。运行示例和验收记录见 [MuJoCo 地形验收](tests/manual/results/stage2_mujoco/README.md)。 -->
 
 ## 10. 完整组合示例
 

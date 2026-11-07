@@ -391,11 +391,13 @@ def test_render_returns_rgb_channels_after_camera_warmup() -> None:
     assert np.array_equal(frame, rgba[..., :3])
 
 
-def test_camera_follows_selected_environment_robot(runtime_context) -> None:
+@pytest.mark.parametrize("env_index", [0, 1])
+def test_camera_follows_selected_environment_robot(runtime_context, env_index) -> None:
     poses: list[dict[str, Any]] = []
     runtime = IsaacSimRuntime.__new__(IsaacSimRuntime)
     runtime.context = runtime_context
-    runtime._camera_env_index = 1
+    runtime._camera_env_index = env_index
+    assert runtime.playback_env_index == env_index
     runtime._articulation = SimpleNamespace(
         get_world_poses=lambda: (
             torch.tensor(((10.0, 10.0, 0.3), (1.0, 2.0, 0.3))),
@@ -411,7 +413,7 @@ def test_camera_follows_selected_environment_robot(runtime_context) -> None:
     assert len(poses) == 1
     np.testing.assert_allclose(
         poses[0]["position"],
-        np.asarray((3.5, -0.5, 2.1)),
+        np.asarray((12.5, 7.5, 2.1) if env_index == 0 else (3.5, -0.5, 2.1)),
     )
     assert poses[0]["orientation"].shape == (4,)
     np.testing.assert_allclose(

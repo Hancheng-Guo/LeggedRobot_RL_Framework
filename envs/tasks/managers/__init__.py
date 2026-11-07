@@ -5,6 +5,7 @@ from .curriculum import CurriculumManager
 from .observation import ObservationManager
 from .reward import RewardManager
 from .termination import TerminationManager
+from .randomization import RandomizationManager
 
 
 __all__ = (
@@ -15,4 +16,5 @@ __all__ = (
     "ObservationManager",
     "RewardManager",
     "TerminationManager",
+    "RandomizationManager",
 )

@@ -81,6 +81,12 @@ class FakeTask:
             self.action[env_ids] = 0.0
             self.last_action[env_ids] = 0.0
 
+    def before_simulator_reset(self, env_ids=None):
+        pass
+
+    def after_simulator_reset(self, env_ids=None):
+        pass
+
     def build_task_context(
         self,
         state: SimulatorState,
@@ -192,6 +198,8 @@ def test_environment_keeps_merged_component_for_playback(
     monkeypatch.setattr(env.simulator, "model_context", None, raising=False)
     monkeypatch.setattr(env, "_build_simulator", lambda component: None)
     monkeypatch.setattr(env, "_build_task", lambda **kwargs: None)
+    monkeypatch.setattr(env, "_prepare_task", lambda component: None)
+    monkeypatch.setattr(env.task, "bind", lambda simulator: None, raising=False)
     environment_info = ComponentInfo("vector", Path("environment.yaml"))
     simulator_info = ComponentInfo("mujoco", Path("simulator.yaml"))
     task_info = ComponentInfo("task", Path("task.yaml"))
@@ -205,6 +213,128 @@ def test_environment_keeps_merged_component_for_playback(
     assert env._component == Component(
         None, None, None, environment_info, simulator_info, updated_task
     )
+
+
+def test_prepare_task_reuses_instance_and_config_before_model_setup(
+    monkeypatch, runtime_context, model_context,
+):
+    events = []
+    reads = []
+
+    class PreparedTask(BaseTaskLogic):
+        def __init__(self, context):
+            super().__init__(context)
+            events.append("create")
+
+        def prepare(self, config):
+            events.append("prepare")
+            super().prepare(config)
+            config["nested"]["value"] = -1
+
+        def config_update(self, component, num_envs, model_context, **config):
+            events.append("configure")
+            assert config["nested"]["value"] == 7
+            config["nested"]["value"] = -2
+
+        def bind(self, simulator):
+            events.append("bind")
+
+    def load_config(path):
+        reads.append(path)
+        return {"nested": {"value": 7}}
+
+    env = VectorEnv(runtime_context)
+    monkeypatch.setattr("envs.vector_env.TASK_TYPE_MAP", {"prepared": PreparedTask})
+    monkeypatch.setattr("envs.vector_env.load_yaml", load_config)
+
+    def build_simulator(component):
+        events.append("simulator")
+        env.simulator = cast(BaseSimulator, SimpleNamespace(model_context=model_context))
+
+    monkeypatch.setattr(env, "_build_simulator", build_simulator)
+    task_info = ComponentInfo("prepared", Path("task.yaml"))
+    env.config_update(Component(None, None, None, None, None, task_info), num_envs=2, max_episode_steps=10)
+    original_task = env.task
+    env.config_update(Component(None, None, None, None, None, None))
+    assert env.task is original_task
+    assert reads == [Path("task.yaml")]
+    assert events == ["create", "prepare", "simulator", "configure", "bind",
+                      "prepare", "simulator", "configure", "bind"]
+
+
+@pytest.mark.parametrize("task_is_none", [False, True], ids=["missing", "none"])
+@pytest.mark.parametrize("explicit_config", [False, True], ids=["inherit", "explicit"])
+def test_prepare_task_handles_absent_instance(
+    runtime_context, monkeypatch, task_is_none, explicit_config,
+):
+    env = VectorEnv(runtime_context)
+    env.num_envs = 2
+    if task_is_none:
+        env.task = cast(BaseTaskLogic, None)
+    task_info = ComponentInfo("base", Path("task.yaml")) if explicit_config else None
+    component = Component(None, None, None, None, None, task_info)
+    if explicit_config:
+        monkeypatch.setattr("envs.vector_env.TASK_TYPE_MAP", {"base": BaseTaskLogic})
+        monkeypatch.setattr("envs.vector_env.load_yaml", lambda path: {})
+        env._prepare_task(component)
+        assert isinstance(env.task, BaseTaskLogic)
+        assert not hasattr(env.task, "randomization_manager")
+        assert env.task.get_simulator_requirements() == {}
+    else:
+        with pytest.raises(RuntimeError, match="task instance is required"):
+            env._prepare_task(component)
+
+
+def test_simulator_build_consumes_task_requirements_without_manager_access(runtime_context):
+    env = VectorEnv(runtime_context)
+    env.num_envs = 2
+    calls = []
+    # This task deliberately exposes no randomization_manager attribute.
+    env.task = cast(BaseTaskLogic, SimpleNamespace(
+        get_simulator_requirements=lambda: {"custom_resource": 7},
+    ))
+    env.simulator = cast(BaseSimulator, SimpleNamespace(
+        config_update=lambda **kwargs: calls.append(kwargs),
+    ))
+    component = Component(None, None, None, None, None, None)
+    env._build_simulator(component)
+    assert calls == [{"component": component, "num_envs": 2, "custom_resource": 7}]
+
+
+@pytest.mark.parametrize("env_ids", [None, torch.tensor([1])], ids=["full", "partial"])
+def test_environment_owns_physics_reset_between_task_hooks(monkeypatch, env_ids):
+    env = make_env()
+    events = []
+    original_reset = env.simulator.reset
+
+    def check_ids(ids):
+        if env_ids is None:
+            assert ids is None
+        else:
+            torch.testing.assert_close(ids, env_ids)
+
+    def before_simulator_reset(ids=None):
+        check_ids(ids)
+        events.append("before")
+
+    def reset(ids=None):
+        check_ids(ids)
+        events.append("physics")
+        original_reset(ids)
+
+    def after_simulator_reset(ids=None):
+        check_ids(ids)
+        events.append("after")
+
+    monkeypatch.setattr(env.task, "before_simulator_reset", before_simulator_reset)
+    monkeypatch.setattr(env.simulator, "reset", reset)
+    monkeypatch.setattr(env.task, "after_simulator_reset", after_simulator_reset)
+    if env_ids is None:
+        env.reset()
+    else:
+        env._reset_done_envs(torch.zeros(2, 3), torch.tensor([False, True]),
+                             torch.zeros(2, dtype=torch.bool))
+    assert events == ["before", "physics", "after"]
 
 
 def test_playback_delegates_without_replacing_environment(
@@ -368,3 +498,49 @@ def test_done_env_returns_terminal_and_reset_observations_separately():
     )
     torch.testing.assert_close(next_obs, torch.zeros(2, 3))
     assert torch.count_nonzero(env.current_episode_steps) == 0
+
+
+def test_empty_requirements_support_legacy_backend_and_release_only_old_resources(runtime_context):
+    env = VectorEnv(runtime_context)
+    env.num_envs = 2
+    env.task = BaseTaskLogic(runtime_context)
+    env.task.prepare({})
+    calls = []
+
+    def legacy_config_update(component, num_envs):
+        calls.append(num_envs)
+
+    env.simulator = cast(BaseSimulator, SimpleNamespace(config_update=legacy_config_update))
+    component = Component(None, None, None, None, None, None)
+    env._build_simulator(component)
+    assert calls == [2]
+    env.task = cast(BaseTaskLogic, SimpleNamespace(get_simulator_requirements=lambda: {"custom_resource": 7}))
+    configurations = []
+    env.simulator = cast(BaseSimulator, SimpleNamespace(config_update=lambda **kwargs: configurations.append(kwargs)))
+    env._build_simulator(component)
+    env.task = BaseTaskLogic(runtime_context)
+    env.task.prepare({})
+    env._build_simulator(component)
+    env._build_simulator(component)
+    assert configurations[-2] == {"component": component, "num_envs": 2, "custom_resource": None}
+    assert configurations[-1] == {"component": component, "num_envs": 2}
+
+
+def test_new_backend_does_not_receive_previous_backend_resource_clears(runtime_context, monkeypatch):
+    class LegacyBackend:
+        def __init__(self, context):
+            pass
+
+        def config_update(self, component, num_envs):
+            assert num_envs == 2
+
+    env = VectorEnv(runtime_context)
+    env.num_envs = 2
+    env.task = BaseTaskLogic(runtime_context)
+    env.task.prepare({})
+    env._simulator_requirement_keys = {"old_resource"}
+    monkeypatch.setattr("envs.vector_env.SIM_TYPE_MAP", {"legacy": LegacyBackend})
+    monkeypatch.setattr("envs.vector_env.load_yaml", lambda path: {})
+    env._build_simulator(Component(None, None, None, None, ComponentInfo("legacy", Path("legacy.yaml")), None))
+    assert isinstance(env.simulator, LegacyBackend)
+    assert env._simulator_requirement_keys == set()

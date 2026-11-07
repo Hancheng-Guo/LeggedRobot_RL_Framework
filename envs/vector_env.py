@@ -2,6 +2,7 @@ import torch
 import numpy as np
 from typing import Any
 from collections.abc import Mapping
+from copy import deepcopy
 
 from .base import BaseEnv
 from envs.simulators import SIM_TYPE_MAP, BaseSimulator
@@ -67,6 +68,8 @@ class VectorEnv(BaseEnv):
         self.task: BaseTaskLogic
         self._playback_environment: BaseEnv | None = None
         self._component: Component | None = None
+        self._task_config: dict[str, Any] = {}
+        self._simulator_requirement_keys: set[str] = set()
 
         self.num_envs: int
         self.max_episode_steps: int
@@ -85,6 +88,7 @@ class VectorEnv(BaseEnv):
             num_envs=num_envs,
             max_episode_steps=max_episode_steps,
         )
+        self._prepare_task(component=component)
         self._build_simulator(component=component)
         self.current_episode_steps = torch.zeros(
             self.num_envs,
@@ -194,7 +198,8 @@ class VectorEnv(BaseEnv):
         self,
         component: Component
     ) -> None:
-        
+        requirements = self.task.get_simulator_requirements()
+        sim_config = {}
         if component.simulator is None:
             if (
                 hasattr(self, "simulator") is False
@@ -203,11 +208,6 @@ class VectorEnv(BaseEnv):
                 raise RuntimeError(
                     f"simulator instance is required."
                 )
-            self.simulator.config_update(
-                component=component,
-                num_envs=self.num_envs,
-            )
-
         else:
             sim_type_name = component.simulator.type
             if sim_type_name not in SIM_TYPE_MAP:
@@ -222,11 +222,35 @@ class VectorEnv(BaseEnv):
                 or not isinstance(self.simulator, sim_type)
             ):
                 self.simulator = sim_type(context=self.context)
-            self.simulator.config_update(
-                component=component,
-                num_envs=self.num_envs,
-                **sim_config
-            )
+                self._simulator_requirement_keys = set()
+        released = {key: None for key in self._simulator_requirement_keys
+                    if key not in requirements}
+        self.simulator.config_update(
+            component=component,
+            num_envs=self.num_envs,
+            **sim_config,
+            **released,
+            **requirements,
+        )
+        self._simulator_requirement_keys = set(requirements)
+
+    def _prepare_task(
+        self,
+        component: Component,
+    ) -> None:
+        """Resolve task/config once and prepare requirements without model metadata."""
+
+        if component.task is not None:
+            task_name = component.task.type
+            if task_name not in TASK_TYPE_MAP:
+                raise ValueError(f"Invalid task type: {task_name!r}.")
+            task_type = TASK_TYPE_MAP[task_name]
+            if not hasattr(self, "task") or not isinstance(self.task, task_type):
+                self.task = task_type(context=self.context)
+            self._task_config = load_yaml(component.task.config)
+        elif not hasattr(self, "task") or self.task is None:
+            raise RuntimeError("task instance is required.")
+        self.task.prepare(deepcopy(self._task_config))
 
 
     def _build_task(
@@ -234,41 +258,15 @@ class VectorEnv(BaseEnv):
         component: Component,
         model_context: ModelContext,
     ) -> None:
-        
-        if component.task is None:
-            if (
-                hasattr(self, "task") is False
-                or self.task is None
-            ):
-                raise RuntimeError(
-                    f"task instance is required."
-                )
-            self.task.config_update(
-                component=component,
-                num_envs=self.num_envs,
-                model_context=model_context,
-            )
+        """Configure the prepared task and bind its simulator-dependent resources."""
 
-        else:
-            task_type_name = component.task.type
-            if task_type_name not in TASK_TYPE_MAP:
-                raise ValueError(
-                    f"Invalid task type: {task_type_name!r}. "
-                )
-            
-            task_type = TASK_TYPE_MAP[task_type_name]
-            task_config = load_yaml(component.task.config)
-            if (
-                hasattr(self, "task") is False
-                or not isinstance(self.task, task_type)
-            ):
-                self.task = task_type(context=self.context)
-            self.task.config_update(
-                component=component,
-                num_envs=self.num_envs,
-                model_context=model_context,
-                **task_config
-            )
+        self.task.config_update(
+            component=component,
+            num_envs=self.num_envs,
+            model_context=model_context,
+            **deepcopy(self._task_config),
+        )
+        self.task.bind(self.simulator)
 
 
     def checkpoint_state_dict(self) -> dict[str, Any]:
@@ -289,7 +287,16 @@ class VectorEnv(BaseEnv):
 
     def reset(self) -> torch.Tensor:
 
-        self.simulator.reset()
+        try:
+            self.task.before_simulator_reset()
+            self.simulator.reset()
+            self.task.after_simulator_reset()
+        except Exception as error:
+            try:
+                self.task.abort_simulator_reset()
+            except Exception as rollback_error:
+                raise ExceptionGroup("Simulator reset and rollback failed", [error, rollback_error]) from error
+            raise
         self.task.reset()
         self.current_episode_steps.zero_()
         state = self.simulator.get_state()
@@ -315,32 +322,40 @@ class VectorEnv(BaseEnv):
         if not torch.any(done):
             return obs
 
-        env_ids = torch.nonzero(
+        env_ids_tensor = torch.nonzero(
             done,
             as_tuple=False,
         ).squeeze(-1)
 
-        self.simulator.reset(env_ids)
-        self.task.reset(env_ids)
-        self.current_episode_steps[env_ids] = 0
+        try:
+            self.task.before_simulator_reset(env_ids_tensor)
+            self.simulator.reset(env_ids_tensor)
+            self.task.after_simulator_reset(env_ids_tensor)
+        except Exception as error:
+            try:
+                self.task.abort_simulator_reset(env_ids_tensor)
+            except Exception as rollback_error:
+                raise ExceptionGroup("Simulator reset and rollback failed", [error, rollback_error]) from error
+            raise
+        self.task.reset(env_ids_tensor)
+        self.current_episode_steps[env_ids_tensor] = 0
 
-        state = self.simulator.get_state(env_ids)
+        state = self.simulator.get_state(env_ids_tensor)
         task_context = self.task.build_task_context(
             state=state,
-            episode_step=self.current_episode_steps[env_ids],
+            episode_step=self.current_episode_steps[env_ids_tensor],
             step_dt=self.simulator.control_dt,
-            env_ids=env_ids,
+            env_ids=env_ids_tensor,
         )
         reset_obs, _ = self.task.compute_observation(
             task_context,
-            env_ids=env_ids,
+            env_ids=env_ids_tensor,
         )
 
         next_obs = obs.clone()
-        next_obs[env_ids] = reset_obs
+        next_obs[env_ids_tensor] = reset_obs
 
         return next_obs
-
 
     def step(
         self,

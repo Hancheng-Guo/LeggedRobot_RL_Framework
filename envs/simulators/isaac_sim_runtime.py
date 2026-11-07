@@ -988,13 +988,12 @@ class IsaacSimRuntime:
 
 
     def _update_camera_pose(self) -> None:
-        """Follow environment zero from an elevated front-right viewpoint."""
+        """Follow the playback environment from an elevated front-right viewpoint."""
 
-        camera_env_index = getattr(self, "_camera_env_index", None)
-        if camera_env_index is None:
+        if getattr(self, "_camera_env_index", None) is None:
             return
         root_positions, _ = self._articulation.get_world_poses()
-        target = self._tensor(root_positions)[camera_env_index]
+        target = self._tensor(root_positions)[self.playback_env_index]
         target_array = target.detach().cpu().numpy()
 
         forward_offset = 2.5

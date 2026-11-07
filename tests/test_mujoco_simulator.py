@@ -9,6 +9,7 @@ from pathlib import Path
 from envs.simulators.mujoco import MujocoSimulator
 from envs.simulators.utils import SimulatorState
 from utils import Component, load_yaml
+from envs.simulators.terrain import TerrainGeometry
 
 
 pytestmark = pytest.mark.mujoco
@@ -89,14 +90,9 @@ def test_mujoco_rejects_unsupported_render_mode(runtime_context):
         simulator.close()
 
 
-def test_mujoco_rejects_unimplemented_terrain_before_model_load(runtime_context):
-    simulator = MujocoSimulator(runtime_context)
-    with pytest.raises(NotImplementedError, match="not implemented"):
-        simulator.config_update(
-            component=Component(None, None, None, None, None, None),
-            terrain={"types": ["rough"], "max_height": 0.1},
-        )
-    assert simulator.terrain_config.is_plane
+def test_invalid_terrain_geometry_is_rejected_before_model_load():
+    with pytest.raises(ValueError, match="collision geometry"):
+        TerrainGeometry((4, 4), (41, 41), -0.1)
 
 
 def test_human_playback_switches_render_mode_temporarily(runtime_context, monkeypatch):
@@ -114,8 +110,10 @@ def test_human_playback_switches_render_mode_temporarily(runtime_context, monkey
         simulator.close()
 
 
-def test_mujoco_viewer_tracks_base_without_changing_view(runtime_context, monkeypatch):
-    simulator = _configure_go1_simulator(runtime_context)
+@pytest.mark.parametrize("env_index", [0, 1])
+def test_mujoco_viewer_tracks_base_without_changing_view(runtime_context, monkeypatch, env_index):
+    monkeypatch.setattr(MujocoSimulator, "playback_env_index", property(lambda self: env_index))
+    simulator = _configure_go1_simulator(runtime_context, num_envs=2)
     camera = mujoco.MjvCamera()  # pyright: ignore[reportAttributeAccessIssue]
     camera.azimuth = 35.0
     camera.elevation = -20.0
@@ -133,7 +131,12 @@ def test_mujoco_viewer_tracks_base_without_changing_view(runtime_context, monkey
         def close(self):
             pass
 
-    monkeypatch.setattr(viewer, "launch_passive", lambda *_: FakeViewer())
+    def launch(model, data):
+        assert model is simulator.models[env_index]
+        assert data is simulator.datas[env_index]
+        return FakeViewer()
+
+    monkeypatch.setattr(viewer, "launch_passive", launch)
 
     try:
         simulator._human_render()
@@ -146,15 +149,19 @@ def test_mujoco_viewer_tracks_base_without_changing_view(runtime_context, monkey
         simulator.close()
 
 
-def test_mujoco_recording_camera_follows_base(runtime_context, monkeypatch):
-    simulator = _configure_go1_simulator(runtime_context)
+@pytest.mark.parametrize("env_index", [0, 1])
+def test_mujoco_recording_camera_follows_base(runtime_context, monkeypatch, env_index):
+    monkeypatch.setattr(MujocoSimulator, "playback_env_index", property(lambda self: env_index))
+    simulator = _configure_go1_simulator(runtime_context, num_envs=2)
     cameras = []
 
     class FakeRenderer:
         def __init__(self, model):
+            assert model is simulator.models[env_index]
             self.model = model
 
         def update_scene(self, data, camera):
+            assert data is simulator.datas[env_index]
             cameras.append(camera)
 
         def render(self):
@@ -171,7 +178,7 @@ def test_mujoco_recording_camera_follows_base(runtime_context, monkeypatch):
         assert camera.type == mujoco.mjtCamera.mjCAMERA_TRACKING  # pyright: ignore[reportAttributeAccessIssue]
         assert camera.trackbodyid == simulator.model_context.base_id
 
-        model, data = simulator.models[0], simulator.datas[0]
+        model, data = simulator.models[env_index], simulator.datas[env_index]
         scene = mujoco.MjvScene(model, maxgeom=1000)  # pyright: ignore[reportAttributeAccessIssue]
         option = mujoco.MjvOption()  # pyright: ignore[reportAttributeAccessIssue]
 

@@ -1,0 +1,20 @@
+{
+  "measured_at_utc": "2026-11-07T13:23:00Z",
+  "command": "python tests/manual/verify_mujoco_terrain.py --render",
+  "exit_code": 0,
+  "actual_render_passed": true,
+  "attempted_in_sandbox": true,
+  "unit_upload_and_context_reuse_passed": true,
+  "renderer_and_camera_reused": true,
+  "opengl_context_reused": true,
+  "rendered_reset_geometry_changed": true,
+  "partial_reset_isolated": true,
+  "images_visually_inspected": true,
+  "previous_attempt": {
+    "measured_at_utc": "2026-11-05T14:58:01.310689+00:00",
+    "actual_render_passed": false,
+    "error": "WGL: The driver does not appear to support OpenGL; mujoco.FatalError: gladLoadGL error"
+  },
+  "evidence": "verification.json and this run's before_reset.png / after_reset.png / terrain_after_reset.png; default playback index 0, nonzero indices covered by parameterized tests",
+  "episode_reset_reuses_terrain": true
+}

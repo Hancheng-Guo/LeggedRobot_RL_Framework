@@ -3,9 +3,10 @@ import numpy as np
 from pathlib import Path
 from typing import Any
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 
+from .terrain import TerrainPatch, TerrainSpawnGeometry
 from .utils import ModelContext, SimulatorState
-from .terrain import TerrainConfig
 from utils import RuntimeContext
 
 
@@ -27,7 +28,6 @@ class BaseSimulator(ABC):
         self.frame_skip: int
         self.render_mode: str | None
         self.model_context: ModelContext
-        self.terrain_config = TerrainConfig()
 
 
     @abstractmethod
@@ -86,9 +86,39 @@ class BaseSimulator(ABC):
         expected = self.num_envs if env_ids is None else env_ids.numel()
         if xy.shape[0] != expected:
             raise ValueError("Ground query rows must match the selected environments.")
-        if not self.terrain_config.is_plane:
-            raise NotImplementedError("Ground sampling requires a terrain backend.")
         return torch.zeros(xy.shape[:2], dtype=xy.dtype, device=xy.device)
+
+
+    def get_terrain_spawn_geometry(self) -> TerrainSpawnGeometry:
+        """Report physical reset bounds; the environment chooses safe spawns."""
+        raise NotImplementedError("This backend does not expose terrain reset geometry.")
+
+
+    def apply_terrain(
+        self,
+        env_ids_tensor: torch.Tensor,
+        patches: Sequence[TerrainPatch],
+    ) -> None:
+        """Install supplied geometry without sampling or resetting robot state."""
+        raise NotImplementedError("This backend cannot apply geometric terrain yet.")
+
+
+    def set_root_positions(
+        self,
+        env_ids_tensor: torch.Tensor,
+        positions: torch.Tensor,
+    ) -> None:
+        """Apply world positions chosen by the environment, preserving joints."""
+        raise NotImplementedError("This backend cannot apply supplied root positions yet.")
+
+
+    def capture_reset_state(self, env_ids_tensor: torch.Tensor) -> object:
+        """Capture backend-owned physical state for a recoverable reset failure."""
+        raise NotImplementedError("This backend cannot snapshot a terrain reset yet.")
+
+
+    def restore_reset_state(self, state: object) -> None:
+        raise NotImplementedError("This backend cannot restore a terrain reset yet.")
 
 
     def prepare_playback(

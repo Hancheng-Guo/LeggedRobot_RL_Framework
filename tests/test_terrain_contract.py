@@ -1,10 +1,13 @@
 import pytest
 import torch
 import json
+import ast
+from pathlib import Path
 import random
 from copy import deepcopy
 
-from envs.simulators.terrain import (
+from envs.simulators.terrain import TerrainGeometry
+from envs.tasks.managers.randomization.terms.terrain import (
     TerrainConfig, TerrainAssignments, generate_terrain_patch, terrain_patch_seed,
 )
 from envs.simulators.isaac_sim import IsaacSimSimulator
@@ -67,14 +70,14 @@ def test_flat_height_query_contract(runtime_context):
         simulator.get_ground_heights(xy)
 
 
-def test_isaac_rejects_unimplemented_geometry_without_mutating_config(runtime_context):
+def test_isaac_rejects_unimplemented_geometry_before_backend_start(runtime_context):
     simulator = IsaacSimSimulator(runtime_context)
     with pytest.raises(NotImplementedError, match="not implemented"):
         simulator.config_update(
             component=Component(None, None, None, None, None, None),
-            terrain={"types": ["rough"], "max_height": 0.1},
+            terrain_geometry=TerrainGeometry((4, 4), (41, 41), .1),
         )
-    assert simulator.terrain_config.is_plane
+    assert simulator._backend is None
 
 
 @pytest.mark.parametrize("kind", ["plane", "slope", "rough"])
@@ -83,18 +86,18 @@ def test_reference_geometry_bounds_spawn_and_reproducibility(kind):
                                              max_slope=0.3, difficulty_levels=[0, 0.5, 1]))
     patch = generate_terrain_patch(config, 42, 3, 1)
     assert patch == generate_terrain_patch(config, 42, 3, 1)
-    assert len(patch.heights) == len(patch.y)
-    assert all(len(row) == len(patch.x) for row in patch.heights)
+    assert len(patch.geometry.heights) == len(patch.geometry.y)
+    assert all(len(row) == len(patch.geometry.x) for row in patch.geometry.heights)
     assert abs(patch.slope) <= 0.15
     if kind == "rough":
-        assert all(abs(h) <= 0.075 + 1e-12 for row in patch.heights for h in row)
-    for j, y in enumerate(patch.y):
-        for i, x in enumerate(patch.x):
+        assert all(abs(h) <= 0.075 + 1e-12 for row in patch.geometry.heights for h in row)
+    for j, y in enumerate(patch.geometry.y):
+        for i, x in enumerate(patch.geometry.x):
             if abs(x) <= config.spawn_size[0] / 2 or kind == "plane":
                 if abs(y) <= config.spawn_size[1] / 2 or kind != "rough":
-                    assert patch.heights[j][i] == 0
+                    assert patch.geometry.heights[j][i] == 0
     flat = generate_terrain_patch(config, 42, 3, 0)
-    assert all(h == 0 for row in flat.heights for h in row)
+    assert all(h == 0 for row in flat.geometry.heights for h in row)
 
 
 def test_allocation_partial_reset_order_and_checkpoint_continuation():
@@ -136,7 +139,7 @@ def test_reference_rough_golden_vertex_and_seed_override():
     config = TerrainConfig.from_mapping(dict(types=["rough"], max_height=0.1, seed=17))
     patch = generate_terrain_patch(config, 99, 2)
     assert patch.seed == 7592564718643782160
-    assert patch.heights[0][0] == 0.07404575023805203
+    assert patch.geometry.heights[0][0] == 0.07404575023805203
     assert patch == generate_terrain_patch(config, 0, 2)
 
 
@@ -148,6 +151,31 @@ def test_invalid_allocation_checkpoint_schema_is_atomic():
     assert assignments.state_dict() == state
 
 
+def test_terrain_dependencies_point_from_task_terms_to_backend_contracts():
+    root = Path(__file__).resolve().parents[1]
+    violations = []
+    groups = [
+        (root / "envs/simulators", ("envs.tasks",)),
+        (root / "envs/tasks/managers/randomization", (
+            "mujoco", "isaacsim", "omni", "pxr",
+            "envs.simulators.mujoco", "envs.simulators.isaac_sim",
+        )),
+    ]
+    for folder, forbidden in groups:
+        for path in folder.rglob("*.py"):
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8-sig"))):
+                if isinstance(node, ast.ImportFrom):
+                    modules = [node.module or ""]
+                elif isinstance(node, ast.Import):
+                    modules = [alias.name for alias in node.names]
+                else:
+                    continue
+                if any(module == name or module.startswith(name + ".")
+                       for module in modules for name in forbidden):
+                    violations.append(f"{path.relative_to(root)}:{node.lineno}")
+    assert not violations, violations
+
+
 @pytest.mark.parametrize("configuration", [
     {"difficulty_levels": []}, {"difficulty_levels": [1.1]},
     {"difficulty_levels": [0, 0]}, {"spawn_size": [4, 1]},
@@ -156,3 +184,21 @@ def test_invalid_allocation_checkpoint_schema_is_atomic():
 def test_invalid_difficulty_and_safe_spawn(configuration):
     with pytest.raises(ValueError):
         TerrainConfig.from_mapping(configuration)
+
+
+@pytest.mark.parametrize("env_id", [-1, 2, True, 0.5])
+def test_allocation_public_patch_rejects_invalid_id(env_id):
+    allocation = TerrainAssignments(TerrainConfig(), 0, 2)
+    before = allocation.state_dict()
+    with pytest.raises(ValueError, match="environment IDs"):
+        allocation.patch(env_id)
+    assert allocation.state_dict() == before
+
+
+@pytest.mark.parametrize("ids", [[-1], [2], [True], [0.5], [0, 0]])
+def test_allocation_public_reset_rejects_invalid_ids_atomically(ids):
+    allocation = TerrainAssignments(TerrainConfig(), 0, 2)
+    before = allocation.state_dict()
+    with pytest.raises(ValueError, match="environment IDs"):
+        allocation.reset(ids)
+    assert allocation.state_dict() == before

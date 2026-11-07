@@ -3,6 +3,8 @@
     "exclude": [
         "tests/manual",
         "tests/test_mujoco_simulator.py",
-        "envs/simulators/mujoco.py"
+        "tests/test_mujoco_terrain.py",
+        "envs/simulators/mujoco.py",
+        "envs/simulators/mujoco_terrain.py"
     ]
 }

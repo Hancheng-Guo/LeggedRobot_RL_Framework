@@ -1,0 +1,114 @@
+{
+  "review_date": "2026-11-09",
+  "timezone": "Asia/Shanghai",
+  "scope": "Stage 3 final verification after user review",
+  "findings_fixed": [
+    "Preserve terrain and observation insertion order when exporting diagnostic YAML",
+    "Initialize only the framework heightfield buffer and preserve unrelated assets"
+  ],
+  "pytest": {
+    "mujoco_core": {
+      "passed": 1044,
+      "skipped": 11,
+      "deselected": 47
+    },
+    "isaac_core": {
+      "passed": 980,
+      "skipped": 11,
+      "deselected": 111
+    }
+  },
+  "pyright": {
+    "mujoco": {
+      "errors": 0,
+      "warnings": 0
+    },
+    "isaac": {
+      "errors": 0,
+      "warnings": 0
+    }
+  },
+  "standing": {
+    "passed": true,
+    "iterations": 16,
+    "transitions": 16384,
+    "completed_episodes": 82,
+    "min_episode_length": 28,
+    "mean_episode_length": 193.8780487804878,
+    "nonflat_samples": {
+      "rough": 971,
+      "slope": 1623
+    },
+    "parameter_delta_l2": 7.236515805685712,
+    "cleanup_returned": true
+  },
+  "moving": {
+    "passed": true,
+    "iterations": 8,
+    "transitions": 8192,
+    "completed_episodes": 40,
+    "min_episode_length": 25,
+    "mean_episode_length": 195.625,
+    "nonflat_samples": {
+      "rough": 633,
+      "slope": 1532
+    },
+    "parameter_delta_l2": 6.568098593518159,
+    "cleanup_returned": true
+  },
+  "physics_and_render": {
+    "passed": true,
+    "episode_reset_reuses_terrain": true,
+    "partial_reset_isolated": true,
+    "render_before_and_after_reset": true,
+    "rendered_reset_geometry_changed": true,
+    "renderer_and_camera_reused": true,
+    "opengl_context_reused": true
+  },
+  "plane_comparison": {
+    "observation_shape": true,
+    "state_shapes": true,
+    "initial_foot_contacts": true,
+    "sampled_contact_counts_per_foot": true,
+    "final_foot_normal_forces": true,
+    "partial_reset_isolation": true,
+    "reset_qpos_repeatable": true,
+    "plane_height_zero": true
+  },
+  "raw_results_directory": "D:\\GHC\\LeggedRobot_RL_Framework\\temp\\stage3_audited_final_20261109",
+  "source_sha256": {
+    "configs/tasks/locomotion_anymal_c_phase.yaml": "7b2dfe4ea36429c8350df463c8f0c7a2c5f402b74772d4b29cc46b2ce3c43d5b",
+    "envs/simulators/base.py": "3ee050de774892c2ead295e6959a24a2c8e7595ebf4af36e2fc401f9721f1d93",
+    "envs/simulators/mujoco.py": "e86b082e7ce330be0992e801ee5e645b11c649304516f31e754b4a9a0518023d",
+    "envs/simulators/mujoco_terrain.py": "36b4b606d8a48377bcf5f17522f0056f3ae8006b0dca7c42cd46a720353f7833",
+    "envs/simulators/utils/state.py": "9b5bb6a0ddb41f96a09a2d03ce7106e9bbbb1eef0aa728bede665122c48be8c6",
+    "envs/tasks/managers/observation/terms/foot.py": "a07bbc5c9f9af7f40ea242162b3d7b02107a330ef0b6dd6d559eef1f5069472d",
+    "envs/tasks/managers/observation/terms/state.py": "d8bfbd013e4a005c0d613406a08684c4da0b850509c6bfb36c4203d495b37048",
+    "envs/tasks/managers/randomization/terms/terrain.py": "7097488b3a054a52e9cc874909d0bff0f5d12c0064d4bf5c68f4bf4e4d76c775",
+    "envs/tasks/managers/reward/terms/contact.py": "87e58b502579704f936c4655193d0fc32d203d315c998703df6848b0bb4f6d53",
+    "envs/tasks/managers/reward/terms/foot.py": "b157967c5069769ff64c78aeda0a22addf6c0449194c43b32e4ef4981cfc667a",
+    "envs/tasks/managers/reward/terms/state.py": "7c23e90169f415873b0ccc5bb3a288671356bf0ebedfe2d7bcc23092343b39b4",
+    "envs/tasks/managers/termination/terms/__init__.py": "82351ea0b6f0a4c48799842a5159a8a2b185fc7c3c6fa496bc19cfd944d00420",
+    "envs/tasks/managers/termination/terms/state.py": "372233a3345a396b9abee00978b708a7443a50efae94ace0296c25c33519919a",
+    "envs/tasks/managers/termination/terms/terrain.py": "07fecc9fa7f86cc761b706a9e0fc5da1c4278e1e12df6e4c694fe48201142177",
+    "envs/tasks/utils/__init__.py": "46423e3f447be4548786c6b9a18b5e1d8462a37790e1c543bf29c84ea65d71d5",
+    "envs/tasks/utils/context.py": "0d62e2b2376d7553b9508811028ed4c6c1137cae8b9e37d666f7af57b7fc7e83",
+    "envs/tasks/utils/height.py": "cc55ee413d338eb44ca658b15949a26419835f61edbb81e7038d457c5cd857cf",
+    "envs/tasks/utils/result.py": "687ec5e7d799dabc6368e4ac95b1b16e1fa2be675f79935988ae8b629ac2cd2c",
+    "tests/manual/verify_mujoco_terrain.py": "155cd67dfd99db401804b8f564afe56c342428ce42ed8f668db7f968eb88dec6",
+    "tests/manual/verify_mujoco_terrain_training.py": "506e06b5a4409aebd4e9fb79d08bd8b26c0983779448a688d94784d3e7130e8d",
+    "tests/test_isaac_simulator.py": "b0712b1763ba9a0bcb0d5436a589842346ccc327107add2d71aaeddd30e84cd4",
+    "tests/test_mujoco_simulator.py": "841561dafb8ec51a3003e1d1a941e830ab20edb890feba2b11503201c18bbb05",
+    "tests/test_mujoco_terrain.py": "c7f2ce0087ed373f871dcce44aa77afd09d477007ae7bf353a149cd66ef3e686",
+    "tests/test_mujoco_terrain_signals.py": "c2b9a94934c41f2752188b9f92364d61832e42ea2bbd90bf53e72521f181bf94",
+    "tests/test_reward_manager.py": "299b70ff5f0260e3886f42ec8fc0b74d7ebebbe2d58a76e0cf4c239abd94cc1b",
+    "tests/test_terrain_contract.py": "829117fc2dddc0cf5e3a10a2d2f85a585b7988516c44998d5d850b995a45f2b3",
+    "tests/test_terrain_manager.py": "083fc0e21743cb003c59ff9878857a758c50d9512ec91a877d6267e80aa85a8a",
+    "tests/test_terrain_signals.py": "d3adb8545d036dff9f78c37e15961029c7938935bb5891f4bb5a9b96002e3d4e"
+  },
+  "limits": [
+    "Isaac regression does not launch a real nonflat Isaac application",
+    "PPO checks signal and update health, not convergence or locomotion skill",
+    "Terrain curriculum and formal checkpoint integration belong to later stages"
+  ]
+}

@@ -1,0 +1,373 @@
+{
+  "script": "D:\\GHC\\LeggedRobot_RL_Framework\\tests\\manual\\verify_mujoco_terrain_training.py",
+  "seed": 0,
+  "iterations": 16,
+  "environment_config": {
+    "num_envs": 8,
+    "max_episode_steps": 200
+  },
+  "runner_config": {
+    "rollout_length": 128,
+    "rollout_length_history_size": 50,
+    "callbacks": [
+      "logging"
+    ]
+  },
+  "component_configs": {
+    "algorithm": "D:\\GHC\\LeggedRobot_RL_Framework\\configs\\algorithms\\ppo_num_batch_4.yaml",
+    "policy": "D:\\GHC\\LeggedRobot_RL_Framework\\configs\\policies\\actor_critic_direct_actuation.yaml",
+    "environment": "D:\\GHC\\LeggedRobot_RL_Framework\\tests\\manual\\results\\stage3_mujoco\\environment.yaml",
+    "simulator": "D:\\GHC\\LeggedRobot_RL_Framework\\configs\\simulators\\mujoco_unitree_go1_rgb_array.yaml",
+    "task": "D:\\GHC\\LeggedRobot_RL_Framework\\configs\\tasks\\locomotion_unitree_go1_standing_terrain.yaml"
+  },
+  "measured_at_utc": "2026-11-08T02:31:38Z",
+  "nonflat_start_is_diagnostic_only": true,
+  "command_speed": 0.0,
+  "initial_nonflat_env_ids": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "initial_foot_ground_heights": [
+    [
+      -0.001920004840940237,
+      -0.0006877270643599331,
+      0.0015726794954389334,
+      0.0070479074493050575
+    ],
+    [
+      -0.028834855183959007,
+      -0.028834855183959007,
+      -0.01507051382213831,
+      -0.01507051382213831
+    ],
+    [
+      0.0019204624695703387,
+      0.0028847213834524155,
+      0.002801067428663373,
+      0.006459863390773535
+    ],
+    [
+      0.014453407377004623,
+      0.014453407377004623,
+      0.007554047275334597,
+      0.007554047275334597
+    ],
+    [
+      0.010267387144267559,
+      0.010267387144267559,
+      0.0053662448190152645,
+      0.0053662448190152645
+    ],
+    [
+      0.010706750676035881,
+      0.010706750676035881,
+      0.0055958605371415615,
+      0.0055958605371415615
+    ],
+    [
+      0.01127650123089552,
+      0.01127650123089552,
+      0.005893643479794264,
+      0.005893643479794264
+    ]
+  ],
+  "initial_relative_base_height": [
+    0.29911938309669495,
+    0.33638447523117065,
+    0.32688215374946594,
+    0.32307761907577515,
+    0.3234497010707855,
+    0.32245054841041565,
+    0.32255545258522034,
+    0.3226914405822754
+  ],
+  "passed": true,
+  "elapsed_seconds": 41.698893200140446,
+  "num_envs": 8,
+  "rollout_length": 128,
+  "transitions": 16384,
+  "completed_episodes": 148,
+  "min_episode_length": 10,
+  "mean_episode_length": 106.12837837837837,
+  "termination_counts": {
+    "termination/body_contact": 61,
+    "termination/base_height": 27,
+    "termination/terrain_bounds": 0
+  },
+  "nonflat_samples": {
+    "rough": 489,
+    "slope": 1033
+  },
+  "contacts_seen": [
+    [
+      true,
+      true,
+      true,
+      true
+    ],
+    [
+      true,
+      true,
+      true,
+      true
+    ],
+    [
+      true,
+      true,
+      true,
+      true
+    ],
+    [
+      true,
+      true,
+      true,
+      true
+    ],
+    [
+      true,
+      true,
+      true,
+      true
+    ],
+    [
+      true,
+      true,
+      true,
+      true
+    ],
+    [
+      true,
+      true,
+      true,
+      true
+    ],
+    [
+      true,
+      true,
+      true,
+      true
+    ]
+  ],
+  "parameter_delta_l2": 6.669122563708564,
+  "updates": [
+    {
+      "rollout/loss": 4.731840948263804,
+      "rollout/policy_loss": 2.221837123235067,
+      "rollout/value_loss": 5.037434597810109,
+      "rollout/entropy": 8.713465770085653,
+      "rollout/approx_kl": 0.019580391390870016,
+      "rollout/clip_fraction": 0.2906901041666667,
+      "rollout/grad_norm": 4.955081383387248,
+      "rollout/learning_rate": 0.0005,
+      "rollout/explained_variance": -0.011675596237182617,
+      "runner/current_iter": 0.0,
+      "rollout/mean_len": 1.64
+    },
+    {
+      "rollout/loss": 2.664088408152262,
+      "rollout/policy_loss": 1.4652891556421916,
+      "rollout/value_loss": 2.415057639280955,
+      "rollout/entropy": 8.729562203089396,
+      "rollout/approx_kl": 0.017209436239985127,
+      "rollout/clip_fraction": 0.21809895833333334,
+      "rollout/grad_norm": 3.894823541243871,
+      "rollout/learning_rate": 0.0005,
+      "rollout/explained_variance": 0.15826410055160522,
+      "runner/current_iter": 1.0,
+      "rollout/mean_len": 37.1
+    },
+    {
+      "rollout/loss": 10.166612982749939,
+      "rollout/policy_loss": 3.227734923362732,
+      "rollout/value_loss": 13.895238637924194,
+      "rollout/entropy": 8.741357962290445,
+      "rollout/approx_kl": 0.014419193573606512,
+      "rollout/clip_fraction": 0.2138671875,
+      "rollout/grad_norm": 17.834236065546673,
+      "rollout/learning_rate": 0.0005,
+      "rollout/explained_variance": 0.07907748222351074,
+      "runner/current_iter": 2.0,
+      "rollout/mean_len": 40.38
+    },
+    {
+      "rollout/loss": 5.4048612515131635,
+      "rollout/policy_loss": 2.0032152930895486,
+      "rollout/value_loss": 6.820785601933797,
+      "rollout/entropy": 8.746842622756958,
+      "rollout/approx_kl": 0.00911508766391004,
+      "rollout/clip_fraction": 0.1357421875,
+      "rollout/grad_norm": 11.622086842854818,
+      "rollout/learning_rate": 0.0005,
+      "rollout/explained_variance": 0.3557600975036621,
+      "runner/current_iter": 3.0,
+      "rollout/mean_len": 74.1
+    },
+    {
+      "rollout/loss": 4.639782110850017,
+      "rollout/policy_loss": 2.1737824082374573,
+      "rollout/value_loss": 4.949488540490468,
+      "rollout/entropy": 8.744580348332724,
+      "rollout/approx_kl": 0.009564571373630315,
+      "rollout/clip_fraction": 0.13509114583333334,
+      "rollout/grad_norm": 15.253887494405111,
+      "rollout/learning_rate": 0.0005,
+      "rollout/explained_variance": -0.04576921463012695,
+      "runner/current_iter": 4.0,
+      "rollout/mean_len": 78.1
+    },
+    {
+      "rollout/loss": 2.1358693142731986,
+      "rollout/policy_loss": -0.3873234341541926,
+      "rollout/value_loss": 5.06386661529541,
+      "rollout/entropy": 8.740543206532797,
+      "rollout/approx_kl": 0.014270648961731544,
+      "rollout/clip_fraction": 0.19173177083333334,
+      "rollout/grad_norm": 4.581605156262715,
+      "rollout/learning_rate": 0.0005,
+      "rollout/explained_variance": 0.7053717374801636,
+      "runner/current_iter": 5.0,
+      "rollout/mean_len": 115.56
+    },
+    {
+      "rollout/loss": 3.5489569902420044,
+      "rollout/policy_loss": 1.1997181475162506,
+      "rollout/value_loss": 4.715936998526256,
+      "rollout/entropy": 8.729637304941813,
+      "rollout/approx_kl": 0.007516334104972581,
+      "rollout/clip_fraction": 0.10709635416666667,
+      "rollout/grad_norm": 12.897358417510986,
+      "rollout/learning_rate": 0.0005,
+      "rollout/explained_variance": 0.7336935997009277,
+      "runner/current_iter": 6.0,
+      "rollout/mean_len": 109.26
+    },
+    {
+      "rollout/loss": 5.060858170191447,
+      "rollout/policy_loss": 1.0495858838160832,
+      "rollout/value_loss": 8.039998610814413,
+      "rollout/entropy": 8.727044185002645,
+      "rollout/approx_kl": 0.012979154998902231,
+      "rollout/clip_fraction": 0.19075520833333334,
+      "rollout/grad_norm": 11.221044540405273,
+      "rollout/learning_rate": 0.0005,
+      "rollout/explained_variance": 0.7053993940353394,
+      "runner/current_iter": 7.0,
+      "rollout/mean_len": 111.7
+    },
+    {
+      "rollout/loss": 1.9130497475465138,
+      "rollout/policy_loss": -0.05353043903596699,
+      "rollout/value_loss": 3.9506221214930215,
+      "rollout/entropy": 8.730858325958252,
+      "rollout/approx_kl": 0.01620344053177784,
+      "rollout/clip_fraction": 0.23567708333333334,
+      "rollout/grad_norm": 2.9383676449457803,
+      "rollout/learning_rate": 0.0005,
+      "rollout/explained_variance": 0.8334032893180847,
+      "runner/current_iter": 8.0,
+      "rollout/mean_len": 105.5
+    },
+    {
+      "rollout/loss": 3.2846808234850564,
+      "rollout/policy_loss": -0.016925077885389328,
+      "rollout/value_loss": 6.620683590571086,
+      "rollout/entropy": 8.73586893081665,
+      "rollout/approx_kl": 0.015203516309460005,
+      "rollout/clip_fraction": 0.22916666666666666,
+      "rollout/grad_norm": 4.436008850733439,
+      "rollout/learning_rate": 0.0005,
+      "rollout/explained_variance": 0.7399724125862122,
+      "runner/current_iter": 9.0,
+      "rollout/mean_len": 99.88
+    },
+    {
+      "rollout/loss": 2.785827934741974,
+      "rollout/policy_loss": 0.3962640166282654,
+      "rollout/value_loss": 4.79660165309906,
+      "rollout/entropy": 8.736958344777426,
+      "rollout/approx_kl": 0.01110731546456615,
+      "rollout/clip_fraction": 0.1650390625,
+      "rollout/grad_norm": 5.741775810718536,
+      "rollout/learning_rate": 0.0005,
+      "rollout/explained_variance": 0.8078345060348511,
+      "runner/current_iter": 10.0,
+      "rollout/mean_len": 98.36
+    },
+    {
+      "rollout/loss": 2.9645121693611145,
+      "rollout/policy_loss": 0.4353056997060776,
+      "rollout/value_loss": 5.075884858767192,
+      "rollout/entropy": 8.735930522282919,
+      "rollout/approx_kl": 0.007227536116261035,
+      "rollout/clip_fraction": 0.10611979166666667,
+      "rollout/grad_norm": 5.725665668646495,
+      "rollout/learning_rate": 0.0005,
+      "rollout/explained_variance": 0.8086689710617065,
+      "runner/current_iter": 11.0,
+      "rollout/mean_len": 111.3
+    },
+    {
+      "rollout/loss": 5.6582478284835815,
+      "rollout/policy_loss": 1.038560926914215,
+      "rollout/value_loss": 9.256844997406006,
+      "rollout/entropy": 8.735597451527914,
+      "rollout/approx_kl": 0.008588395197875798,
+      "rollout/clip_fraction": 0.11946614583333333,
+      "rollout/grad_norm": 12.970314621925354,
+      "rollout/learning_rate": 0.0005,
+      "rollout/explained_variance": 0.7358343601226807,
+      "runner/current_iter": 12.0,
+      "rollout/mean_len": 110.24
+    },
+    {
+      "rollout/loss": 4.738189538319905,
+      "rollout/policy_loss": 0.5428060765067736,
+      "rollout/value_loss": 8.40824023882548,
+      "rollout/entropy": 8.736543893814087,
+      "rollout/approx_kl": 0.00930831472699841,
+      "rollout/clip_fraction": 0.13248697916666666,
+      "rollout/grad_norm": 7.679706235726674,
+      "rollout/learning_rate": 0.0005,
+      "rollout/explained_variance": 0.6880661249160767,
+      "runner/current_iter": 13.0,
+      "rollout/mean_len": 106.48
+    },
+    {
+      "rollout/loss": 2.898095667362213,
+      "rollout/policy_loss": 0.1664092616798977,
+      "rollout/value_loss": 5.480840563774109,
+      "rollout/entropy": 8.733889102935791,
+      "rollout/approx_kl": 0.009223201409137497,
+      "rollout/clip_fraction": 0.13704427083333334,
+      "rollout/grad_norm": 8.637311776479086,
+      "rollout/learning_rate": 0.0005,
+      "rollout/explained_variance": 0.8377599120140076,
+      "runner/current_iter": 14.0,
+      "rollout/mean_len": 111.64
+    },
+    {
+      "rollout/loss": 4.2828181982040405,
+      "rollout/policy_loss": -0.34383407793939114,
+      "rollout/value_loss": 9.27076522509257,
+      "rollout/entropy": 8.730284055074057,
+      "rollout/approx_kl": 0.009021732839755714,
+      "rollout/clip_fraction": 0.11881510416666667,
+      "rollout/grad_norm": 6.222739199797313,
+      "rollout/learning_rate": 0.0005,
+      "rollout/explained_variance": 0.7810548543930054,
+      "runner/current_iter": 15.0,
+      "rollout/mean_len": 93.88
+    }
+  ],
+  "observation_dim": 112,
+  "foot_height_reward_range": [
+    -0.0,
+    -0.0
+  ],
+  "cleanup_returned": true
+}

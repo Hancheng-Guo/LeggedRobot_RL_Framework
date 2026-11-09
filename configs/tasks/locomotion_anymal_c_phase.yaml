@@ -102,4 +102,15 @@ curriculum_manager_config:
 
 
 event_manager_config: {}
-randomization_manager_config: {}
+randomization_manager_config:
+  terms:
+    terrain:
+      types:
+        plane: {weight: 1}
+        slope: {weight: 1, max_slope: 0.15}
+        rough: {weight: 1, max_height: 0.04}
+      patch_size: [4, 4]
+      resolution: 0.1
+      spawn_size: [1.5, 1.2]
+      spawn_margin: 0.5
+      difficulty_levels: [0.25, 0.6, 1.0]

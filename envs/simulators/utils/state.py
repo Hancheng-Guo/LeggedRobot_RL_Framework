@@ -1,4 +1,5 @@
 from dataclasses import dataclass, fields
+from collections.abc import Iterator
 
 import torch
 
@@ -25,18 +26,19 @@ class SimulatorState:
     contact_forces: torch.Tensor
     foot_ground_contact: torch.Tensor  # [num_envs, num_feet]
     foot_contact_normal_force: torch.Tensor  # [num_envs, num_feet]
+    base_ground_height: torch.Tensor | None = None  # [env], world ground z below the root.
+    foot_ground_heights: torch.Tensor | None = None  # [env, foot], ModelContext foot order.
+    ground_valid: torch.Tensor | None = None  # [env], root/foot ground samples are defined.
+    terrain_in_bounds: torch.Tensor | None = None  # [env], root and feet inside the random patch.
 
     def as_dict(self) -> dict[str, torch.Tensor]:
-        return {
-            field.name: getattr(self, field.name)
-            for field in fields(self)
-        }
+        return dict(self._items())
 
-    def _items(self):
-        return (
-            (field.name, getattr(self, field.name))
-            for field in fields(self)
-        )
+    def _items(self) -> Iterator[tuple[str, torch.Tensor]]:
+        for field in fields(self):
+            value = getattr(self, field.name)
+            if value is not None:
+                yield field.name, value
 
     def clone(self) -> "SimulatorState":
         return type(self)(**{

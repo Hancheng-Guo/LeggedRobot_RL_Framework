@@ -11,6 +11,7 @@ from envs.tasks.managers.reward.terms.foot import (
     FootLiftHeightDiffCommandGatedL2,
     FootLiftHeightDiffCommandWeightedExp,
     FootStateDurationCommandWeightedExp,
+    FootSlidingVelocityL2,
 )
 from envs.tasks.managers.reward.terms.gait import (
     QuadrupedalCommandAdaptiveGaitPhaseHeightL2,
@@ -69,6 +70,20 @@ def make_reward_context() -> TaskContext:
         episode_step=torch.zeros(2, dtype=torch.long),
         step_dt=0.02,
     )
+
+
+@pytest.mark.parametrize('velocity', [(3.,4.,0.), (0.,0.,5.), (0.,3.,4.)])
+def test_foot_sliding_penalizes_mean_squared_xyz_velocity(runtime_context, model_context, velocity):
+    model_context = replace(model_context, foot_geom_ids=torch.tensor([1,3]))
+    context = make_reward_context()
+    context.state.geom_xvel = torch.full((2,4,6), 1000.)
+    context.state.geom_xvel[0,1,3:6] = torch.tensor(velocity)
+    context.state.foot_ground_contact = torch.tensor([[True,False],[False,False]])
+    term = FootSlidingVelocityL2(context=runtime_context, model_context=model_context)
+    # One of two feet is grounded; average over two feet and three components.
+    torch.testing.assert_close(term.compute(context), torch.tensor([25./6,0.]))
+    selected = replace(context, state=context.state.select(torch.tensor([0])))
+    torch.testing.assert_close(term.compute(selected), torch.tensor([25./6]))
 
 
 def test_joint_position_diff_groups_use_disjoint_model_ids(runtime_context, model_context):

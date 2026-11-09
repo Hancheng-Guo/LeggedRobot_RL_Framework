@@ -17,10 +17,3 @@ class TaskContext:
     step_dt: float                          # Duration of one control step.
     env_ids: torch.Tensor | None = None     # Selected environments; None means all.
     task_state: dict[str, torch.Tensor] = field(default_factory=dict)
-
-
-@dataclass
-class TaskStepResult:
-    reward: torch.Tensor        # Reward for the completed step, scaled by step_dt.
-    terminated: torch.Tensor    # Task termination on the completed step.
-    truncated: torch.Tensor     # Time-limit truncation on the completed step.

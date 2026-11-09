@@ -1,0 +1,14 @@
+{
+  "reference": "tests/manual/results/stage1_mujoco_plane.json",
+  "current": "tests/manual/results/stage3_mujoco/plane_regression.json",
+  "exact_match": {
+    "observation_shape": true,
+    "state_shapes": true,
+    "initial_foot_contacts": true,
+    "sampled_contact_counts_per_foot": true,
+    "final_foot_normal_forces": true,
+    "partial_reset_isolation": true,
+    "reset_qpos_repeatable": true,
+    "plane_height_zero": true
+  }
+}

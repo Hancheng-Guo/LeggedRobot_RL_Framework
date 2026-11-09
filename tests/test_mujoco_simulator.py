@@ -323,6 +323,49 @@ def test_mujoco_state_exposes_base_velocity_in_body_frame(runtime_context):
     )
 
 
+@pytest.mark.parametrize('quaternion', [
+    (1.,0.,0.,0.),
+    (2**-.5,2**-.5,0.,0.),
+    (2**-.5,0.,2**-.5,0.),
+    (2**-.5,0.,0.,2**-.5),
+    (.5,.5,.5,.5),
+])
+def test_free_joint_body_velocity_matches_native_mujoco_and_tracking(runtime_context, quaternion):
+    from envs.tasks.utils import TaskContext
+    from envs.tasks.managers.reward.terms.tracking import TrackAngularVelocityZL2Exp
+    from envs.tasks.managers.observation.terms.tracking import TrackAngularVelocityZErrorIntegral
+
+    simulator = _configure_go1_simulator(runtime_context, num_envs=2)
+    try:
+        for data in simulator.datas:
+            data.qpos[3:7] = quaternion
+            data.qvel[:6] = [1.2,-.7,.9,.2,-.4,1.]
+            mujoco.mj_forward(simulator.models[0],data)  # pyright: ignore[reportAttributeAccessIssue]
+        for env_ids in (None, torch.tensor([1,0]), torch.tensor([1])):
+            state = simulator.get_state(env_ids)
+            native = np.zeros(6)
+            # XBODY uses the body frame/origin; BODY uses the inertial frame/COM.
+            mujoco.mj_objectVelocity(simulator.models[0],simulator.datas[0],  # pyright: ignore[reportAttributeAccessIssue]
+                mujoco.mjtObj.mjOBJ_XBODY,simulator.model_context.base_id,native,1)  # pyright: ignore[reportAttributeAccessIssue]
+            count = state.qpos.shape[0]
+            expected = torch.tensor(native, dtype=runtime_context.dtype)
+            torch.testing.assert_close(state.base_ang_vel_body, expected[:3].expand(count,3))
+            torch.testing.assert_close(state.base_lin_vel_body, expected[3:].expand(count,3))
+            torch.testing.assert_close(state.base_ang_vel_body,
+                torch.tensor([.2,-.4,1.]).expand(count,3))
+            context = TaskContext(state=state,command={'ang_vel_z':torch.ones(count,1)},
+                last_command={'ang_vel_z':torch.ones(count,1)},action=torch.zeros(count,simulator.model_context.nu),
+                last_action=torch.zeros(count,simulator.model_context.nu),
+                episode_step=torch.ones(count,dtype=torch.long),step_dt=.002)
+            reward = TrackAngularVelocityZL2Exp(context=runtime_context, num_envs=count)
+            torch.testing.assert_close(reward.compute(context), torch.ones(count))
+            observation = TrackAngularVelocityZErrorIntegral(context=runtime_context,
+                num_envs=count, model_context=simulator.model_context)
+            torch.testing.assert_close(observation.compute(context), torch.zeros(count,1))
+    finally:
+        simulator.close()
+
+
 def test_mujoco_foot_ground_contact_applies_force_threshold(
     runtime_context,
     model_context,

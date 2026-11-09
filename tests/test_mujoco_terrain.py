@@ -1,5 +1,5 @@
 # pyright: reportAttributeAccessIssue=false
-from dataclasses import dataclass, replace, asdict
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from contextlib import nullcontext
 from types import SimpleNamespace
@@ -9,11 +9,12 @@ import mujoco
 import numpy as np
 import pytest
 import torch
+import yaml
 
 from envs.simulators.mujoco import MujocoSimulator
 from envs.tasks.managers.randomization.terms.terrain import TerrainConfig, TerrainRandomizationTerm, TerrainAssignment
 from envs.vector_env import VectorEnv
-from utils import Component, ComponentInfo
+from utils import Component, ComponentInfo, load_yaml
 
 
 pytestmark = pytest.mark.mujoco
@@ -50,7 +51,7 @@ class TerrainScenario:
 def configure(context, *, num_envs=3, terrain=None, workers=1, model_path=None,
               feet=("FR", "FL", "RR", "RL"), keyframe: str | None = "home"):
     config = TerrainConfig.from_mapping(terrain if terrain is not None else dict(
-        types=["plane", "slope", "rough"], max_height=0.04, max_slope=0.15,
+        types={"plane":{}, "slope":{"max_slope":.15}, "rough":{"max_height":.04}},
         spawn_size=[1, 1], seed=0))
     manager = TerrainRandomizationTerm(num_envs, context, **asdict(config))
     simulator = MujocoSimulator(context)
@@ -84,7 +85,7 @@ def integration_state(model, data):
 def test_mixed_geometry_keeps_floor_id_and_independent_buffers(scenario):
     assert scenario.simulator._terrain is not None
     assert [p.terrain_type for p in scenario.patches] == ["plane", "slope", "rough"]
-    floor_id = scenario.simulator.model_context.floor_geom_ids.item()
+    floor_id = scenario.simulator.model_context.floor_geom_ids[0].item()
     assert floor_id == mujoco.mj_name2id(mujoco.MjModel.from_xml_path(str(scenario.simulator.model_path)),
                                         mujoco.mjtObj.mjOBJ_GEOM, "floor")
     for model in scenario.simulator.models:
@@ -94,6 +95,30 @@ def test_mixed_geometry_keeps_floor_id_and_independent_buffers(scenario):
     assert np.ptp(scenario.simulator._terrain.grids[0]) == 0
     assert np.ptp(scenario.simulator._terrain.grids[1]) > 0
     assert np.ptp(scenario.simulator._terrain.grids[2]) > 0
+
+
+def test_build_models_preserves_unrelated_heightfield_assets(runtime_context, tmp_path):
+    spec = mujoco.MjSpec.from_string('''<mujoco><worldbody>
+        <geom name="floor" type="plane" size="3 3 .1"/>
+        <body pos="0 0 .3"><freejoint/><geom name="foot" type="sphere" size=".025" mass="1"/>
+        </body></worldbody></mujoco>''')
+    spec.add_hfield(name='existing',nrow=2,ncol=2,size=[1,1,.2,.1],userdata=[0,.2,.6,1])
+    spec.worldbody.add_geom(name='obstacle',type=mujoco.mjtGeom.mjGEOM_HFIELD,
+                            hfieldname='existing',pos=[10,0,0])
+    path = tmp_path/'existing_heightfield.xml'
+    path.write_text(spec.to_xml(),encoding='utf-8')
+    original = mujoco.MjModel.from_xml_path(str(path))
+    existing = mujoco.mj_name2id(original,mujoco.mjtObj.mjOBJ_HFIELD,'existing')
+    start = original.hfield_adr[existing]
+    count = original.hfield_nrow[existing] * original.hfield_ncol[existing]
+    expected = original.hfield_data[start:start+count].copy()
+    sim = configure(runtime_context,num_envs=1,model_path=path,feet=('foot',),keyframe=None)
+    try:
+        sim.reset()
+        model = sim.simulator.models[0]
+        np.testing.assert_array_equal(model.hfield_data[start:start+count],expected)
+    finally:
+        sim.simulator.close()
 
 
 def test_height_queries_match_native_collision_rays(scenario):
@@ -120,11 +145,88 @@ def test_height_queries_match_native_collision_rays(scenario):
     (torch.zeros(1, 2, 2), torch.tensor([3])),
     (torch.zeros(1, 2, 2), torch.tensor([0.])),
     (torch.full((3, 2, 2), float("nan")), None),
-    (torch.full((3, 2, 2), 2.01), None),
 ])
 def test_invalid_ground_queries(scenario, xy, ids):
     with pytest.raises(ValueError):
         scenario.simulator.get_ground_heights(xy, ids)
+
+
+@pytest.mark.parametrize('xy', [(2.01,0),(-2.01,0),(0,2.01),(0,-2.01),
+                               (3,3),(-3,-3),(3,-3),(-3,3),(500,500)])
+def test_peripheral_flat_has_real_contact_and_matching_height(runtime_context, tmp_path, xy):
+    path = tmp_path/'probe.xml'
+    path.write_text('''<mujoco><worldbody>
+        <geom name="floor" type="plane" size="3 3 .1" friction=".7 .01 .002"/>
+        <body pos="0 0 .2"><freejoint/><geom name="foot" type="sphere" size=".025" mass="1"/>
+        </body></worldbody></mujoco>''', encoding='utf-8')
+    scenario = configure(runtime_context, num_envs=1, model_path=path, feet=('foot',), keyframe=None)
+    sim = scenario.simulator
+    try:
+        scenario.reset()
+        point = torch.tensor([[xy]], dtype=torch.float64)
+        assert sim.get_ground_heights(point).item() == pytest.approx(0.)
+        model, data = sim.models[0], sim.datas[0]
+        assert model.stat.extent < 20
+        data.qpos[:3] = [*xy,.019]
+        mujoco.mj_forward(model, data)
+        state = sim.get_state()
+        assert state.ground_valid is not None and state.terrain_in_bounds is not None
+        assert state.ground_valid.all() and not state.terrain_in_bounds.any()
+        assert state.foot_ground_contact.all() and (state.foot_contact_normal_force > 15).all()
+        floor_ids = sim.model_context.floor_geom_ids.tolist()
+        assert len(floor_ids) == 5
+        for geom_id in floor_ids[1:]:
+            np.testing.assert_allclose(model.geom_friction[geom_id], model.geom_friction[floor_ids[0]])
+        hit = np.array([-1],dtype=np.int32)
+        distance = mujoco.mj_ray(model, data, np.array([*xy,2.]), np.array([0.,0.,-1.]),
+                                 None, 1, 1, hit)
+        assert distance == pytest.approx(2.)
+        assert hit[0] in floor_ids[1:]
+        for _ in range(250):
+            mujoco.mj_step(model, data)
+        assert data.qpos[2] == pytest.approx(.025, abs=.002)
+    finally:
+        sim.close()
+
+
+def test_exterior_does_not_cover_negative_heightfield(scenario):
+    sim = scenario.simulator
+    patch = scenario.patches[0].geometry
+    negative = replace(patch, heights=tuple(tuple(-.03 for x in patch.x) for y in patch.y))
+    sim.apply_terrain(torch.tensor([0]), [negative])
+    hit = np.array([-1],dtype=np.int32)
+    point = np.array([1.2,0.,2.])
+    distance = mujoco.mj_ray(sim.models[0],sim.datas[0],point,np.array([0.,0.,-1.]),None,1,-1,hit)
+    assert distance == pytest.approx(2.03, abs=1e-7)
+    assert hit[0] == sim.model_context.floor_geom_ids[0].item()
+
+
+@pytest.mark.parametrize('direction', [(1,0),(-1,0),(0,1),(0,-1),(1,1),(-1,-1),(1,-1),(-1,1)])
+def test_probe_crosses_patch_seam_without_falling(runtime_context, tmp_path, direction):
+    path = tmp_path/'crossing.xml'
+    path.write_text('''<mujoco><worldbody><geom name="floor" type="plane" size="3 3 .1"/>
+        <body pos="0 0 .3"><freejoint/><geom name="foot" type="sphere" size=".025" mass="1"/>
+        </body></worldbody></mujoco>''', encoding='utf-8')
+    scenario = configure(runtime_context, num_envs=1, model_path=path, feet=('foot',), keyframe=None,
+                         terrain=dict(types={'plane':{'weight':1e100},'rough':{'max_height':.04}}, seed=42))
+    sim = scenario.simulator
+    try:
+        scenario.reset()
+        model, data = sim.models[0], sim.datas[0]
+        data.qpos[:3] = [direction[0]*1.9, direction[1]*1.9, .025]
+        # The 1 kg probe's settled support is below the robot's default threshold.
+        sim.foot_contact_force_threshold = 0.
+        data.qvel[:2] = direction
+        for _ in range(400):
+            mujoco.mj_step(model,data)
+            assert data.qpos[2] > .02
+        assert max(abs(data.qpos[:2])) > 2.1
+        state = sim.get_state()
+        assert state.ground_valid is not None and state.terrain_in_bounds is not None
+        assert state.ground_valid.all() and not state.terrain_in_bounds.any()
+        assert state.foot_ground_contact.all()
+    finally:
+        sim.close()
 
 
 def test_local_reset_changes_only_selected_environment(scenario):
@@ -148,8 +250,7 @@ def test_local_reset_changes_only_selected_environment(scenario):
 
 
 def test_reset_difficulty_and_invalid_updates_are_atomic(runtime_context):
-    sim = configure(runtime_context, num_envs=2, terrain=dict(types=["rough"],
-        max_height=.05, spawn_size=[1, 1], difficulty_levels=[0, 1]))
+    sim = configure(runtime_context, num_envs=2, terrain=dict(types={"rough": {"max_height": .05}}, spawn_size=[1, 1], difficulty_levels=[0, 1]))
     try:
         assert sim.simulator._terrain is not None
         assert sim.assignments is not None
@@ -214,8 +315,11 @@ def test_actual_foot_contacts_on_nonflat_surface(runtime_context, tmp_path, kind
         <body pos="0 0 .2"><freejoint/><geom name="foot" type="sphere" size=".025" mass="1"/>
         </body></worldbody></mujoco>''', encoding="utf-8")
     sim = configure(runtime_context, num_envs=1, model_path=path, feet=("foot",),
-        keyframe=None, terrain=dict(types=[kind, "plane"] if kind != "plane" else ["plane", "rough"],
-        weights=[1e100, 1], max_height=.04, max_slope=.1, spawn_size=[.5, .5], seed=42))
+        keyframe=None, terrain=dict(types={
+            kind:dict(weight=1e100, **({'max_slope':.1} if kind == 'slope' else
+                                     {'max_height':.04} if kind == 'rough' else {})),
+            'plane' if kind != 'plane' else 'rough':{} if kind != 'plane' else {'max_height':.04},
+        }, spawn_size=[.5, .5], seed=42))
     try:
         sim.reset()
         assert sim.patches[0].terrain_type == kind
@@ -230,7 +334,7 @@ def test_actual_foot_contacts_on_nonflat_surface(runtime_context, tmp_path, kind
         assert state.foot_ground_contact[0, 0], state.foot_contact_normal_force
         assert state.foot_contact_normal_force[0, 0] > 15
         pairs = state.contact_geom_ids[0].tolist()
-        assert any(sim.simulator.model_context.floor_geom_ids.item() in pair for pair in pairs)
+        assert any(sim.simulator.model_context.floor_geom_ids[0].item() in pair for pair in pairs)
         data.qpos[2] = height + .2
         mujoco.mj_forward(sim.simulator.models[0], data)
         assert not sim.simulator.get_state().foot_ground_contact[0, 0]
@@ -257,7 +361,7 @@ def test_parallel_terrain_stepping_matches_serial(runtime_context):
 
 def test_legacy_plane_is_unchanged(runtime_context):
     implicit = configure(runtime_context, terrain={})
-    explicit = configure(runtime_context, terrain={"types": ["plane"]})
+    explicit = configure(runtime_context, terrain={"types": {"plane":{}}})
     try:
         implicit.reset()
         explicit.reset()
@@ -275,7 +379,7 @@ def test_legacy_plane_is_unchanged(runtime_context):
 
 def test_too_small_safe_spawn_area_fails_before_first_reset(runtime_context):
     with pytest.raises(ValueError, match="collision footprint"):
-        configure(runtime_context, terrain=dict(types=["rough"], max_height=.1))
+        configure(runtime_context, terrain=dict(types={"rough": {"max_height": .1}}))
 
 
 @pytest.mark.parametrize("env_index", [0, 2])
@@ -316,7 +420,7 @@ def test_translated_floor_heights_and_spawn(runtime_context, tmp_path):
         <body pos="0 0 .3"><freejoint/><geom name="foot" type="sphere" size=".025" mass="1"/>
         </body></worldbody></mujoco>''', encoding="utf-8")
     sim = configure(runtime_context, num_envs=1, model_path=path, feet=("foot",),
-        keyframe=None, terrain=dict(types=["rough"], max_height=.04, spawn_size=[.5, .5]))
+        keyframe=None, terrain=dict(types={"rough": {"max_height": .04}}, spawn_size=[.5, .5]))
     try:
         sim.reset()
         position = sim.simulator.datas[0].qpos[:3]
@@ -342,7 +446,7 @@ def test_unsupported_ground_fails_early(runtime_context, tmp_path, floor, feet):
         path.write_text(path.read_text().replace('name="foot"', 'name="ball"'), encoding="utf-8")
     with pytest.raises(ValueError):
         configure(runtime_context, model_path=path, keyframe=None, feet=feet,
-            terrain=dict(types=["rough"], max_height=.04, spawn_size=[.5, .5]))
+            terrain=dict(types={"rough": {"max_height": .04}}, spawn_size=[.5, .5]))
 
 
 def test_backend_reset_executes_without_sampling_terrain(scenario):
@@ -382,11 +486,16 @@ def test_invalid_patch_batch_does_not_partially_update_geometry(scenario):
         np.testing.assert_array_equal(model.hfield_data, heights)
 
 
-def test_task_randomization_owns_terrain_and_routes_full_and_done_resets(runtime_context):
+def test_task_randomization_owns_terrain_and_routes_full_and_done_resets(runtime_context, tmp_path):
+    config = load_yaml(ROOT/'configs/tasks/locomotion_unitree_go1_standing.yaml')
+    config['randomization_manager_config'] = load_yaml(
+        ROOT/'configs/tasks/locomotion_anymal_c_phase.yaml')['randomization_manager_config']
+    path = tmp_path/'task.yaml'
+    path.write_text(yaml.safe_dump(config, sort_keys=False),encoding='utf-8')
     env = VectorEnv(replace(runtime_context, load_dir=ROOT, save_dir=ROOT))
     component = Component(None, None, None, None,
         ComponentInfo("mujoco", ROOT / "configs/simulators/mujoco_unitree_go1_rgb_array.yaml"),
-        ComponentInfo("locomotion", ROOT / "configs/tasks/locomotion_unitree_go1_standing_terrain.yaml"))
+        ComponentInfo("locomotion", path))
     try:
         env.config_update(component, num_envs=3, max_episode_steps=100)
         assert env.task.randomization_manager is not None
@@ -430,7 +539,7 @@ def test_spawn_bounds_do_not_require_named_feet(runtime_context, tmp_path):
         <body pos="0 0 .3"><freejoint/><geom name="ball" type="sphere" size=".025" mass="1"/>
         </body></worldbody></mujoco>''', encoding="utf-8")
     sim = configure(runtime_context, num_envs=1, model_path=path, feet=(), keyframe=None,
-        terrain=dict(types=["rough"], max_height=.04, spawn_size=[.5, .5]))
+        terrain=dict(types={"rough": {"max_height": .04}}, spawn_size=[.5, .5]))
     try:
         assert sim.simulator.model_context.foot_geom_ids.numel() == 0
         sim.reset()
@@ -557,7 +666,7 @@ def test_renderer_upload_preserves_context_and_camera(rollback_scenario, monkeyp
 
 @pytest.fixture
 def rollback_scenario(runtime_context):
-    sim = configure(runtime_context, terrain=dict(types=["rough"], max_height=.05,
+    sim = configure(runtime_context, terrain=dict(types={"rough": {"max_height": .05}},
         spawn_size=[1, 1], difficulty_levels=[.25, 1]))
     sim.reset()
     yield sim

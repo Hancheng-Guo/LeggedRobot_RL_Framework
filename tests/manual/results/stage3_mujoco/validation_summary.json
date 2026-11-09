@@ -1,0 +1,48 @@
+{
+  "date": "2026-11-07",
+  "stage": 3,
+  "status": "passed",
+  "mujoco_pytest": {
+    "passed": 973,
+    "skipped": 11,
+    "deselected": 44
+  },
+  "isaac_pytest": {
+    "passed": 938,
+    "skipped": 11,
+    "deselected": 79,
+    "real_isaac_app_started": false
+  },
+  "pyright": {
+    "mujoco_errors": 0,
+    "mujoco_warnings": 0,
+    "isaac_errors": 0,
+    "isaac_warnings": 0
+  },
+  "new_tests": {
+    "core": 30,
+    "mujoco": 5
+  },
+  "standing_ppo": {
+    "report": "training_verification.json",
+    "exit_code": 0,
+    "transitions": 16384
+  },
+  "moving_ppo": {
+    "report": "moving/training_verification.json",
+    "exit_code": 0,
+    "command_speed": 0.3,
+    "transitions": 8192
+  },
+  "flat_baseline": "plane_comparison.json",
+  "scope": "Task ground-height signals and finite-terrain termination; no Isaac nonflat, curriculum, terrain checkpoint wiring or policy quality guarantee",
+  "manual_component_validation": "Acceptance parameters are embedded in verify_mujoco_terrain_training.py; environment/task copies are generated only under output-dir; all other component configs are reused",
+  "manual_parameters_refactor": {
+    "date": "2026-11-08",
+    "mujoco_signal_tests_passed": 35,
+    "isaac_signal_tests_passed": 30,
+    "standing_ppo_exit_code": 0,
+    "moving_ppo_exit_code": 0,
+    "business_smoke_configs_removed": true
+  }
+}

@@ -71,6 +71,14 @@ class BaseSimulator(ABC):
         return self.render_mode is not None
 
 
+    def get_ground_bounds(
+        self,
+        env_ids: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor] | None:
+        """Random terrain xy lower/upper bounds [env, 2]; None without a finite patch."""
+        return None
+
+
     def get_ground_heights(
         self,
         xy: torch.Tensor,
@@ -87,6 +95,38 @@ class BaseSimulator(ABC):
         if xy.shape[0] != expected:
             raise ValueError("Ground query rows must match the selected environments.")
         return torch.zeros(xy.shape[:2], dtype=xy.dtype, device=xy.device)
+
+
+    def _get_ground_state(
+        self,
+        qpos: torch.Tensor,
+        geom_xpos: torch.Tensor,
+        env_ids: torch.Tensor | None = None,
+    ) -> dict[str, torch.Tensor]:
+
+        bounds = self.get_ground_bounds(env_ids)
+        if bounds is None:
+            return {}
+
+        base_xy = qpos[:, self.model_context.base_pos_qpos_ids[:2]]
+        foot_xy = geom_xpos[:, self.model_context.foot_geom_ids, :2]
+        xy = torch.cat((base_xy[:, None, :], foot_xy), dim=1)
+        lower, upper = bounds
+        finite = torch.isfinite(xy).all(dim=(1, 2))
+        in_bounds = (torch.isfinite(xy) & (xy >= lower[:, None]) & (xy <= upper[:, None])).all(dim=(1, 2))
+        heights = xy.new_zeros(xy.shape[:2])
+        if torch.any(finite):
+            env_ids_tensor = (torch.arange(self.num_envs, device=xy.device)
+                              if env_ids is None else env_ids)
+            heights[finite] = self.get_ground_heights(xy[finite], env_ids_tensor[finite])
+        valid = finite & torch.isfinite(heights).all(dim=1)
+        heights = torch.where(valid[:, None], heights, 0.)
+        return {
+            "base_ground_height": heights[:, 0],
+            "foot_ground_heights": heights[:, 1:],
+            "ground_valid": valid,
+            "terrain_in_bounds": in_bounds,
+        }
 
 
     def get_terrain_spawn_geometry(self) -> TerrainSpawnGeometry:

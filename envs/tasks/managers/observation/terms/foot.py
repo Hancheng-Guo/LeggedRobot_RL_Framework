@@ -4,7 +4,7 @@ import torch
 from .base import BaseObservationTerm
 from .registry import register_observation
 from envs.simulators.utils import ModelContext
-from envs.tasks.utils import TaskContext
+from envs.tasks.utils import TaskContext, validate_height_reference, foot_heights
 
 
 def _foot_contact_output_dim(model_context: ModelContext) -> int:
@@ -25,10 +25,12 @@ class FootHeight(BaseObservationTerm):
     def __init__(
         self,
         model_context: ModelContext,
+        height_reference: str = "ground",
         *args, **kwargs,
     ) -> None:
         
         super().__init__(*args, **kwargs)
+        self.height_reference = validate_height_reference(height_reference)
 
         if model_context.foot_geom_ids.numel() == 0:
             raise ValueError(
@@ -44,7 +46,7 @@ class FootHeight(BaseObservationTerm):
         task_context: TaskContext,
     ) -> torch.Tensor:
         
-        return task_context.state.geom_xpos[:, self.foot_geom_ids, 2]
+        return foot_heights(task_context, self.foot_geom_ids, self.height_reference)
 
 
 

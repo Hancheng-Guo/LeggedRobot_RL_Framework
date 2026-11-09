@@ -730,14 +730,14 @@ term 顺序决定最终 observation 的拼接顺序。所有 observation term �
 |---|---|
 | `base_linear_velocity` | base 坐标系线速度 |
 | `base_position` | base 世界坐标位置 |
-| `base_height` | base 高度 |
+| `base_height` | base 离地高度；`height_reference=ground`，可设为 `world` |
 | `base_angular_velocity` | base 坐标系角速度 |
 | `projected_gravity` | 重力在 base 坐标系中的投影 |
 | `joint_position` | 关节位置 |
 | `joint_velocity` | 关节速度 |
 | `joint_position_diff` | 关节位置相对默认位置的偏差 |
 | `actuator_force` | 执行器力 |
-| `foot_height` | 足端高度 |
+| `foot_height` | 各足 geom 中心离地高度；`height_reference=ground`，可设为 `world` |
 | `foot_contact_normal_force` | 足端法向接触力 |
 | `foot_contact_state` | 足端接触状态 |
 | `foot_duration_tanh` | 每只足的触地状态保持时间经 `tanh(alpha × 时间)` 压缩；触地为正、离地为负，默认 `alpha=1.0` |
@@ -777,8 +777,8 @@ reward_manager_config:
 | `joint_power_l1` | — |
 | `base_linear_velocity_z_l2` | — |
 | `base_linear_velocity_z_l2_xy_speed_weighted` | `min_speed=0.5` |
-| `base_height_l2` | 必填 `target_height`；`std=1.0`、`max_normalized_error=null` |
-| `base_height_l2_xy_speed_weighted` | 必填 `target_height`；`min_speed=0.5` |
+| `base_height_l2` | 必填 `target_height`；`std=1.0`、`max_normalized_error=null`、`height_reference=ground`（可选 `world`） |
+| `base_height_l2_xy_speed_weighted` | 必填 `target_height`；`min_speed=0.5`、`height_reference=ground`（可选 `world`） |
 | `base_angular_velocity_xy_l2` | — |
 | `projected_gravity_xy_l2` | — |
 | `track_linear_velocity_xy_l2_exp` | `x_std=1.0`、`y_std=1.0`、`command_names=[lin_vel_x, lin_vel_y]` |
@@ -800,9 +800,9 @@ reward_manager_config:
 | `foot_state_duration_cubic_command_tanh_weighted_exp` | 整组足端触地状态保持时间的三次方版本，指令范数先取 `tanh`；参数同上 |
 | `foot_duration_cubic_command_tanh_weighted_exp` | 分别统计每只足的触地状态保持时间，取三次方并按 `tanh` 指令范数加权后求平均；参数同上 |
 | `foot_state_switch` | `hold_time=0.2`；触地状态在保持时间内切换时返回惩罚值 |
-| `foot_sliding_velocity_l2` | — |
-| `foot_lift_height_diff_command_weighted_exp` | 必填 `target_height`；`height_std=0.03`、`command_std=0.5`、`command_names=[lin_vel_x, lin_vel_y, ang_vel_z]`；仅对摆动脚计算高度奖励，零指令时为零 |
-| `foot_lift_height_diff_command_gated_l2` | 必填 `target_height`；`height_std=null` 时使用 `target_height`；命令范数 `<=0.1` 时所有足端目标高度为 0，运动时支撑脚目标为 0、摆动脚目标为 `target_height`；使用负权重作为高度误差惩罚 |
+| `foot_sliding_velocity_l2` | 触地足端 geom 中心世界 xyz 速度平方，按全部足及三个速度分量取均值，非触地足贡献为零；包含法向运动，不是严格的接触切向滑移 |
+| `foot_lift_height_diff_command_weighted_exp` | 必填 `target_height`；`height_std=0.03`、`command_std=0.5`、`command_names=[lin_vel_x, lin_vel_y, ang_vel_z]`、`height_reference=ground`（可选 `world`）；仅对摆动脚计算高度奖励，零指令时为零 |
+| `foot_lift_height_diff_command_gated_l2` | 必填 `target_height`；`height_std=null`（默认使用 `target_height`）、`height_reference=ground`（可选 `world`）；命令范数 `<=0.1` 或支撑脚时贡献为零，仅对运动中的摆动脚计算相对 `target_height` 的误差；使用负权重作为惩罚 |
 | `quadrupedal_foot_velocity_diff_l2` | — |
 | `foot_contact_without_command` | `command_names=[lin_vel_x, lin_vel_y, ang_vel_z]` |
 
@@ -822,7 +822,8 @@ termination_manager_config:
 | 名称 | 参数 |
 |---|---|
 | `body_contact` | 必填 `body_names`，任一指定 body 发生接触即终止 |
-| `base_height` | 必填 `min_height`，低于阈值即终止 |
+| `base_height` | 必填 `min_height`；`height_reference=ground`（可选 `world`），低于阈值即终止 |
+| `terrain_bounds` | 无参数；机身或任意足端离开随机地形区域时终止；未配置有限地形时不会触发 |
 
 Episode 达到 `max_episode_steps` 属于 `truncated`，不是 termination term。
 
@@ -903,36 +904,63 @@ Stage 可通过 `sample_on_update: true` 避免重复计入同一份结果，通
 
 ### 9.8 Randomization Manager
 
-`randomization_manager_config` 控制 task 的随机化，目前支持 `terrain` 项；写 `{}` 时不启用随机化，两个仿真器均使用默认平地。地形参数放在 **task YAML** 中：
+`RandomizationManager` 通过注册表构建和调度随机化 term，目前支持 `terrain`。配置属于 **task YAML**；`randomization_manager_config: {}` 表示关闭随机化，保留默认平地行为。
+
+**配置与支持范围**
 
 ```yaml
 randomization_manager_config:
   terms:
     terrain:
-      types: [plane, slope, rough]
-      max_height: 0.04
-      max_slope: 0.15
-      spawn_size: [1.0, 1.0]
+      types:
+        plane: {weight: 1}
+        slope: {weight: 1, max_slope: 0.15}
+        rough: {weight: 1, max_height: 0.04}
+      patch_size: [4, 4]
+      resolution: 0.1
+      spawn_size: [1.5, 1.2]
+      difficulty_levels: [0.25, 0.6, 1.0]
       seed: 0
 ```
 
-MuJoCo 已支持 `plane`、`slope` 和 `rough`，使用相同的公共网格规则生成独立高度场。Isaac Sim 当前仍只支持平地，非平地配置会明确报错。
+MuJoCo 支持三种地形（`plane`、`slope` 和 `rough`），Isaac Sim 当前只支持平地，非平地配置会明确报错。可配对使用 [ANYmal C 地形任务](configs/tasks/locomotion_anymal_c_phase.yaml) 与 [MuJoCo 仿真配置](configs/simulators/mujoco_anymal_c_rgb_array.yaml)；仿真器 YAML 只保存模型和物理参数。
 
-MuJoCo 示例配对使用 `configs/tasks/locomotion_unitree_go1_standing_terrain.yaml` 与 `configs/simulators/mujoco_unitree_go1_rgb_array.yaml`。仿真器 YAML 只保留模型和物理参数；原先位于仿真器 YAML 根部的 `terrain:` 应迁移到上面的 task 随机化项，否则启动时会明确报错。启用非平地时，须指定一个世界坐标轴对齐的地面 plane（`floor_geom_names`），它会原位替换为高度场，保留名称、ID、材质、摩擦和接触参数。`spawn_size` 是中央平坦区的全尺寸，必须容纳 reset 姿态下机器人所有碰撞形状的水平包围盒；Go1 示例使用 `[1.0, 1.0]`。尺寸不足、额外 plane 或倾斜地面会在构建时被拒绝。
+`types` 是按地形名组织的字典，每种类型的 `weight` 默认为 1，决定各环境的抽样概率，不保证各类型数量相等。尺寸、分辨率、出生区、难度等级和种子是公共参数，放在 `terrain` 层。
 
-`MujocoSimulator.get_ground_heights(xy, env_ids)` 按碰撞三角形查询世界高度；超出有限地形块会报错。task 的 `randomization_manager.terms["terrain"]` 持有地形分配、难度和出生采样状态。`VectorEnv` 在建场景前向 task 取得碰撞布局需求，并在完整/局部 reset 时先调用 task 的物理随机化钩子，再清理其他任务状态。纯平地配置继续走原有无限平面路径。
+**`plane`**：平坦地面，高度相对原地面为零。单独配置 `types: {plane: {}}` 时沿用原有无限平面；与其他类型混合配置时，使用同尺寸的有限高度场，所有顶点高度为零。
 
-`envs/simulators/terrain.py` 定义后端共用的几何数据和物理接口；其中 `TerrainPatch` 只含坐标与高度，种子、类型、难度及出生元数据保留在 task 的 `TerrainAssignment` 中。`envs/tasks/managers/randomization/terms/terrain.py` 定义 `TerrainRandomizationTerm`，负责配置校验、确定性生成、分配状态、难度和出生规则，由 task 的 `RandomizationManager` 控制。仿真器只接收 `terrain_geometry` 碰撞布局，通过 `apply_terrain` 应用给定网格，通过 `set_root_positions` 执行给定出生位置。单独调用 `simulator.reset()` 不再采样或更换地形。
+**`slope`**：中央出生区保持平坦，区外沿 ±x、±y 四个方向同号起伏：正 `slope` 均抬升，负值均降低，接近外边界时回到零高度，与外围平地衔接。系数均匀采样于 `[-max_slope × difficulty, +max_slope × difficulty)`；`max_slope` 限制采样系数，不限制双轴合成后的实际坡度。
 
-任务初始化使用通用接口：`VectorEnv._prepare_task()` 读取配置、创建或复用 task，并调用 `task.prepare(config)`；环境通过 `task.get_simulator_requirements()` 取得物理配置需求。仿真器构建后，`_build_task()` 使用同一份配置和 `ModelContext` 完成初始化，最后调用 `task.bind(simulator)` 绑定任务资源。env 不直接访问 task 内部的随机化管理器。其他需要在建场景前准备资源的 task 可重写 `prepare()`，并调用父类实现；该钩子此时不能依赖 `ModelContext`。
+**`rough`**：各网格顶点在 `[-max_height × difficulty, +max_height × difficulty)` 内独立均匀采样，形成随机起伏；中央出生区及其一圈网格保持平坦，最外圈顶点高度为零。网格间由三角形连接，`resolution` 控制最大网格间距；该类型不受 `max_slope` 约束。
 
-`prepare()` 只解析配置和声明碰撞布局，不创建 manager、地形分配状态或随机化项。`RandomizationManager` 与其他 manager 统一在 `_build_managers()` 阶段构建；布局声明和实际构建共用同一套配置校验与布局计算规则。
+`difficulty_levels` 是各类型共用的难度候选集，与 `types` 不按位置对应；选中的难度系数缩放 slope 的采样系数和 rough 的高度幅度，plane 始终为零高度。
 
-`RandomizationManager` 通过 `BaseRandomizationTerm` 和注册表构建、调度各随机化项，不内置 terrain 分支。空配置不向后端传地形参数；环境仅记录已使用的资源键，在同一后端不再需要该资源时发送显式 `None` 清除请求。`bind()` 只绑定资源与校验物理尺寸，首次 reset 才生成并应用地形；后续回合 reset 复用当前地形，仅在请求的难度变化时重新生成对应环境的地形。
+MuJoCo 非平地要求 `floor_geom_names` 指定一个未旋转、启用碰撞且属于 world body 的 plane，原位替换为高度场并保留地面配置。`spawn_size` 是中央平坦区的全尺寸，须容纳 reset 姿态下机器人的完整碰撞投影；ANYmal C 示例使用 `[1.5, 1.2]`。不支持额外 plane、倾斜地面或不适配的出生区。
 
-回合 reset 复用已有地形并恢复机器人出生位置；首次使用或难度变化时，先生成候选分配并应用网格，再重置物理状态并设置出生位置；所有项的后置操作成功后才提交分配代数。任一步骤失败，通过 `abort_simulator_reset()` 恢复所选环境的物理数据和高度缓冲，分配代数及难度请求不被消耗。难度请求通过 terrain term 的 `set_difficulty(env_ids, difficulty_indices)` 设置；通用 manager 钩子只接收环境索引。MuJoCo 离屏渲染保持 renderer 和相机，在下一次绘制前上传变化的高度场。
+**初始化与重置**
 
-<!-- 阶段 2 仅完成仿真链路，任务的离地高度信号与正式训练检查点接入分别属于阶段 3、5。运行示例和验收记录见 [MuJoCo 地形验收](tests/manual/results/stage2_mujoco/README.md)。 -->
+`task.prepare()` 只声明场景资源需求；仿真器构建后，task 在构建各 manager 时一并创建随机化 manager，再通过 `task.bind()` 绑定并校验资源。地形选择、难度和出生策略由 task 控制，后端只执行物理操作。
+
+回合重置沿用以下顺序，完整和局部 reset 使用同一流程：
+
+```python
+task.before_simulator_reset(env_ids)  # 保存回滚状态，按需应用候选地形
+simulator.reset(env_ids)             # 恢复机器人物理状态
+task.after_simulator_reset(env_ids)   # 设置出生位置，全部成功后提交分配
+task.reset(env_ids)                  # 清理任务回合状态
+```
+
+首次使用或请求的难度变化时生成地形；普通 reset 复用当前地形，不推进分配代数。重新绑定后端只重新应用缓存网格。难度请求通过 `task.randomization_manager.terms["terrain"].set_difficulty(env_ids_tensor, difficulty_indices)` 设置，相同难度不触发重生成；失败时恢复所选环境的物理状态和地形，不消耗难度请求。
+
+**地面信号与使用边界**
+
+simulator 在 `get_state()` 中批量查询机身及足端地面高度，并将 `base_ground_height`、`foot_ground_heights`、`ground_valid` 和 `terrain_in_bounds` 作为可选物理字段一并构造到 `SimulatorState`，供 task、观测、奖励和终止读取；高度条目默认 `height_reference: ground`，可显式设为 `world`；`base_position`、机身平面相对的步态信号和世界速度项保留原含义。普通平地不执行这项查询。
+
+MuJoCo 几何地形外围每侧延伸 1000 米平地，高度为原地面世界 z，不覆盖内部负高度地形。高度查询按机身/足端各点分别选择高度场或外围平地，跨界后观测、奖励与接触信号仍正常计算。
+
+`ground_valid` 表示机身及全部足端的地面高度是否有效，`terrain_in_bounds` 表示它们是否全部处于随机区域内，两者均为 `[env]`。`termination_manager_config.terms.terrain_bounds: {}` 可选择越出随机区域即终止；当前地形示例未启用该项，可在外围继续运动；按需添加该项后，越出随机区域会终止。查询超出外围覆盖的位置返回 NaN，状态采集将该环境标记为 `ground_valid=False` 并屏蔽无定义高度信号。
+
+<!-- 短训练参数内置于 [手工验收脚本](tests/manual/verify_mujoco_terrain_training.py)，运行时仅在输出目录生成环境参数及可选的前进指令任务副本。几何与物理接口、渲染验证见 [阶段 2 记录](tests/manual/results/stage2_mujoco/README.md)；信号适配、越界和 PPO 验收见 [阶段 3 记录](tests/manual/results/stage3_mujoco/README.md)。正式地形检查点恢复尚未接入。 -->
 
 ## 10. 完整组合示例
 

@@ -320,7 +320,11 @@ class MujocoSimulator(BaseSimulator):
             ),
             floor_geom_ids=self._geom_ids_by_name(
                 geom_names,
-                requested_names=self.floor_geom_names,
+                requested_names=(
+                    self.floor_geom_names
+                    if self._terrain is None
+                    else self.floor_geom_names + self._terrain.peripheral_geom_names
+                ),
             ),
         )
 
@@ -618,7 +622,11 @@ class MujocoSimulator(BaseSimulator):
                 )
 
 
-    def _validated_env_ids(self, env_ids: torch.Tensor | None) -> list[int]:
+    def _validated_env_ids(
+        self,
+        env_ids: torch.Tensor | None,
+    ) -> list[int]:
+
         if env_ids is None:
             return list(range(self.num_envs))
         if env_ids.ndim != 1 or env_ids.dtype != torch.long:
@@ -630,6 +638,22 @@ class MujocoSimulator(BaseSimulator):
         ):
             raise ValueError("Environment IDs must be unique and in range.")
         return env_ids_list
+
+
+    def get_ground_bounds(
+        self,
+        env_ids: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor] | None:
+
+        if self._terrain is None:
+            return None
+        env_ids_list = self._validated_env_ids(env_ids)
+        origin = self._tensor(self._terrain.origin[:2])
+        half_size = self._tensor(self._terrain.geometry.patch_size) / 2
+        return (
+            (origin - half_size).expand(len(env_ids_list), 2),
+            (origin + half_size).expand(len(env_ids_list), 2),
+        )
 
 
     def get_ground_heights(
@@ -851,7 +875,13 @@ class MujocoSimulator(BaseSimulator):
             contact_forces,
         )
 
+        ground_state = self._get_ground_state(
+            qpos=basic_state["qpos"],
+            geom_xpos=basic_state["geom_xpos"],
+            env_ids=env_ids,
+        )
         return SimulatorState(
+            **ground_state,
             **basic_state,
             **base_velocity_state,
             **foot_contact_state,
@@ -1051,10 +1081,10 @@ class MujocoSimulator(BaseSimulator):
                 data.qvel[lin_vel_ids],
                 out=numpy_buffers.base_lin_vel_body[env_index],
             )
-            np.matmul(
-                rotation_world_to_body,
-                data.qvel[ang_vel_ids],
-                out=numpy_buffers.base_ang_vel_body[env_index],
+            # Free-joint angular qvel is already expressed in the local body frame.
+            np.copyto(
+                numpy_buffers.base_ang_vel_body[env_index],
+                data.qvel[ang_vel_ids]
             )
 
         return self._publish_state_fields(

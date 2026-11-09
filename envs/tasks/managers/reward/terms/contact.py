@@ -37,11 +37,11 @@ class IllegalContactL1(BaseRewardTerm):
         self,
         task_context: TaskContext
     ) -> torch.Tensor:
-        
+
         contact_geom_ids = task_context.state.contact_geom_ids
         if contact_geom_ids.shape[1] == 0:
             return torch.zeros(
-                self.num_envs,
+                contact_geom_ids.shape[0],
                 dtype=self.context.dtype,
                 device=self.context.device,
             )

@@ -22,7 +22,7 @@
 python tests/manual/verify_mujoco_terrain.py --render
 ```
 
-脚本配对使用 `configs/simulators/mujoco_unitree_go1_rgb_array.yaml` 与 `configs/tasks/locomotion_unitree_go1_standing_terrain.yaml` 中的随机化配置，运行 3 个独立 Go1 环境，`sim_dt=0.002`、`frame_skip=10`、3 个工作线程、固定地形 seed=0。第一次 reset 后三个环境分别是 plane/slope/rough，patch ID 为 3/4/5，初始难度值均为 0.25。
+本历史记录运行 3 个独立 Go1 环境，`sim_dt=0.002`、`frame_skip=10`、3 个工作线程、固定地形 seed=0。第一次 reset 后三个环境分别是 plane/slope/rough，patch ID 为 3/4/5，初始难度值均为 0.25。当前手工脚本已改用 `configs/simulators/mujoco_anymal_c_rgb_array.yaml` 与 `configs/tasks/locomotion_anymal_c_phase.yaml`；旧 Go1 地形任务已删除。
 
 先在安全出生区运行 300 个控制步，再将机器人移动到 x=1.2 m、y=0 的出生区外，按照各足下方高度放置并运行另 300 个控制步。维持 home 位置控制目标，不调用任务管理器或 PPO。验证所有状态有限、机身保持合理离地高度、四足在稳定阶段均出现接触，且最终四足均超过力阈值。随后执行一次普通完整 reset，核对地形对象、高度缓冲及分配代数保持不变，且不产生地形上传请求。最后仅重置示例播放环境 env_0 并请求最高难度，核对 env_1/2 的地形和姿态完全不变。渲染模式下若采样仍为 plane，则交替请求不同难度直至实际几何改变，避免把普通 reset 当作重新采样操作。
 
@@ -54,10 +54,10 @@ python -m pytest -m 'core or mujoco' tests -q -p no:cacheprovider --basetemp tem
 
 - 非平地模式要求明确指定一个世界坐标轴对齐、挂在 world body 下、启用碰撞的 plane 作为替换目标。不支持额外 plane、倾斜地面和非平凡父 frame；这些情况会在构建时失败。
 - 新地形有有限边界，`patch_size` 外没有隐藏的备用平面。高度查询超出边界会报错；阶段 3 接入地形信号时需相应处理越界终止。
-- 纯 `types: [plane]`（以及不配置 terrain）保持原有无限平面和固定 reset 行为。混合分布中的 plane 是有限的平坦地形块，会参与分配和出生采样。
+- 纯 `types: {plane: {}}`（以及不配置 terrain）保持原有无限平面和固定 reset 行为。混合分布中的 plane 是有限的平坦地形块，会参与分配和出生采样。
 - `spawn_size` 必须适配机器人完整碰撞包围盒，Go1 示例使用 `[1,1]`。更大的机器人或不同 reset 姿态可能需要扩大区域。场景文件及原机器人资产未被修改，地形数据在内存中生成。
 - 本轮实际渲染复验（2026-11-07T13:23:00Z，UTC）成功创建 WGL/OpenGL 上下文，完整 `python tests/manual/verify_mujoco_terrain.py --render` 退出码为 0。示例使用默认播放索引 0：脚本确认普通 reset 复用地形、不产生上传请求；难度更新后实际高度缓冲改变、reset 前后图像不同、renderer / camera / OpenGL context 对象均保持相同、上传标记已清除，且 env_1/2 地形与姿态保持不变。`verification.json` 中相关标记与 `passed` 均为 true；下方图片为本轮生成结果。非零播放索引另由参数化测试验证。之前 WGL 初始化失败的记录保留在 [渲染状态](render_validation.json) 的 `previous_attempt` 中，本轮未复现。
-- 本阶段不宣称非平地训练已就绪。任务离地高度信号改造与短训练属于阶段 3；Isaac 非平地属于阶段 4；课程、正式检查点和评估恢复属于阶段 5。
+- 阶段 2 仅验收仿真链路。任务离地高度信号与短训练现已在 [阶段 3](../stage3_mujoco/README.md) 完成；Isaac 非平地仍属于阶段 4，课程、正式检查点和评估恢复仍属于阶段 5。
 
 ## 实际渲染图像
 

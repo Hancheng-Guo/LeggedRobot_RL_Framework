@@ -1,4 +1,4 @@
-"""Exercise real Go1 contacts on all stage-2 surfaces, without stage-3 tasks/PPO."""
+"""Exercise real ANYmal C contacts on all stage-2 surfaces, without stage-3 tasks/PPO."""
 from __future__ import annotations
 
 import argparse
@@ -55,9 +55,9 @@ def main():
     context = RuntimeContext(torch.device("cpu"), torch.float32, 4, 0, True, ROOT, ROOT)
     torch.set_num_threads(4)
     sim = MujocoSimulator(context)
-    config = load_yaml(ROOT / "configs/simulators/mujoco_unitree_go1_rgb_array.yaml")
+    config = load_yaml(ROOT / "configs/simulators/mujoco_anymal_c_rgb_array.yaml")
     config["model_path"] = ROOT / config["model_path"]
-    task_config = load_yaml(ROOT / "configs/tasks/locomotion_unitree_go1_standing_terrain.yaml")
+    task_config = load_yaml(ROOT / "configs/tasks/locomotion_anymal_c_phase.yaml")
     randomization = RandomizationManager(3, context, **task_config["randomization_manager_config"])
     manager = randomization.terms["terrain"]
     assert manager is not None
@@ -73,9 +73,11 @@ def main():
         report = dict(python=sys.version, mujoco=mujoco.__version__, platform=platform.platform(),
                       measured_at_utc=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                       initialization_seconds=initialization, num_envs=3, steps_per_phase=args.steps,
-                      config=str(ROOT / "configs/simulators/mujoco_unitree_go1_rgb_array.yaml"),
-                      randomization_config=str(ROOT / "configs/tasks/locomotion_unitree_go1_standing_terrain.yaml"),
+                      config=str(ROOT / "configs/simulators/mujoco_anymal_c_rgb_array.yaml"),
+                      randomization_config=str(ROOT / "configs/tasks/locomotion_anymal_c_phase.yaml"),
                       phases=[])
+        reset_height = sim.get_state().qpos[:, 2].clone()
+        target_height = task_config["constants"]["base_target_height"]
         action = sim.model_context.actuator_default_ctrl.repeat(3, 1)
         for phase in ("safe_spawn", "outside_spawn_on_surface"):
             if phase != "safe_spawn":
@@ -87,7 +89,7 @@ def main():
                     mujoco.mj_forward(model, data)
                     feet_xy = data.geom_xpos[sim.model_context.foot_geom_ids.numpy(), :2]
                     heights = sim.get_ground_heights(torch.tensor(feet_xy[None]), torch.tensor([env_id]))
-                    data.qpos[2] = .32 + heights.max().item()
+                    data.qpos[2] = reset_height[env_id].item() + heights.max().item()
                     mujoco.mj_forward(model, data)
             seen = torch.zeros(3, 4, dtype=torch.bool)
             times = []
@@ -104,8 +106,8 @@ def main():
             feet_xy = state.geom_xpos[:, sim.model_context.foot_geom_ids, :2]
             ground_heights = sim.get_ground_heights(feet_xy)
             base_ground = sim.get_ground_heights(state.qpos[:, None, :2])[:, 0]
-            assert torch.all((state.qpos[:, 2] - base_ground > .15)
-                             & (state.qpos[:, 2] - base_ground < .4))
+            assert torch.all((state.qpos[:, 2] - base_ground > target_height * .5)
+                             & (state.qpos[:, 2] - base_ground < target_height * 1.5))
             if phase == "outside_spawn_on_surface":
                 for env_id in (1, 2):
                     assert ground_heights[env_id].max() - ground_heights[env_id].min() > 1e-5
@@ -114,7 +116,6 @@ def main():
                 final_qpos=state.qpos.tolist(), foot_contact_seen=seen.tolist(),
                 final_foot_ground_heights=ground_heights.tolist(),
                 difficulties=[p.difficulty for p in manager.patches],
-                slopes=[p.slope for p in manager.patches],
                 final_foot_normal_force=state.foot_contact_normal_force.tolist(),
                 mean_step_and_state_ms=float(np.mean(times[50:]))))
         # Exercise a real offscreen context before and after env_0 changes terrain.

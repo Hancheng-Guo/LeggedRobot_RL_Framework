@@ -5,7 +5,7 @@ from .registry import (
     register_termination,
 )
 
-from . import state, contact
+from . import state, contact, terrain
 
 
 __all__ = (

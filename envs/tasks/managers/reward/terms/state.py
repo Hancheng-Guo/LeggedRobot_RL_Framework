@@ -3,7 +3,7 @@ import torch
 from .base import BaseRewardTerm
 from .registry import register_reward
 from envs.simulators.utils import ModelContext
-from envs.tasks.utils import TaskContext
+from envs.tasks.utils import TaskContext, validate_height_reference, base_height, mask_ground_signal
 
 
 @register_reward
@@ -66,10 +66,12 @@ class BaseHeightL2(BaseRewardTerm):
         target_height: float,
         std: float = 1.0,
         max_normalized_error: float | None = None,
+        height_reference: str = "ground",
         *args, **kwargs,
     ) -> None:
         
         super().__init__(*args, **kwargs)
+        self.height_reference = validate_height_reference(height_reference)
 
         self.height_qpos_id = int(model_context.base_pos_qpos_ids[2].item())
         self.target_height = target_height
@@ -86,14 +88,14 @@ class BaseHeightL2(BaseRewardTerm):
         task_context: TaskContext
     ) -> torch.Tensor:
         
-        height = task_context.state.qpos[:, self.height_qpos_id]
+        height = base_height(task_context, self.height_qpos_id, self.height_reference)
         normalized_error = (height - self.target_height) / self.std
         if self.max_normalized_error is not None:
             normalized_error = normalized_error.clamp(
                 min=-self.max_normalized_error,
                 max=self.max_normalized_error,
             )
-        return normalized_error.square()
+        return mask_ground_signal(task_context, normalized_error.square(), self.height_reference)
 
 
 @register_reward
@@ -104,10 +106,12 @@ class BaseHeightL2XySpeedWeighted(BaseRewardTerm):
         model_context: ModelContext,
         target_height: float,
         min_speed: float = 0.5,
+        height_reference: str = "ground",
         *args, **kwargs,
     ) -> None:
         
         super().__init__(*args, **kwargs)
+        self.height_reference = validate_height_reference(height_reference)
 
         self.height_qpos_id = int(model_context.base_pos_qpos_ids[2].item())
         self.target_height = target_height
@@ -120,13 +124,13 @@ class BaseHeightL2XySpeedWeighted(BaseRewardTerm):
         task_context: TaskContext
     ) -> torch.Tensor:
         
-        height = task_context.state.qpos[:, self.height_qpos_id]
+        height = base_height(task_context, self.height_qpos_id, self.height_reference)
         height_error_l2 = (height - self.target_height).square()
         xy_speed = torch.linalg.norm(
             task_context.state.qvel[:, self.xy_qvel_ids],
             dim=-1,
         ).clamp_min(self.min_speed)
-        return height_error_l2 / xy_speed
+        return mask_ground_signal(task_context, height_error_l2 / xy_speed, self.height_reference)
 
 
 @register_reward

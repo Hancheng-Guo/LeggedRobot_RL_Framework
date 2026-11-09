@@ -9,17 +9,14 @@ import math
 import hashlib
 import torch
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from copy import deepcopy
-from typing import cast, Any
+from typing import cast, Any, TypeAlias
 
 from envs.simulators.terrain import TerrainBackend, TerrainGeometry, TerrainPatch
 from utils import RuntimeContext
 from .base import BaseRandomizationTerm, RandomizationBackend
 from .registry import register_randomization
-
-
-TERRAIN_TYPES = frozenset({"plane", "slope", "rough"})
 
 
 @dataclass(frozen=True)
@@ -29,7 +26,6 @@ class TerrainAssignment:
     seed: int
     terrain_type: str
     difficulty: float
-    slope: float
     geometry: TerrainPatch
     spawn_size: tuple[float, float]
 
@@ -54,30 +50,61 @@ def terrain_patch_seed(
 
 
 @dataclass(frozen=True)
+class PlaneTerrainConfig:
+    weight: float = 1.0
+
+
+@dataclass(frozen=True)
+class SlopeTerrainConfig:
+    max_slope: float
+    weight: float = 1.0
+
+
+@dataclass(frozen=True)
+class RoughTerrainConfig:
+    max_height: float
+    weight: float = 1.0
+
+
+TerrainTypeConfig: TypeAlias = PlaneTerrainConfig | SlopeTerrainConfig | RoughTerrainConfig
+
+
+@dataclass(frozen=True)
 class TerrainConfig:
     """Shared terrain parameters; lengths are metres and slopes are rise/run.
 
-    ``types`` and ``weights`` describe the per-environment distribution.  A
+    Each type owns its weight and specific parameters. A
     fixed seed overrides the runtime seed; None uses the runtime seed. MuJoCo
     builds these grids as heightfields. Isaac Sim still rejects
     non-plane configurations until its geometry implementation is added.
     """
 
-    types: tuple[str, ...] = ("plane",)
-    weights: tuple[float, ...] = (1.0,)
+    types: dict[str, TerrainTypeConfig] = field(
+        default_factory=lambda: {"plane": PlaneTerrainConfig()})
     patch_size: tuple[float, float] = (4.0, 4.0)
     resolution: float = 0.1
-    max_height: float = 0.0
-    max_slope: float = 0.0
     spawn_margin: float = 0.5
     seed: int | None = None
     difficulty_levels: tuple[float, ...] = (1.0,)
     spawn_size: tuple[float, float] = (0.5, 0.5)
 
 
+    def __eq__(
+        self,
+        other: object,
+    ) -> bool:
+        if not isinstance(other, TerrainConfig):
+            return NotImplemented
+        # Type order defines weighted sampling intervals and must match on restore.
+        return (
+            tuple(self.types) == tuple(other.types)
+            and asdict(self) == asdict(other)
+        )
+
+
     @property
     def is_plane(self) -> bool:
-        return self.types == ("plane",)
+        return len(self.types) == 1 and "plane" in self.types
 
 
     def effective_seed(
@@ -98,8 +125,8 @@ class TerrainConfig:
         if not isinstance(value, Mapping):
             raise TypeError("'terrain' must be a mapping.")
         unknown = set(value) - {
-            "types", "weights", "patch_size", "resolution", "max_height",
-            "max_slope", "spawn_margin", "seed", "difficulty_levels", "spawn_size",
+            "types", "patch_size", "resolution", "spawn_margin",
+            "seed", "difficulty_levels", "spawn_size",
         }
         if unknown:
             raise ValueError(f"Unknown terrain field(s): {sorted(unknown)}.")
@@ -110,18 +137,46 @@ class TerrainConfig:
                 raise TypeError(f"terrain.{name} must be a sequence.")
             return item
 
-        types = tuple(sequence("types", ("plane",)))
-        if not types or any(not isinstance(terrain_type, str) for terrain_type in types):
-            raise ValueError("terrain.types must contain terrain type names.")
-        if len(set(types)) != len(types) or set(types) - TERRAIN_TYPES:
-            raise ValueError(f"terrain.types must be unique members of {sorted(TERRAIN_TYPES)}.")
+        raw_types = value.get("types", {"plane": {}})
+        if not isinstance(raw_types, Mapping):
+            raise TypeError(
+                "terrain.types must be a mapping keyed by terrain type names."
+            )
+        if not raw_types:
+            raise ValueError("terrain.types must contain at least one terrain type.")
 
-        raw_weights = sequence("weights", (1.0,) * len(types))
-        if len(raw_weights) != len(types):
-            raise ValueError("terrain.weights must match terrain.types in length.")
-        weights = tuple(cls._finite_number(item, "weights") for item in raw_weights)
-        if any(weight <= 0 for weight in weights):
-            raise ValueError("terrain.weights must be positive.")
+        types: dict[str, TerrainTypeConfig] = {}
+        for name, params in raw_types.items():
+            if not isinstance(params, Mapping):
+                raise TypeError(f"terrain.types.{name} must be a mapping.")
+
+            weight = cls._finite_number(params.get("weight", 1.0), f"types.{name}.weight")
+            if weight <= 0:
+                raise ValueError(f"terrain.types.{name}.weight must be positive.")
+            allowed = {"weight"}
+            if name == "slope":
+                allowed.add("max_slope")
+            elif name == "rough":
+                allowed.add("max_height")
+            if set(params) - allowed:
+                raise ValueError(
+                    f"Unknown terrain.types.{name} field(s): {sorted(set(params) - allowed)}."
+                )
+
+            if name == "slope":
+                max_slope = cls._finite_number(params.get("max_slope", 0.0), "types.slope.max_slope")
+                if max_slope <= 0:
+                    raise ValueError("terrain.types.slope.max_slope must be positive.")
+                types[name] = SlopeTerrainConfig(max_slope=max_slope, weight=weight)
+            elif name == "rough":
+                max_height = cls._finite_number(params.get("max_height", 0.0), "types.rough.max_height")
+                if max_height <= 0:
+                    raise ValueError("terrain.types.rough.max_height must be positive.")
+                types[name] = RoughTerrainConfig(max_height=max_height, weight=weight)
+            elif name == "plane":
+                types[name] = PlaneTerrainConfig(weight=weight)
+            else:
+                raise ValueError(f"Unsupported terrain type: {name}.")
 
         raw_size = sequence("patch_size", (4.0, 4.0))
         if len(raw_size) != 2:
@@ -131,21 +186,15 @@ class TerrainConfig:
             cls._finite_number(raw_size[1], "patch_size"),
         )
         resolution = cls._finite_number(value.get("resolution", 0.1), "resolution")
-        max_height = cls._finite_number(value.get("max_height", 0.0), "max_height")
-        max_slope = cls._finite_number(value.get("max_slope", 0.0), "max_slope")
         spawn_margin = cls._finite_number(value.get("spawn_margin", 0.5), "spawn_margin")
         if any(length <= 0 for length in patch_size) or resolution <= 0:
             raise ValueError("terrain.patch_size and terrain.resolution must be positive.")
         if min(patch_size) < 2 * resolution:
             raise ValueError("terrain.patch_size must span at least two resolution cells.")
-        if max_height < 0 or max_slope < 0 or spawn_margin < 0:
-            raise ValueError("terrain height, slope, and spawn margin must be non-negative.")
+        if spawn_margin < 0:
+            raise ValueError("terrain.spawn_margin must be non-negative.")
         if 2 * spawn_margin >= min(patch_size):
             raise ValueError("terrain.spawn_margin leaves no interior spawn area.")
-        if "rough" in types and max_height == 0:
-            raise ValueError("terrain.max_height must be positive for rough terrain.")
-        if "slope" in types and max_slope == 0:
-            raise ValueError("terrain.max_slope must be positive for slope terrain.")
 
         seed = value.get("seed")
         if seed is not None and (isinstance(seed, bool) or not isinstance(seed, int) or seed < 0):
@@ -161,8 +210,15 @@ class TerrainConfig:
         if any(size <= 0 or size + 2 * spawn_margin >= length
                for size, length in zip(spawn_size, patch_size)):
             raise ValueError("terrain.spawn_size must fit inside the spawn margin.")
-        return cls(types, weights, patch_size, resolution, max_height, max_slope,
-                   spawn_margin, seed, levels, (spawn_size[0], spawn_size[1]))
+        return cls(
+            types=types,
+            patch_size=patch_size,
+            resolution=resolution,
+            spawn_margin=spawn_margin,
+            seed=seed,
+            difficulty_levels=levels,
+            spawn_size=(spawn_size[0], spawn_size[1]),
+        )
 
 
     @staticmethod
@@ -194,10 +250,13 @@ def generate_terrain_patch(
 
     Resolution is a maximum cell size (ceil(size/resolution) equal cells).
     Rough vertices are independent uniform heights in +/- max_height*difficulty;
-    slope runs along x with a random sign and magnitude <= max_slope*difficulty.
+    slope rises in all four directions outside the spawn area when positive,
+    and falls in all four directions when negative.
     Vertices within one cell of the spawn rectangle are zero, guaranteeing that
     all triangles intersecting that rectangle are flat. Slope resumes outside
-    that plateau. max_slope constrains slope terrain only, not rough gradients.
+    that plateau and returns to zero at the patch perimeter to meet the exterior
+    flat ground. max_slope bounds the sampled coefficient, not the total gradient
+    magnitude of collision triangles, which can combine x and y gradients.
     """
     if (
         isinstance(difficulty_index, bool)
@@ -206,35 +265,70 @@ def generate_terrain_patch(
     ):
         raise ValueError("Invalid terrain difficulty index.")
     seed = terrain_patch_seed(config.effective_seed(runtime_seed), patch_id)
+
     # Normalize before summation to avoid overflowing otherwise valid weights.
-    weights = [weight / max(config.weights) for weight in config.weights]
+    max_weight = max(params.weight for params in config.types.values())
+    weights = [params.weight / max_weight for params in config.types.values()]
     draw = _uniform(seed, "type") * sum(weights)
-    terrain_type = config.types[-1]
+    terrain_type = next(reversed(config.types))
     for name, weight in zip(config.types, weights):
         draw -= weight
         if draw < 0:
             terrain_type = name
             break
     difficulty = config.difficulty_levels[difficulty_index]
-    slope = (2 * _uniform(seed, "slope") - 1) * config.max_slope * difficulty if terrain_type == "slope" else 0.0
     nx, ny = (math.ceil(size / config.resolution) for size in config.patch_size)
     dx, dy = config.patch_size[0] / nx, config.patch_size[1] / ny
     x = tuple(-config.patch_size[0] / 2 + i * dx for i in range(nx + 1))
     y = tuple(-config.patch_size[1] / 2 + j * dy for j in range(ny + 1))
     safe_x, safe_y = config.spawn_size[0] / 2 + dx, config.spawn_size[1] / 2 + dy
-    rows = []
-    for j, py in enumerate(y):
-        row = []
-        for i, px in enumerate(x):
-            height = 0.0
-            if terrain_type == "slope":
-                height = slope * math.copysign(max(0.0, abs(px) - safe_x), px)
-            elif terrain_type == "rough" and (abs(px) > safe_x or abs(py) > safe_y):
-                height = (2 * _uniform(seed, f"height:{j}:{i}") - 1) * config.max_height * difficulty
-            row.append(height)
-        rows.append(tuple(row))
-    return TerrainAssignment(patch_id, seed, terrain_type, difficulty, slope,
-                             TerrainPatch(x, y, tuple(rows)), config.spawn_size)
+
+    rows: list[tuple[float, ...]] = []
+    type_config = config.types[terrain_type]
+
+    if isinstance(type_config, SlopeTerrainConfig):
+        slope = (2 * _uniform(seed, "slope") - 1) * type_config.max_slope * difficulty
+        for py in y:
+            row = []
+            for px in x:
+                distance_from_spawn = max(abs(px) - safe_x, abs(py) - safe_y)
+                distance_to_x_edge = config.patch_size[0] / 2 - abs(px)
+                distance_to_y_edge = config.patch_size[1] / 2 - abs(py)
+                run = max(
+                    0.,
+                    min(distance_from_spawn, distance_to_x_edge, distance_to_y_edge)
+                )
+                row.append(slope * run)
+            rows.append(tuple(row))
+
+    elif isinstance(type_config, RoughTerrainConfig):
+        for j, py in enumerate(y):
+            row = []
+            for i, px in enumerate(x):
+                height = 0.0
+                if (i not in (0, nx) and j not in (0, ny)
+                        and (abs(px) > safe_x or abs(py) > safe_y)):
+                    height = (
+                        (2 * _uniform(seed, f"height:{j}:{i}") - 1)
+                        * type_config.max_height * difficulty
+                    )
+                row.append(height)
+            rows.append(tuple(row))
+
+    elif isinstance(type_config, PlaneTerrainConfig):
+        rows = [tuple(0.0 for _ in x) for _ in y]
+
+    else:
+        raise TypeError(f"Unsupported terrain configuration type: {type(type_config).__name__}.")
+
+    return TerrainAssignment(
+        patch_id=patch_id,
+        seed=seed,
+        terrain_type=terrain_type,
+        difficulty=difficulty,
+        geometry=TerrainPatch(x, y, tuple(rows)),
+        spawn_size=config.spawn_size,
+    )
 
 
 class TerrainAssignments:
@@ -347,7 +441,7 @@ class TerrainAssignments:
 
 
     def state_dict(self) -> dict[str, Any]:
-        return dict(version=1, 
+        return dict(version=5,
                     config=asdict(self.config),
                     seed=self.seed,
                     num_envs=self.num_envs,
@@ -372,7 +466,7 @@ class TerrainAssignments:
         ):
             raise ValueError("Invalid terrain allocation checkpoint schema.")
         if (
-            state.get("version") != 1
+            state.get("version") != 5
             or state.get("num_envs") != self.num_envs
             or state.get("seed") != self.seed
         ):
@@ -460,13 +554,21 @@ class TerrainRandomizationTerm(BaseRandomizationTerm):
     @staticmethod
     def geometry_from_config(config: TerrainConfig) -> TerrainGeometry | None:
         """Declare collision buffers without constructing allocation state."""
-        return None if config.is_plane else TerrainGeometry(
+        if config.is_plane:
+            return None
+        height_bound = 0.0
+        for params in config.types.values():
+            if isinstance(params, RoughTerrainConfig):
+                height_bound = max(height_bound, params.max_height)
+            elif isinstance(params, SlopeTerrainConfig):
+                height_bound = max(height_bound, params.max_slope * config.patch_size[0] / 2)
+        return TerrainGeometry(
             config.patch_size,
             (
                 math.ceil(config.patch_size[1] / config.resolution) + 1,
                 math.ceil(config.patch_size[0] / config.resolution) + 1
             ),
-            max(config.max_height, config.max_slope * config.patch_size[0] / 2),
+            height_bound,
         )
 
     @property

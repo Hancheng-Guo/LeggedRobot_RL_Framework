@@ -3,7 +3,7 @@ import torch
 from .base import BaseObservationTerm
 from .registry import register_observation
 from envs.simulators.utils import ModelContext
-from envs.tasks.utils import TaskContext
+from envs.tasks.utils import TaskContext, validate_height_reference, base_height
 
 
 @register_observation
@@ -56,10 +56,12 @@ class BaseHeight(BaseObservationTerm):
     def __init__(
         self,
         model_context: ModelContext,
+        height_reference: str = "ground",
         *args, **kwargs,
     ) -> None:
         
         super().__init__(*args, **kwargs)
+        self.height_reference = validate_height_reference(height_reference)
         
         self.qpos_id = int(model_context.base_pos_qpos_ids[2].item())
         self.output_dim = 1
@@ -69,7 +71,7 @@ class BaseHeight(BaseObservationTerm):
         self,
         task_context: TaskContext,
     ) -> torch.Tensor:
-        return task_context.state.qpos[:, self.qpos_id:self.qpos_id + 1]
+        return base_height(task_context, self.qpos_id, self.height_reference).unsqueeze(-1)
 
 
 @register_observation

@@ -17,6 +17,9 @@ from envs.simulators.terrain import TerrainGeometry, TerrainPatch
 
 class MujocoTerrain:
 
+    peripheral_width = 1000.0
+    peripheral_geom_names = tuple(f"__framework_terrain_flat_{i}" for i in range(4))
+
     def __init__(
         self,
         geometry: TerrainGeometry,
@@ -77,11 +80,50 @@ class MujocoTerrain:
         floor.pos = self.origin - np.array([0., 0., self.bound])
         # Ignore the old plane's size; dimensions belong to the heightfield.
         floor.size = [0, 0, 0]
+        # Exterior slabs must not inflate automatic camera/clipping and solver scales.
+        local_model = spec.compile()
+        for field in ("center", "extent", "meaninertia", "meanmass", "meansize"):
+            setattr(spec.stat, field, getattr(local_model.stat, field))
+        half_x, half_y = np.asarray(self.geometry.patch_size) / 2
+        width = self.peripheral_width
+        self.outer_half_size = np.array([half_x + width, half_y + width])
+        slabs = (
+            ((-half_x - width / 2, 0), (width / 2, half_y + width)),
+            ((half_x + width / 2, 0), (width / 2, half_y + width)),
+            ((0, -half_y - width / 2), (half_x, width / 2)),
+            ((0, half_y + width / 2), (half_x, width / 2)),
+        )
+        floor_properties = dict(
+            contype=floor.contype,
+            conaffinity=floor.conaffinity,
+            condim=floor.condim,
+            friction=floor.friction,
+            solref=floor.solref,
+            solimp=floor.solimp,
+            solmix=floor.solmix,
+            priority=floor.priority,
+            margin=floor.margin,
+            gap=floor.gap,
+            material=floor.material,
+            rgba=floor.rgba,
+            group=floor.group,
+        )
+        for geom_name, (centre, half_size) in zip(self.peripheral_geom_names, slabs):
+            if spec.geom(geom_name) is not None:
+                raise ValueError(f"Reserved terrain geom name already exists: {geom_name}.")
+            spec.worldbody.add_geom(
+                name=geom_name,
+                type=mujoco.mjtGeom.mjGEOM_BOX,
+                pos=self.origin + np.array([*centre, -.1]),
+                size=[*half_size, .1],
+                **floor_properties,
+            )
         models = [spec.compile() for _ in range(self.num_envs)]
         self.hfield_id = int(models[0].geom_dataid[self.geom_id])
         for model in models:
             # Buffer allocation starts flat; the environment supplies geometry.
-            model.hfield_data[:] = .5
+            start = model.hfield_adr[self.hfield_id]
+            model.hfield_data[start:start + nrow * ncol] = .5
             self.grids.append(np.full((nrow, ncol), self.origin[2], dtype=np.float64))
         return models
 
@@ -132,12 +174,19 @@ class MujocoTerrain:
         grid = self.grids[env_id]
         half = np.asarray(self.geometry.patch_size) / 2
         local = xy - self.origin[:2]
-        if not np.isfinite(local).all() or np.any(np.abs(local) > half + 1e-7):
-            raise ValueError("Ground query lies outside the finite terrain patch or is non-finite.")
+        if not np.isfinite(local).all():
+            raise ValueError("Ground query contains non-finite coordinates.")
+
+        result = np.full(len(xy), self.origin[2], dtype=np.float64)
+        result[np.any(np.abs(local) > self.outer_half_size, axis=1)] = np.nan
+
+        inside = np.all(np.abs(local) <= half, axis=1)
+        local = local[inside]
         uv = (np.clip(local, -half, half) + half) / (2 * half) * np.array([grid.shape[1] - 1, grid.shape[0] - 1])
         i = np.minimum(uv[:, 0].astype(int), grid.shape[1] - 2)
         j = np.minimum(uv[:, 1].astype(int), grid.shape[0] - 2)
         u, v = uv[:, 0] - i, uv[:, 1] - j
         a, b, c, d = grid[j, i], grid[j, i + 1], grid[j + 1, i + 1], grid[j + 1, i]
-        return np.where(u >= v, a + u * (b - a) + v * (c - b),
-                        a + u * (c - d) + v * (d - a))
+        result[inside] = np.where(u >= v, a + u * (b - a) + v * (c - b),
+                                 a + u * (c - d) + v * (d - a))
+        return result

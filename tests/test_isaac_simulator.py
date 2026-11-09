@@ -143,6 +143,34 @@ def test_isaac_sim_is_registered_without_importing_optional_runtime() -> None:
     assert SIM_TYPE_MAP["isaac_sim"] is IsaacSimSimulator
 
 
+@pytest.mark.parametrize('env_ids', [None, torch.tensor([1,0]), torch.empty(0,dtype=torch.long)])
+def test_isaac_ground_state_is_owned_by_backend(tmp_path, runtime_context, monkeypatch, env_ids):
+    simulator, backend = _configure(tmp_path, runtime_context)
+    values = backend.get_state()
+    values.update(
+        base_ground_height=torch.tensor([.2,.7]),
+        foot_ground_heights=torch.tensor([[.1,.3],[.6,.8]]),
+        ground_valid=torch.tensor([True,False]),
+        terrain_in_bounds=torch.tensor([False,True]),
+    )
+    # Exercise the runtime's selection path without starting an Isaac application.
+    runtime = IsaacSimRuntime(runtime_context)
+    monkeypatch.setattr(runtime, '_get_full_state', lambda: values)
+    monkeypatch.setattr(backend, 'get_state', runtime.get_state)
+
+    def unexpected_query(*args, **kwargs):
+        raise AssertionError('The wrapper must not query or recompute ground state')
+
+    monkeypatch.setattr(simulator, '_get_ground_state', unexpected_query)
+    try:
+        state = simulator.get_state(env_ids)
+        for name, value in values.items():
+            expected = value if env_ids is None else value[env_ids]
+            torch.testing.assert_close(getattr(state,name), expected)
+    finally:
+        simulator.close()
+
+
 def test_isaac_maps_named_leg_joints_to_qpos(tmp_path: Path, runtime_context) -> None:
     simulator, _ = _configure(tmp_path, runtime_context)
     simulator.leg_joint_names = ("FL_joint",)
@@ -302,6 +330,8 @@ def test_isaac_sim_forwards_reset_step_state_render_and_close(
     assert backend.step_action is action
     assert backend.step_frame_skip == 10
     assert state.qpos.shape == (1, 9)
+    assert state.base_ground_height is None and state.foot_ground_heights is None
+    assert state.ground_valid is None and state.terrain_in_bounds is None
     assert frame is not None
     assert frame.shape == (4, 6, 3)
     assert backend.closed

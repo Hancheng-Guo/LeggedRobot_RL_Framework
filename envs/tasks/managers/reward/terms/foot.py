@@ -6,7 +6,7 @@ from .base import BaseRewardTerm
 from .registry import register_reward
 from .utils import command_vector
 from envs.simulators.utils import ModelContext
-from envs.tasks.utils import TaskContext
+from envs.tasks.utils import TaskContext, validate_height_reference, foot_heights, mask_ground_signal
 
 
 @register_reward
@@ -373,7 +373,7 @@ class FootSlidingVelocityL2(BaseRewardTerm):
         
         landed = task_context.state.foot_ground_contact
         foot_xvel = task_context.state.geom_xvel[:, self.foot_geom_ids, :]
-        foot_velocity = foot_xvel[..., 3:5]
+        foot_velocity = foot_xvel[..., 3:6]
         return ((foot_velocity * landed.unsqueeze(-1)).square()).mean(dim=(-1, -2))
 
 
@@ -387,10 +387,12 @@ class FootLiftHeightDiffCommandWeightedExp(BaseRewardTerm):
         height_std: float = 0.03,
         command_std: float = 0.5,
         command_names: Sequence[str] = ("lin_vel_x", "lin_vel_y", "ang_vel_z"),
+        height_reference: str = "ground",
         *args, **kwargs,
     ) -> None:
 
         super().__init__(*args, **kwargs)
+        self.height_reference = validate_height_reference(height_reference)
 
         if height_std <= 0.0:
             raise ValueError("'height_std' must be positive.")
@@ -409,7 +411,7 @@ class FootLiftHeightDiffCommandWeightedExp(BaseRewardTerm):
         task_context: TaskContext
     ) -> torch.Tensor:
 
-        foot_height = task_context.state.geom_xpos[:, self.foot_geom_ids, 2]
+        foot_height = foot_heights(task_context, self.foot_geom_ids, self.height_reference)
         height_reward = torch.exp(
             -((foot_height - self.target_height) / self.height_std).square()
         )
@@ -419,7 +421,8 @@ class FootLiftHeightDiffCommandWeightedExp(BaseRewardTerm):
         )
         command_gate = 1.0 - torch.exp(-command_norm / self.command_std)
         swinging = ~task_context.state.foot_ground_contact
-        return (height_reward * command_gate.unsqueeze(-1) * swinging).mean(dim=-1)
+        value = (height_reward * command_gate.unsqueeze(-1) * swinging).mean(dim=-1)
+        return mask_ground_signal(task_context, value, self.height_reference)
 
 
 @register_reward
@@ -431,10 +434,12 @@ class FootLiftHeightDiffCommandGatedL2(BaseRewardTerm):
         target_height: float,
         height_std: float | None = None,
         command_names: Sequence[str] = ("lin_vel_x", "lin_vel_y", "ang_vel_z"),
+        height_reference: str = "ground",
         *args, **kwargs,
     ) -> None:
 
         super().__init__(*args, **kwargs)
+        self.height_reference = validate_height_reference(height_reference)
 
         if (
             not isinstance(target_height, (int, float))
@@ -467,7 +472,7 @@ class FootLiftHeightDiffCommandGatedL2(BaseRewardTerm):
         task_context: TaskContext
     ) -> torch.Tensor:
 
-        foot_height = task_context.state.geom_xpos[:, self.foot_geom_ids, 2]
+        foot_height = foot_heights(task_context, self.foot_geom_ids, self.height_reference)
         height_diff = foot_height - self.target_height
         height_diff_norm = height_diff / self.height_std
         command_norm = torch.linalg.norm(
@@ -480,11 +485,12 @@ class FootLiftHeightDiffCommandGatedL2(BaseRewardTerm):
             torch.ones_like(command_norm)
         )
         swinging = ~task_context.state.foot_ground_contact
-        return (
+        value = (
             height_diff_norm.square() *
             command_gate.unsqueeze(-1) *
             swinging
         ).mean(dim=-1)
+        return mask_ground_signal(task_context, value, self.height_reference)
 
 
 @register_reward

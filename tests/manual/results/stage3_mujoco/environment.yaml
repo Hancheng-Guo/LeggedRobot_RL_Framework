@@ -1,0 +1,2 @@
+max_episode_steps: 200
+num_envs: 8

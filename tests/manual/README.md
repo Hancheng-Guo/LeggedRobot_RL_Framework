@@ -5,6 +5,7 @@
 | 脚本 | 环境 | 用途 |
 | --- | --- | --- |
 | `verify_mujoco_terrain.py` | MuJoCo | 同时运行三类地形上的 Go1，验证安全出生、出生区外接触及局部 reset；见 [阶段 2 验收](results/stage2_mujoco/README.md)。 |
+| `verify_mujoco_terrain_training.py` | MuJoCo | 阶段 3 实际 PPO 短训、非平地诊断初始姿态、信号有限性及更新验证；见 [阶段 3 验收](results/stage3_mujoco/README.md)。 |
 | `record_plane_baseline.py` | MuJoCo / Isaac Sim | 阶段 1 的平地观测、接触、局部 reset 隔离与环境步进基线，输出 JSON；见 [契约与基线](results/stage1_contract.md)。 |
 | `profile_mujoco_state.py` | MuJoCo | 分析 `MujocoSimulator.get_state()` 及各状态字段的耗时占比。 |
 | `benchmark_mujoco_step_threads.py` | MuJoCo | 比较不同环境数和工作线程数的仿真步进吞吐量。 |

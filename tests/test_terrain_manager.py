@@ -1,7 +1,7 @@
 """Exercise terrain decisions through a backend-neutral fake physical interface."""
-from dataclasses import replace, asdict
+from dataclasses import asdict, replace
 from collections.abc import Sequence
-from typing import cast
+from typing import Any, cast
 
 import pytest
 import torch
@@ -48,7 +48,7 @@ class PhysicalBackend:
 
 
 def make_manager(context, num_envs=3):
-    config = TerrainConfig.from_mapping(dict(types=["rough"], max_height=.05,
+    config = TerrainConfig.from_mapping(dict(types={"rough": {"max_height": .05}},
         spawn_size=[1, 1], difficulty_levels=[.25, 1], seed=17))
     manager = TerrainRandomizationTerm(num_envs, context, **asdict(config))
     backend = PhysicalBackend(context, num_envs)
@@ -102,7 +102,7 @@ def test_manager_rejects_invalid_choices_before_backend_mutation(runtime_context
 
 
 def test_manager_validates_spawn_space_without_engine_objects(runtime_context):
-    config = TerrainConfig.from_mapping(dict(types=["rough"], max_height=.05))
+    config = TerrainConfig.from_mapping(dict(types={"rough": {"max_height": .05}}))
     manager = TerrainRandomizationTerm(3, runtime_context, **asdict(config))
     backend = PhysicalBackend(runtime_context)
     backend.measured = replace(backend.measured, collision_upper=(.4, .1, .2))
@@ -123,7 +123,7 @@ def test_legacy_plane_does_not_measure_allocate_or_move_spawn(runtime_context):
 
 def test_task_randomization_owns_policy_and_preserves_unchanged_configuration(runtime_context, model_context):
     task = BaseTaskLogic(runtime_context)
-    config = {"terms": {"terrain": dict(types=["rough"], max_height=.05, spawn_size=[1, 1])}}
+    config: dict[str, Any] = {"terms": {"terrain": dict(types={"rough": {"max_height": .05}}, spawn_size=[1, 1])}}
     task.prepare({"randomization_manager_config": config})
     assert not hasattr(task, "randomization_manager")
     assert task.get_simulator_requirements()["terrain_geometry"] is not None
@@ -148,7 +148,7 @@ def test_task_randomization_owns_policy_and_preserves_unchanged_configuration(ru
     task.after_simulator_reset(torch.tensor([1]))
     patches = terrain.patches
     # Explicit default weights and omitted weights describe the same policy.
-    config["terms"]["terrain"]["weights"] = [1]
+    config["terms"]["terrain"]["types"]["rough"]["weight"] = 1
     task.prepare({"randomization_manager_config": config})
     build_task()
     assert task.randomization_manager is manager
@@ -157,10 +157,10 @@ def test_task_randomization_owns_policy_and_preserves_unchanged_configuration(ru
 
 
 def test_manager_configuration_matching_uses_effective_term_values(runtime_context):
-    terms = {"terrain": dict(types=["rough"], max_height=.05, spawn_size=[1, 1])}
+    terms = {"terrain": dict(types={"rough": {"max_height": .05}}, spawn_size=[1, 1])}
     manager = RandomizationManager(3, runtime_context, terms=terms)
     assert manager.matches_config(3, terms=terms)
-    changed = {"terrain": dict(terms["terrain"], max_height=.1)}
+    changed = {"terrain": dict(terms["terrain"], types={"rough":{"max_height":.1}})}
     assert not manager.matches_config(3, terms=changed)
     assert not manager.matches_config(4, terms=terms)
     assert not manager.matches_config(3)
@@ -172,12 +172,12 @@ def test_layout_declaration_does_not_construct_randomization_terms(monkeypatch):
 
     monkeypatch.setattr(TerrainRandomizationTerm, "__init__", unexpected_construction)
     monkeypatch.setattr(RandomizationManager, "__init__", unexpected_construction)
-    config = {"terrain": dict(types=["rough"], max_height=.05, spawn_size=[1, 1])}
+    config = {"terrain": dict(types={"rough": {"max_height": .05}}, spawn_size=[1, 1])}
     requirements = RandomizationManager.get_simulator_requirements(terms=config)
     assert requirements["terrain_geometry"] is not None
 
 
-@pytest.mark.parametrize("terms", [{"friction_typo": {}}, {"terrain": {"types": ["unknown"]}}])
+@pytest.mark.parametrize("terms", [{"friction_typo": {}}, {"terrain": {"types": {"unknown":{}}}}])
 def test_task_randomization_rejects_invalid_terms(runtime_context, terms):
     with pytest.raises(ValueError):
         RandomizationManager(3, runtime_context, terms=terms)
@@ -235,7 +235,7 @@ def test_registry_dispatch_and_rollback_across_terms(runtime_context, monkeypatc
             events.append("abort")
 
     monkeypatch.setitem(RANDOMIZATION_CLASS_MAP, "probe", Probe)
-    terrain = dict(types=["rough"], max_height=.05, spawn_size=[1, 1])
+    terrain = dict(types={"rough": {"max_height": .05}}, spawn_size=[1, 1])
     terms = {"terrain": terrain, "probe": {"value": 7, "fail": True}}
     assert RandomizationManager.get_simulator_requirements(terms)["probe_resource"] == 7
     manager = RandomizationManager(3, runtime_context, terms)

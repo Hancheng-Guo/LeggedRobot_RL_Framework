@@ -1,10 +1,18 @@
 import torch
 from typing import Any
+from copy import deepcopy
+from functools import partial
 from collections.abc import Mapping
 
 from .terms import BaseCommandTerm, get_command_class
 from .playback import PlaybackCommandSource, PlaybackCommands
 from .constraints import CommandConstraintSet
+from .curriculum import curriculum_reference
+from envs.tasks.managers.curriculum.types import (
+    ContinuousDimensionConfig,
+    CurriculumSpaceConfig,
+    CurriculumSpaceConfigs,
+)
 from envs.simulators.utils import ModelContext
 from envs.tasks.utils import TaskContext
 from envs.tasks.managers.curriculum import (
@@ -15,6 +23,68 @@ from utils import RuntimeContext
 
 
 class CommandManager:
+
+    @classmethod
+    def get_curriculum_space_config(
+        cls,
+        config: Mapping[str, Any] | None,
+    ) -> CurriculumSpaceConfigs:
+
+        config = config if config is not None else {"terms": {}}
+        command_terms = config.get("terms")
+        if not isinstance(command_terms, dict):
+            raise ValueError("Command manager must define 'terms'.")
+
+        dimensions: dict[str, dict[str, ContinuousDimensionConfig]] = {}
+        term_curricula: dict[str, str] = {}
+        for term_name, term_config in command_terms.items():
+
+            if not isinstance(term_config, dict):
+                raise TypeError(
+                    f"Config of command term '{term_name}' must be a dict."
+                )
+
+            type_name = term_config.get("type")
+            if not isinstance(type_name, str):
+                raise ValueError(
+                    f"'type' is missing for command term '{term_name}'."
+                )
+
+            params = term_config.get("params", {})
+            if params is None:
+                params = {}
+            if not isinstance(params, dict):
+                raise TypeError(
+                    f"'params' of command term '{term_name}' must be a dict."
+                )
+
+            curriculum_name = curriculum_reference(get_command_class(type_name), params)
+            if curriculum_name is None:
+                continue
+
+            if "min_value" not in params or "max_value" not in params:
+                raise ValueError(f"Command term '{term_name}' requires min_value and max_value.")
+
+            curriculum_dimensions = dimensions.setdefault(curriculum_name, {})
+            curriculum_dimensions[term_name] = ContinuousDimensionConfig(
+                min_value=params["min_value"],
+                max_value=params["max_value"],
+                num_cell=params.get("num_cell", 1),
+                dim=params.get("dim", 1),
+            )
+            term_curricula[term_name] = curriculum_name
+
+        constraints = CommandConstraintSet(set(command_terms), config.get("constraints"))
+        constraints.validate_curricula(term_curricula)
+        return {
+            curriculum_name: CurriculumSpaceConfig(
+                dimensions=dict(curriculum_dimensions),
+                filters=(partial(constraints.filter, target_names=set(curriculum_dimensions)),),
+                source_config={"command": deepcopy(dict(config))},
+            )
+            for curriculum_name, curriculum_dimensions in dimensions.items()
+        }
+
 
     def __init__(
         self,
@@ -132,7 +202,8 @@ class CommandManager:
                 )
 
             cls = get_command_class(type_name)
-            term_kwargs = self._get_term_kwargs(cls, name, *args, **kwargs)
+            params = dict(params)
+            term_kwargs = self._get_term_kwargs(cls, name, params, *args, **kwargs)
 
             self.terms[name] = cls(
                 num_envs=self.num_envs,
@@ -147,30 +218,32 @@ class CommandManager:
         self,
         cls: type[BaseCommandTerm],
         name: str,
+        params: dict[str, Any],
         *args, **kwargs,
     ) -> dict[str, Any]:
 
         term_kwargs: dict[str, Any] = {}
-        curriculum_term_name = getattr(cls, "curriculum_term_name", None)
+        curriculum_name = curriculum_reference(cls, params)
 
-        if curriculum_term_name is not None:
+        if curriculum_name is not None:
 
-            curriculum_manager = kwargs.pop("curriculum_manager")
+            params.pop("curriculum")
+            curriculum_manager = kwargs.pop("curriculum_manager", None)
             if not isinstance(curriculum_manager, CurriculumTermProvider):
                 raise ValueError(
                     f"Command term '{name}' requires a "
                     "curriculum term provider."
                 )
-            
+
             curriculum_term = curriculum_manager.get_term(
-                curriculum_term_name
+                curriculum_name
             )
             if not isinstance(curriculum_term, CommandCurriculumSampler):
                 raise TypeError(
-                    f"Curriculum term '{curriculum_term_name}' "
+                    f"Curriculum term '{curriculum_name}' "
                     "does not provide command sampling."
                 )
-            
+
             term_kwargs["curriculum_sampler"] = curriculum_term
             term_kwargs["term_name"] = name
 

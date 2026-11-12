@@ -14,12 +14,12 @@ stage:
   - standing:
       max_iterations: 10
       transition:
-        - {metric: "rollout/mean_len", method: mean, operator: ">=", threshold: 2.0, window: 1}
+        - {metric: rollout/mean_len, method: mean, operator: ">=", threshold: 2.0, window: 1}
 
   - velocity_tracking:
       max_iterations: 10
       transition:
-        - {metric: "rollout/mean_len", method: mean, operator: ">=", threshold: 2.0, window: 1}
+        - {metric: rollout/mean_len, method: mean, operator: ">=", threshold: 2.0, window: 1}
 
 
 component:

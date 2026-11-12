@@ -84,6 +84,11 @@ class BaseEnv(ABC):
         return {}
 
 
+    def set_training_mode(self, training: bool) -> None:
+        """Let task policies distinguish learning from evaluation."""
+        pass
+
+
     def load_checkpoint_state_dict(
         self,
         state: Mapping[str, Any],

@@ -9,6 +9,7 @@ import torch
 from envs.simulators.terrain import TerrainPatch, TerrainSpawnGeometry
 from envs.tasks.managers.randomization.terms.terrain import TerrainConfig, TerrainRandomizationTerm
 from envs.tasks import BaseTaskLogic
+from envs.tasks.locomotion import LocomotionTaskLogic
 from envs.tasks.managers.randomization import RandomizationManager
 from utils import Component
 
@@ -122,9 +123,9 @@ def test_legacy_plane_does_not_measure_allocate_or_move_spawn(runtime_context):
 
 
 def test_task_randomization_owns_policy_and_preserves_unchanged_configuration(runtime_context, model_context):
-    task = BaseTaskLogic(runtime_context)
+    task = LocomotionTaskLogic(runtime_context)
     config: dict[str, Any] = {"terms": {"terrain": dict(types={"rough": {"max_height": .05}}, spawn_size=[1, 1])}}
-    task.prepare({"randomization_manager_config": config})
+    task.prepare(config={"randomization_manager_config": config})
     assert not hasattr(task, "randomization_manager")
     assert task.get_simulator_requirements()["terrain_geometry"] is not None
 
@@ -132,6 +133,8 @@ def test_task_randomization_owns_policy_and_preserves_unchanged_configuration(ru
         task.config_update(Component(None, None, None, None, None, None),
             num_envs=3, model_context=model_context, constants={},
             randomization_manager_config=config,
+            task_state_manager_config={},
+            curriculum_manager_config={"terms": {}}, event_manager_config={},
             action_manager_config={"terms": {}}, command_manager_config={"terms": {}},
             observation_manager_config={"terms": {"base_height": {}}}, reward_manager_config={"terms": {}},
             termination_manager_config={"terms": {}})
@@ -141,7 +144,7 @@ def test_task_randomization_owns_policy_and_preserves_unchanged_configuration(ru
     terrain = cast(TerrainRandomizationTerm, manager.terms["terrain"])
     assert terrain.geometry == task.get_simulator_requirements()["terrain_geometry"]
     backend = PhysicalBackend(runtime_context)
-    task.bind(backend)
+    task.bind(simulator=backend)
     task.before_simulator_reset(torch.tensor([1]))
     assert not any(isinstance(event, tuple) and event[0] == "reset" for event in backend.events)
     backend.reset(torch.tensor([1]))
@@ -149,11 +152,38 @@ def test_task_randomization_owns_policy_and_preserves_unchanged_configuration(ru
     patches = terrain.patches
     # Explicit default weights and omitted weights describe the same policy.
     config["terms"]["terrain"]["types"]["rough"]["weight"] = 1
-    task.prepare({"randomization_manager_config": config})
+    task.prepare(config={"randomization_manager_config": config})
     build_task()
     assert task.randomization_manager is manager
     assert terrain.patches == patches
     assert [event[0] for event in backend.events if isinstance(event, tuple)].count("reset") == 1
+
+
+def test_base_task_has_no_randomization_dependency(runtime_context, model_context, monkeypatch):
+    def unexpected_construction(*args, **kwargs):
+        raise AssertionError("BaseTask must not construct a randomization manager")
+
+    monkeypatch.setattr(RandomizationManager, "__init__", unexpected_construction)
+    task = BaseTaskLogic(runtime_context)
+    task.prepare(config={})
+    task.config_update(
+        Component(None, None, None, None, None, None), num_envs=3,
+        model_context=model_context, constants={},
+        task_state_manager_config={},
+        action_manager_config={"terms": {}}, command_manager_config={"terms": {}},
+        observation_manager_config={"terms": {"base_height": {}}},
+        reward_manager_config={"terms": {}}, termination_manager_config={"terms": {}},
+    )
+    assert not hasattr(task, "randomization_manager")
+    assert task.get_simulator_requirements() == {}
+    assert not hasattr(task, "CURRICULUM_SPACE_PROVIDERS")
+    assert LocomotionTaskLogic.CURRICULUM_SPACE_PROVIDERS["randomization_manager_config"] is RandomizationManager
+    backend = PhysicalBackend(runtime_context)
+    task.bind(simulator=backend)
+    task.before_simulator_reset()
+    task.after_simulator_reset()
+    task.abort_simulator_reset()
+    assert backend.events == []
 
 
 def test_manager_configuration_matching_uses_effective_term_values(runtime_context):

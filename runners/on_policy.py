@@ -346,6 +346,7 @@ class OnPolicyRunner(BaseRunner):
             raise RuntimeError("'rollout_length' is missing.")
 
         self.algorithm.set_train_mode()
+        self.environment.set_training_mode(True)
         if self._checkpoint_environment_snapshot is not None:
             self.environment.load_checkpoint_state_dict(self._checkpoint_environment_snapshot)
             self._checkpoint_environment_snapshot = None
@@ -554,6 +555,7 @@ class OnPolicyRunner(BaseRunner):
             raise RuntimeError("algorithm is not instantiated.")
 
         self.algorithm.set_eval_mode()
+        self.environment.set_training_mode(False)
         obs = self.environment.reset()
 
         if not self._run_callbacks(
@@ -754,6 +756,7 @@ class OnPolicyRunner(BaseRunner):
             raise RuntimeError("algorithm is not instantiated.")
 
         self.algorithm.set_eval_mode()
+        self.environment.set_training_mode(False)
         if session is not None:
             session.poll()
         obs = self.environment.reset()

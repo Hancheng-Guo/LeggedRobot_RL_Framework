@@ -5,7 +5,7 @@ from .registry import (
     register_curriculum,
 )
 
-from . import command
+from . import reward
 
 
 __all__ = (

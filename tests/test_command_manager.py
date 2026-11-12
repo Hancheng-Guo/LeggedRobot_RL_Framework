@@ -11,11 +11,11 @@ def make_manager(runtime_context, model_context):
         model_context=model_context,
         terms={
             "x": {
-                "type": "UniformOnReset",
+                "type": "Uniform",
                 "params": {"min_value": 2.0, "max_value": 2.0},
             },
             "y": {
-                "type": "UniformOnReset",
+                "type": "Uniform",
                 "params": {"min_value": 10.0, "max_value": 10.0},
             },
         },
@@ -73,7 +73,7 @@ def test_multidimensional_command_uses_shared_range_and_constraint(
         model_context=model_context,
         terms={
             "foot_phase": {
-                "type": "UniformOnReset",
+                "type": "Uniform",
                 "params": {
                     "dim": 4,
                     "min_value": -1.0,
@@ -135,7 +135,7 @@ def test_command_constraint_operators(
         model_context=model_context,
         terms={
             "x": {
-                "type": "UniformOnReset",
+                "type": "Uniform",
                 "params": {
                     "min_value": initial_value,
                     "max_value": initial_value,
@@ -175,7 +175,7 @@ def test_not_equal_constraint_rejects_invalid_direction(
             model_context=model_context,
             terms={
                 "x": {
-                    "type": "UniformOnReset",
+                    "type": "Uniform",
                     "params": {"min_value": 0.0, "max_value": 1.0},
                 },
             },

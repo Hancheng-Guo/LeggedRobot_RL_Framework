@@ -2,6 +2,7 @@ import pytest
 import torch
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import app.stage_manager as stage_manager_module
 from app.stage_manager import StageManager, StageTrainResult
@@ -196,29 +197,19 @@ def test_stage_callback_tracks_multiple_explicit_conditions() -> None:
     assert callback.stop_training
 
 
-CELL_PREFIX = "curriculum/test/motion/"
+CELL_PREFIX = "curriculum/test/"
 
 
 def make_cell_callback(window=2, **overrides):
     config = {
         "metric": CELL_PREFIX + "reward_min",
-        "sample_on_update": True,
-        "require_all_cells_valid": True,
+        "revision_metric": CELL_PREFIX + "statistics_revision",
+        "validity_metric": CELL_PREFIX + "all_cells_valid",
         "method": "min", "operator": ">=", "threshold": 2.0,
         "window": window,
     }
     config.update(overrides)
-    callback = StageCallback(condition=[config])
-    manager = SimpleNamespace(get_metric_names=lambda: {
-        CELL_PREFIX + name for name in (
-            "reward_min", "reward_max", "reward_mean", "reward_std",
-            "statistics_revision", "all_cells_valid", "coverage",
-        )
-    })
-    callback.set_runner(SimpleNamespace(
-        environment=SimpleNamespace(task=SimpleNamespace(curriculum_manager=manager)),
-    ))
-    return callback
+    return StageCallback(condition=[config])
 
 
 def cell_info(revision=1, value=3.0, valid=1):
@@ -295,12 +286,12 @@ def test_stage_missing_required_control_metric_raises(key):
 
 @pytest.mark.parametrize("require_valid", [False, True])
 def test_stage_missing_primary_metric_raises_only_after_validity_check(require_valid):
-    callback = make_cell_callback(require_all_cells_valid=require_valid)
+    callback = make_cell_callback(validity_metric=CELL_PREFIX + "all_cells_valid" if require_valid else None)
     callback._on_step_end(cell_info())
     incomplete = cell_info(revision=2)
     del incomplete[CELL_PREFIX + "reward_min"]
     if require_valid:
-        with pytest.raises(KeyError, match="reward_min.*all_cells_valid being 1"):
+        with pytest.raises(KeyError, match="reward_min.*validity metric.*being 1"):
             callback._on_step_end(incomplete)
     else:
         callback._on_step_end(incomplete)
@@ -309,7 +300,7 @@ def test_stage_missing_primary_metric_raises_only_after_validity_check(require_v
 
 
 def test_stage_waits_for_first_cell_evaluation_without_validity_gate():
-    callback = make_cell_callback(require_all_cells_valid=False)
+    callback = make_cell_callback(validity_metric=None)
     initial = cell_info(revision=0, valid=0)
     del initial[CELL_PREFIX + "reward_min"]
     callback._on_step_end(initial)
@@ -348,11 +339,41 @@ def test_stage_control_metrics_must_be_scalar(key):
         callback._on_step_end(info)
 
 
-@pytest.mark.parametrize("key", ["sample_on_update", "require_all_cells_valid"])
-@pytest.mark.parametrize("value", [None, "", 1, "true"])
-def test_stage_curriculum_options_must_be_boolean(key, value):
-    with pytest.raises(TypeError, match=key + ".*bool"):
+@pytest.mark.parametrize("key", ["revision_metric", "validity_metric"])
+@pytest.mark.parametrize("value", ["", 1, True, [], {}])
+def test_stage_control_references_must_be_nonempty_strings(key, value):
+    with pytest.raises(TypeError, match=key + ".*non-empty string"):
         make_cell_callback(**{key: value})
+
+
+@pytest.mark.parametrize("key", ["revision_metric", "validity_metric"])
+def test_stage_control_references_reject_wildcards(key):
+    overrides: dict[str, Any] = {key: "batch/*"}
+    with pytest.raises(ValueError, match=key + ".*exact metric name"):
+        make_cell_callback(**overrides)
+
+
+@pytest.mark.parametrize("key", ["sample_on_update", "require_all_cells_valid"])
+def test_stage_rejects_removed_curriculum_options(key):
+    with pytest.raises(ValueError, match="optional fields: revision_metric, validity_metric"):
+        make_cell_callback(**{key: True})
+
+
+@pytest.mark.parametrize("value", [-1, 0.5, 2, float("nan"), float("inf")])
+def test_stage_invalid_validity_does_not_change_window_or_revision(value):
+    callback = make_cell_callback()
+    callback._on_step_end(cell_info())
+    with pytest.raises(ValueError, match="validity metric.*boolean or 0/1"):
+        callback._on_step_end(cell_info(revision=2, valid=value))
+    assert list(callback._conditions[0].values) == [3.0]
+    assert callback._conditions[0].last_revision == 1
+
+
+@pytest.mark.parametrize("value", [True, False, 0, 1, 0.0, 1.0])
+def test_stage_validity_accepts_boolean_or_binary_number(value):
+    callback = make_cell_callback(window=1)
+    callback._on_step_end(cell_info(valid=value))
+    assert callback.stop_training is bool(value)
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf")])
@@ -387,8 +408,11 @@ def test_stage_restore_discards_gated_windows_but_keeps_ordinary_windows():
 
 
 @pytest.mark.parametrize("sample,validity", [(True, True), (True, False), (False, True)])
-def test_stage_restores_curriculum_window_with_environment(sample, validity):
-    options = {"sample_on_update": sample, "require_all_cells_valid": validity}
+def test_stage_restores_controlled_window_with_environment(sample, validity):
+    options = {
+        "revision_metric": CELL_PREFIX + "statistics_revision" if sample else None,
+        "validity_metric": CELL_PREFIX + "all_cells_valid" if validity else None,
+    }
     callback = make_cell_callback(window=3, **options)
     callback._on_step_end(cell_info(revision=7))
     restored = make_cell_callback(window=3, **options)
@@ -449,6 +473,29 @@ def test_stage_rejects_invalid_checkpoint_revision(revision):
         make_cell_callback().load_checkpoint_state_dict(state, environment_restored=True)
 
 
+@pytest.mark.parametrize("key", ["metric", "revision_metric", "validity_metric"])
+@pytest.mark.parametrize("environment_restored", [False, True])
+def test_stage_checkpoint_metric_references_must_match(key, environment_restored):
+    source = make_cell_callback()
+    source._on_step_end(cell_info())
+    overrides: dict[str, Any] = {key: "different_metric"}
+    restored = make_cell_callback(**overrides)
+    before = restored.checkpoint_state_dict()
+    with pytest.raises(ValueError, match="metric references do not match"):
+        restored.load_checkpoint_state_dict(
+            source.checkpoint_state_dict(), environment_restored=environment_restored,
+        )
+    assert restored.checkpoint_state_dict() == before
+
+
+def test_stage_checkpoint_requires_explicit_metric_metadata():
+    callback = make_cell_callback()
+    state = callback.checkpoint_state_dict()
+    del state["condition_metrics"]
+    with pytest.raises(ValueError, match="metric references do not match"):
+        callback.load_checkpoint_state_dict(state, environment_restored=True)
+
+
 def test_stage_restores_completed_curriculum_condition():
     callback = make_cell_callback(window=1)
     callback._on_step_end(cell_info(revision=4))
@@ -460,54 +507,56 @@ def test_stage_restores_completed_curriculum_condition():
     assert restored._conditions[0].last_revision == 4
 
 
-@pytest.mark.parametrize("optional", ["sample_on_update", "require_all_cells_valid"])
+@pytest.mark.parametrize("optional", ["revision_metric", "validity_metric"])
 def test_stage_control_options_can_be_used_independently(optional):
     config = {
         "metric": CELL_PREFIX + "reward_min", "method": "min",
         "operator": ">=", "threshold": 2.0, "window": 2,
-        optional: True,
+        optional: CELL_PREFIX + ("statistics_revision" if optional == "revision_metric" else "all_cells_valid"),
     }
     callback = StageCallback(condition=[config])
     info = cell_info()
     callback._on_step_end(info)
     callback._on_step_end(info)
-    assert callback.stop_training is (optional == "require_all_cells_valid")
-    if optional == "sample_on_update":
+    assert callback.stop_training is (optional == "validity_metric")
+    if optional == "revision_metric":
         callback._on_step_end(cell_info(revision=2))
         assert callback.stop_training
 
 
-@pytest.mark.parametrize("metric", [
-    "reward", "reward/action_diff_l2", "curriculum/test/reward_min",
-    "curriculum//motion/reward_min", "curriculum/test//reward_min",
-])
-def test_stage_enabled_curriculum_options_require_explicit_group(metric):
-    with pytest.raises(ValueError, match="curriculum options require"):
-        make_cell_callback(metric=metric)
-
-
-def test_stage_disabled_curriculum_options_allow_ordinary_metrics():
+@pytest.mark.parametrize("metric", ["score", "reward/action_diff_l2", "custom/nested/score"])
+def test_stage_controls_accept_any_metric_path(metric):
     callback = make_cell_callback(
-        metric="reward", sample_on_update=False, require_all_cells_valid=False,
+        metric=metric, revision_metric="batch_version", validity_metric="ready",
     )
+    callback._on_train_start()
+    callback._on_step_end({metric: 3.0, "batch_version": 1, "ready": True})
+    callback._on_step_end({metric: 3.0, "batch_version": 1, "ready": True})
+    assert list(callback._conditions[0].values) == [3.0]
+    callback._on_step_end({metric: 3.0, "batch_version": 2, "ready": True})
+    assert callback.stop_training
+
+
+def test_stage_absent_control_references_allow_ordinary_metrics():
+    callback = make_cell_callback(metric="reward", revision_metric=None, validity_metric=None)
     callback._on_step_end({"reward": 3.0})
     callback._on_step_end({"reward": 3.0})
     assert callback.stop_training
 
 
-def test_stage_binds_controls_only_to_the_metric_group():
+def test_stage_binds_controls_only_to_the_metric_instance():
     callback = make_cell_callback()
     callback._on_step_end(cell_info())
     foreign = {
-        "curriculum/test/other/statistics_revision": torch.tensor(2),
-        "curriculum/test/other/all_cells_valid": torch.tensor(1),
+        "curriculum/other/statistics_revision": torch.tensor(2),
+        "curriculum/other/all_cells_valid": torch.tensor(1),
     }
     with pytest.raises(KeyError, match=CELL_PREFIX + "statistics_revision"):
         callback._on_step_end({CELL_PREFIX + "reward_min": torch.tensor(3.0)} | foreign)
     assert list(callback._conditions[0].values) == [3.0]
     assert not callback.stop_training
-    foreign["curriculum/test/other/all_cells_valid"] = torch.tensor(0)
-    # Start a fresh window so this test can verify the other group's false gate
+    foreign["curriculum/other/all_cells_valid"] = torch.tensor(0)
+    # Start a fresh window so this test can verify the other instance's false gate
     # does not block the correctly bound, valid control metrics.
     callback._on_train_start()
     callback._on_step_end(cell_info(revision=2) | foreign)
@@ -518,7 +567,7 @@ def test_stage_binds_controls_only_to_the_metric_group():
 
 @pytest.mark.parametrize("metric", [
     "*/loss", "reward/*", "reward/a?", "reward/[abc]",
-    CELL_PREFIX + "reward_*", "curriculum/*/motion/reward_min",
+    CELL_PREFIX + "reward_*", "curriculum/*/reward_min",
 ])
 def test_stage_rejects_wildcard_metric_names(metric):
     with pytest.raises(ValueError, match="exact metric name.*wildcards"):
@@ -540,24 +589,27 @@ def test_stage_keeps_separate_windows_for_explicit_curriculum_metrics():
     assert callback.stop_training
 
 
-@pytest.mark.parametrize("metric", [
-    "curriculum/typo/motion/reward_min", "curriculum/test/typo/reward_min",
-    CELL_PREFIX + "reward_mni", CELL_PREFIX + "missing_metric",
-])
-@pytest.mark.parametrize("enabled", [False, True])
-def test_stage_rejects_unknown_curriculum_metrics_before_training(metric, enabled):
-    callback = make_cell_callback(
-        metric=metric, sample_on_update=enabled, require_all_cells_valid=enabled,
-    )
-    with pytest.raises(KeyError, match="not a supported metric"):
-        callback._on_train_start()
+@pytest.mark.parametrize("metric", ["unknown", "curriculum/test/typo"])
+def test_stage_waits_until_related_data_arrives(metric):
+    callback = make_cell_callback(metric=metric)
+    callback._on_train_start()
+    callback._on_step_end({"unrelated": 100.0})
+    assert not callback._conditions[0].values
+    with pytest.raises(KeyError, match="missing despite validity metric"):
+        callback._on_step_end(cell_info())
 
 
-def test_stage_requires_curriculum_manager_before_training():
+def test_stage_does_not_access_task_or_curriculum_manager():
     callback = make_cell_callback()
-    callback.set_runner(SimpleNamespace(environment=SimpleNamespace(task=SimpleNamespace())))
-    with pytest.raises(ValueError, match="curriculum manager"):
-        callback._on_train_start()
+    class Runner:
+        @property
+        def environment(self):
+            raise AssertionError("Scalar conditions must not inspect the environment.")
+    callback.set_runner(Runner())
+    callback._on_train_start()
+    callback._on_step_end(cell_info())
+    callback._on_step_end(cell_info(revision=2))
+    assert callback.stop_training
 
 
 def test_stage_restores_explicit_condition_windows_separately():
@@ -579,7 +631,7 @@ def test_stage_restores_explicit_condition_windows_separately():
 def test_stage_checkpoint_values_require_metric_names():
     callback = make_callback(window=3)
     with pytest.raises(TypeError, match="must map metric names"):
-        callback.load_checkpoint_state_dict({"condition_values": [[1.0, 2.0]], "stop_training": False})
+        callback.load_checkpoint_state_dict(callback.checkpoint_state_dict() | {"condition_values": [[1.0, 2.0]]})
 
 
 def test_runner_records_callback_that_requests_stop(

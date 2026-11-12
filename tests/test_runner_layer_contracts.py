@@ -113,7 +113,9 @@ def test_restore_mode_controls_optimizer_and_callback_history(
         set_train_mode=lambda: None,
         load_checkpoint_state_dict=lambda state, load_optimizer: restored_optimizer.append(load_optimizer),
     ))
-    runner.environment = cast(BaseEnv, SimpleNamespace(num_envs=1, reset=lambda: torch.zeros(1, 1)))
+    runner.environment = cast(BaseEnv, SimpleNamespace(
+        num_envs=1, reset=lambda: torch.zeros(1, 1), set_training_mode=lambda training: None,
+    ))
     monkeypatch.setattr(runner, "_build_environment", lambda **kwargs: None)
     monkeypatch.setattr(runner, "_build_algorithm", lambda **kwargs: None)
     transition = [{"metric": "score", "method": "mean", "operator": ">=",
@@ -128,6 +130,8 @@ def test_restore_mode_controls_optimizer_and_callback_history(
         "callbacks": [{"type": "StageCallback", "state": {
             "stop_training": False,
             "condition_values": [{"score": [7.0, 9.0]}],
+            "condition_metrics": [{"metric": "score", "revision_metric": None, "validity_metric": None}],
+            "condition_revisions": [None],
         }}],
     }}, path)
     runner.prepare_checkpoint_load(path)
@@ -180,6 +184,7 @@ def test_stage_training_after_evaluation_rebuilds_completion_callback(
     obs = torch.zeros(1, 1)
     runner.environment = cast(BaseEnv, SimpleNamespace(
         num_envs=1, reset=lambda: obs, close=lambda: None,
+        set_training_mode=lambda training: None,
         checkpoint_state_dict=lambda: {},
         load_checkpoint_state_dict=lambda state: None,
         has_playback_render_mode=lambda: False,
@@ -232,6 +237,8 @@ def test_save_after_restore_preserves_completed_stage(
 ) -> None:
     callbacks = [{"type": "StageCallback", "state": {
         "stop_training": True, "condition_values": [{"score": [1.0]}],
+        "condition_metrics": [{"metric": "score", "revision_metric": None, "validity_metric": None}],
+        "condition_revisions": [None],
     }}]
     source = tmp_path / "source.pt"
     torch.save({"runner": {

@@ -6,7 +6,7 @@ from envs.tasks.utils import TaskContext
 
 
 @register_command
-class UniformOnReset(BaseCommandTerm):
+class Uniform(BaseCommandTerm):
 
     def __init__(
         self,

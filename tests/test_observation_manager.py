@@ -184,7 +184,7 @@ def test_task_exposes_gait_phase_without_reward(runtime_context, model_context):
         command_manager_config={
             "terms": {
                 name: {
-                    "type": "UniformOnReset",
+                    "type": "Uniform",
                     "params": {"min_value": 0.0, "max_value": 0.0},
                 }
                 for name in ("lin_vel_x", "lin_vel_y", "ang_vel_z")

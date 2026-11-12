@@ -1,0 +1,58 @@
+{
+  "date": "2026-11-11",
+  "scope": "One independent sampling space per curriculum instance; no group layer.",
+  "mujoco_core": {
+    "passed": 1105,
+    "skipped": 11,
+    "deselected": 47
+  },
+  "isaac_core": {
+    "passed": 1041,
+    "skipped": 11,
+    "deselected": 111
+  },
+  "pyright": {
+    "mujoco_errors": 0,
+    "isaac_errors": 0
+  },
+  "real_ppo": {
+    "joint_instance": {
+      "source_output_dir": "temp\\single_space_ppo_20261111",
+      "passed": true,
+      "num_envs": 4,
+      "rollout_length": 64,
+      "episode_steps": 32,
+      "evaluation_statistics_frozen": true,
+      "initial_updates": 2,
+      "resumed_updates": 2,
+      "resume_parameter_delta_l2": 2.230613382141522,
+      "finite_signals": true,
+      "cleanup_returned": true
+    },
+    "two_instances": {
+      "source_output_dir": "temp\\two_instances_ppo_20261111",
+      "passed": true,
+      "num_envs": 4,
+      "rollout_length": 64,
+      "episode_steps": 32,
+      "evaluation_statistics_frozen": true,
+      "initial_updates": 2,
+      "resumed_updates": 2,
+      "resume_parameter_delta_l2": 2.2037536019750585,
+      "finite_signals": true,
+      "cleanup_returned": true
+    }
+  },
+  "source_sha256": {
+    "envs/tasks/managers/command/base.py": "eb6f76388bfc01c2deac883ac7084b5c911dac06c8eb1db2baf80346c9a45ce8",
+    "envs/tasks/managers/command/curriculum.py": "ec9e32b9f8c890c91218baac1892d907b8c5b14979f83dbe352b50ad303756a6",
+    "envs/tasks/managers/command/terms/curriculum.py": "7a26ef10786a00629a9451d7db25c039db85a20ef9a1e399f1db5d4560ebbbb5",
+    "envs/tasks/managers/curriculum/types.py": "2fd8bfa91094e2e2d3fbc12415266fdf48836deec401c164531f9131c6d0b7c5",
+    "envs/tasks/managers/curriculum/spaces.py": "5b5f5c693619591ed023f53807c6532218fe3737f97a41ea9d2c954daf560b25",
+    "envs/tasks/managers/curriculum/base.py": "7912a35ded46ff6afeda156d2eaca404e961a314a65732305f6bce3227d7b5d4",
+    "envs/tasks/managers/curriculum/terms/reward.py": "0ec868a729962ae44f6406f0f546b4e90182c9d701776353bf736da631b879a1",
+    "runners/callbacks/stage.py": "6190ae222f5e141004cbe3ce450e739f72abd8f34d70a1decd56e96677d5c31c",
+    "configs/tasks/locomotion_anymal_c_phase.yaml": "55ef5829e51b0211b1af7b12df14c8889f815960ce44a8ef74e62fe60be1fe57"
+  },
+  "passed": true
+}

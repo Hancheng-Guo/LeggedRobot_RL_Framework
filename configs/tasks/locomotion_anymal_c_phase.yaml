@@ -18,11 +18,11 @@ action_manager_config:
 
 command_manager_config:
   terms:
-    lin_vel_x: {type: SymmetricFastLpacSampleOnReset, params: {group: velocity, min_value: 0.0, max_value: 2.5, num_cell: 10}}
-    lin_vel_y: {type: SymmetricFastLpacSampleOnReset, params: {group: velocity, min_value: 0.0, max_value: 0.4, num_cell: 4}}
-    ang_vel_z: {type: SymmetricFastLpacSampleOnReset, params: {group: velocity, min_value: 0.0, max_value: 1.5, num_cell: 3}}
-    foot_phase_real: {type: UniformOnReset, params: {dim: 4, min_value: 1.0, max_value: 1.0}}
-    foot_phase_imag: {type: UniformOnReset, params: {dim: 4, min_value: 0.0, max_value: 0.0}}
+    lin_vel_x: {type: SymmetricCurriculum, params: {curriculum: locomotion, min_value: 0.0, max_value: 2.5, num_cell: 10}}
+    lin_vel_y: {type: SymmetricCurriculum, params: {curriculum: locomotion, min_value: 0.0, max_value: 0.4, num_cell: 4}}
+    ang_vel_z: {type: SymmetricCurriculum, params: {curriculum: locomotion, min_value: 0.0, max_value: 1.5, num_cell: 3}}
+    foot_phase_real: {type: Uniform, params: {dim: 4, min_value: 1.0, max_value: 1.0}}
+    foot_phase_imag: {type: Uniform, params: {dim: 4, min_value: 0.0, max_value: 0.0}}
 
 
 observation_manager_config:
@@ -88,14 +88,14 @@ termination_manager_config:
 
 curriculum_manager_config:
   terms:
-    fast_lpac_command_reward:
-      max_cells: 100000
-      temperature: 300.0
-      # Cell scores accumulate weighted tracking rewards over the whole episode.
-      normalize_by_episode_steps: false
-      min_samples_per_cell: 5
-      reward_sources:
-        velocity:
+    locomotion:
+      type: fast_lpac_reward
+      params:
+        temperature: 300.0
+        # Cell scores accumulate weighted tracking rewards over the whole episode.
+        normalize_by_episode_steps: false
+        min_samples_per_cell: 5
+        reward_sources:
           - reward/track_linear_velocity_x_l2_exp_and_logcosh
           - reward/track_linear_velocity_y_l2_exp_and_logcosh
           - reward/track_angular_velocity_z_l2_exp_and_logcosh

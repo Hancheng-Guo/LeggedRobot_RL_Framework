@@ -1,0 +1,42 @@
+{
+  "date": "2026-11-11",
+  "scope": "StageCallback uses explicit metric references and does not inspect curriculum objects or metric paths.",
+  "mujoco_core": {
+    "passed": 1121,
+    "skipped": 11,
+    "deselected": 47
+  },
+  "isaac_core": {
+    "passed": 1057,
+    "skipped": 11,
+    "deselected": 111
+  },
+  "pyright": {
+    "mujoco_errors": 0,
+    "isaac_errors": 0
+  },
+  "source_output_dir": "temp/generic_stage_ppo_20261111",
+  "real_ppo": {
+    "passed": true,
+    "num_envs": 4,
+    "rollout_length": 64,
+    "episode_steps": 32,
+    "evaluation_statistics_frozen": true,
+    "initial_updates": 2,
+    "resumed_updates": 2,
+    "resume_parameter_delta_l2": 2.230613382141522,
+    "finite_signals": true,
+    "cleanup_returned": true,
+    "stage_callback_state_restored": true,
+    "stage_metric_references_matched": true
+  },
+  "source_sha256": {
+    "runners/callbacks/stage.py": "843d42c47d08fe5134dc7f05ff26629321f0ae583c352818ecfc9281bbdb00c6",
+    "configs/anymal_c_mujoco_cpu_velocity_phase.yaml": "d5bd3667c48780466cee39b1fde04d55879f127fd3b425056b7210915c014301",
+    "tests/test_stage_callback.py": "c4fb8ffd9cda4b128a20e465d08d2aea7ce4a99fc6fab7dcc5313fdc6f97abb4",
+    "tests/test_curriculum_checkpoint.py": "73cc4c3af8adefca5a182a3d1abbdb025838b33242ac6675359feb2bd5e6d44d",
+    "tests/test_lpac_curriculum.py": "bdf4ed53df0500cb954ffe89a49c317af30c07820e5588d0fd001228107b7431",
+    "tests/test_runner_layer_contracts.py": "340066bf20bfdd78e5c2248f9411e08609ce4e27a546892600a634d69a596cda"
+  },
+  "passed": true
+}

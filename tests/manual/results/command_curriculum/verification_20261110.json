@@ -1,0 +1,43 @@
+{
+  "passed": true,
+  "num_envs": 4,
+  "rollout_length": 64,
+  "episode_steps": 32,
+  "legacy_comparison": {
+    "reference": "b7561be54f72f4eabb1682bf86196fb74a9cafb9",
+    "equal": true
+  },
+  "evaluation_statistics_frozen": true,
+  "initial_updates": 2,
+  "resumed_updates": 2,
+  "resume_parameter_delta_l2": 1.9874762115363516,
+  "finite_signals": true,
+  "cleanup_returned": true,
+  "source_output_dir": "D:\\GHC\\LeggedRobot_RL_Framework\\temp\\manager_spaces_final_20261110",
+  "checks": {
+    "mujoco_core": {
+      "passed": 1079,
+      "skipped": 11,
+      "deselected": 47
+    },
+    "isaac_core": {
+      "passed": 1015,
+      "skipped": 11,
+      "deselected": 111
+    },
+    "pyright_mujoco": "0 errors, 0 warnings",
+    "pyright_isaac": "0 errors, 0 warnings"
+  },
+  "source_sha256": {
+    "envs/tasks/base.py": "c124728cebd5b007a17f4e0a2197f65189ddbaf13905b62e9a903c8ef712ebdc",
+    "envs/tasks/locomotion.py": "0e135497aa6f8cd2d48d68cdbd9b866997a01b3c791f3d81c11fe9b97833d26d",
+    "envs/tasks/managers/command/base.py": "59736f58954b36f8911e52086b042b0f040cad7bc82bda5863bf6a2c375b2850",
+    "envs/tasks/managers/command/curriculum.py": "d265b2439bf0f129712b64036aed78a46bdf57f8c8b8e9bc25382f68e8caa26d",
+    "envs/tasks/managers/curriculum/types.py": "fba9ec22481c850f5b5b5f13001e01e8225cc8ff4506c4c2719105a750f306af",
+    "envs/tasks/managers/curriculum/spaces.py": "f7424d243299b0052eae86927f901dd776a8380256c96f1e4d9cb5b93cfa9f06",
+    "envs/tasks/managers/curriculum/terms/command.py": "496a3c40a3dc5ba0fb4b541200eaac92364bb26fd8d067a3a7226b14000a65bc",
+    "envs/tasks/managers/curriculum/base.py": "3a97e80f2897f18eb45d9ab16da69a17e1330a91e63ce751e2a5e208efe9d383",
+    "tests/manual/verify_command_curriculum.py": "d3809da9c1a8671ea484cc155810b320bff63e26b3b190a17a33b4b19d754daa",
+    "tests/test_curriculum_spaces.py": "026ae31053ce4afed9fe91aeef6ec2979b2779be9f0b9435df3ad132bb23851a"
+  }
+}

@@ -5,10 +5,19 @@ from typing import Any
 
 from .terms.base import RandomizationBackend
 from .terms import BaseRandomizationTerm, get_randomization_class
+from envs.tasks.managers.curriculum.types import CurriculumSpaceConfigs
 from utils import RuntimeContext
 
 
 class RandomizationManager:
+
+    @classmethod
+    def get_curriculum_space_config(
+        cls,
+        config: Mapping[str, Any] | None,
+    ) -> CurriculumSpaceConfigs:
+        return {}
+
 
     def __init__(
         self,

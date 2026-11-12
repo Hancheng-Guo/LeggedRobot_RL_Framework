@@ -1,3 +1,4 @@
+from curriculum_helpers import build_curriculum_manager
 from copy import deepcopy
 from dataclasses import replace
 from types import SimpleNamespace
@@ -7,7 +8,7 @@ import pytest
 import torch
 
 from envs.tasks.managers.curriculum import CurriculumManager
-from envs.tasks.managers.curriculum.terms.command import BaseLpacCommandReward
+from envs.tasks.managers.curriculum.terms.reward import BaseLpacReward
 from envs import VectorEnv
 from envs.tasks import BaseTaskLogic
 from envs.tasks.locomotion import LocomotionTaskLogic
@@ -20,31 +21,33 @@ from runners.types import TrainStopReason
 @pytest.fixture(params=[False, True], ids=["lpac", "fast_lpac"])
 def make_manager(request, runtime_context, model_context):
     fast = request.param
-    name = "fast_lpac_command_reward" if fast else "lpac_command_reward"
-    command_type = "FastLpacSampleOnReset" if fast else "LpacSampleOnReset"
+    name = "fast_lpac_reward" if fast else "lpac_reward"
+    command_type = "Curriculum"
 
     def make(*, num_envs=3, context=runtime_context, reward_weight=2.0, **options):
         config = {
             "min_samples_per_cell": 2,
             "temperature": 1.0,
             "exploration": 0.2,
-            "reward_sources": {
-                "motion": ["reward"],
-                "posture": [{"reward/action_diff_l2": 0.5}],
-            },
+            "reward_sources": ["reward"],
         }
         config.update(options)
-        return CurriculumManager(
+        return build_curriculum_manager(
             num_envs=num_envs, context=context, model_context=model_context,
-            terms={name: config},
+            terms={
+                name: {"type": name, "params": config},
+                name + "_posture": {"type": name, "params": config | {
+                    "reward_sources": [{"reward/action_diff_l2": 0.5}],
+                }},
+            },
             manager_configs={
                 "command_manager_config": {
                     "terms": {
                         key: {"type": command_type, "params": {
-                            "group": group, "min_value": 0.0,
+                            "curriculum": curriculum_name, "min_value": 0.0,
                             "max_value": 3.0, "num_cell": 3,
                         }}
-                        for key, group in (("x", "motion"), ("yaw", "posture"))
+                        for key, curriculum_name in (("x", name), ("yaw", name + "_posture"))
                     },
                 },
                 "reward_manager_config": {"terms": {
@@ -57,7 +60,7 @@ def make_manager(request, runtime_context, model_context):
 
 
 def get_term(manager):
-    return cast(BaseLpacCommandReward, next(iter(manager.terms.values())))
+    return cast(BaseLpacReward, next(iter(manager.terms.values())))
 
 
 def update(manager, values):
@@ -69,12 +72,12 @@ def update(manager, values):
 
 
 def warm_up(manager):
-    term = get_term(manager)
     for _ in range(2):
-        for buffer in term.buffers.values():
-            buffer.assigned_cell_ids.copy_(torch.tensor([0, 1, 2]))
+        for instance in manager.terms.values():
+            cast(BaseLpacReward, instance).buffer.assigned_cell_ids.copy_(torch.tensor([0, 1, 2]))
         update(manager, [1.0, 2.0, 3.0])
         manager.reset()
+        manager.resample()
 
 
 @pytest.fixture
@@ -89,12 +92,14 @@ def make_runner(runtime_context):
         def reset():
             if manager is not None:
                 manager.reset()
+                manager.resample()
             return obs
 
         def step(action):
             if manager is not None:
                 update(manager, [10.0, 20.0, 30.0])
                 manager.reset()
+                manager.resample()
             return (obs, obs, torch.ones(3), torch.ones(3, dtype=torch.bool),
                     torch.zeros(3, dtype=torch.bool), {})
 
@@ -128,16 +133,15 @@ def assert_same_checkpoint(expected, actual):
         restored = actual["terms"][name]
         assert saved["type"] == restored["type"]
         assert saved["config"] == restored["config"]
-        assert saved["groups"].keys() == restored["groups"].keys()
-        for group, values in saved["groups"].items():
-            current = restored["groups"][group]
-            assert values["dimension_names"] == current["dimension_names"]
-            assert values["term_slices"] == current["term_slices"]
-            for key in ("cell_starts", "cell_interval"):
-                torch.testing.assert_close(values[key], current[key], check_dtype=False)
-            assert values["tensors"].keys() == current["tensors"].keys()
-            for key, tensor in values["tensors"].items():
-                torch.testing.assert_close(tensor, current["tensors"][key], equal_nan=True, check_dtype=False)
+        values = saved["space"]
+        current = restored["space"]
+        assert values["dimension_names"] == current["dimension_names"]
+        assert values["term_slices"] == current["term_slices"]
+        for key in ("cell_starts", "cell_interval"):
+            torch.testing.assert_close(values[key], current[key], check_dtype=False)
+        assert values["tensors"].keys() == current["tensors"].keys()
+        for key, tensor in values["tensors"].items():
+            torch.testing.assert_close(tensor, current["tensors"][key], equal_nan=True, check_dtype=False)
 
 
 @pytest.mark.parametrize("normalize", [False, True])
@@ -145,10 +149,11 @@ def test_checkpoint_round_trip_preserves_batches_but_discards_active_episodes(ma
     source = make_manager(normalize_by_episode_steps=normalize)
     warm_up(source)
     source_term = get_term(source)
-    for buffer in source_term.buffers.values():
-        buffer.assigned_cell_ids.copy_(torch.tensor([0, 1, 2]))
+    buffer = source_term.buffer
+    buffer.assigned_cell_ids.copy_(torch.tensor([0, 1, 2]))
     update(source, [4.0, 5.0, 6.0])
     source.reset(torch.tensor([0]))
+    source.resample(torch.tensor([0]))
     update(source, [7.0, 8.0, 9.0])
     assert source_term.episode_step_count.tolist() == [1, 2, 2]
 
@@ -163,21 +168,23 @@ def test_checkpoint_round_trip_preserves_batches_but_discards_active_episodes(ma
     assert_same_checkpoint(state, target.checkpoint_state_dict())
     target_term = get_term(target)
     assert target_term.episode_step_count.tolist() == [0, 0, 0]
-    for name, buffer in target_term.buffers.items():
-        assert buffer.assigned_cell_ids.tolist() == [-1, -1, -1]
-        assert torch.count_nonzero(target_term.episode_reward_sum[name]) == 0
-        assert target_term.cell_statistics[name].sample_count[0] == 1
-        assert target_term.cell_statistics[name].revision.item() == 1
+    buffer = target_term.buffer
+    assert buffer.assigned_cell_ids.tolist() == [-1, -1, -1]
+    assert torch.count_nonzero(target_term.episode_reward_sum) == 0
+    assert target_term.cell_statistics.sample_count[0] == 1
+    assert target_term.cell_statistics.revision.item() == 1
     for name, value in source.collect_metrics().items():
         torch.testing.assert_close(value, target.collect_metrics()[name])
 
     # Fresh assignments use restored probabilities, without committing old episodes.
+    source_term.load_checkpoint_state_dict(state["terms"][next(iter(source.terms))])
     torch.manual_seed(23)
-    source_term.resample(set(source_term.buffers))
+    source_term.resample()
     torch.manual_seed(23)
     target.reset()
-    for name, buffer in source_term.buffers.items():
-        torch.testing.assert_close(buffer.assigned_cell_ids, target_term.buffers[name].assigned_cell_ids)
+    target.resample()
+    buffer = source_term.buffer
+    torch.testing.assert_close(buffer.assigned_cell_ids, target_term.buffer.assigned_cell_ids)
     assert_same_checkpoint(state, target.checkpoint_state_dict())
 
 
@@ -186,7 +193,7 @@ def test_initial_checkpoint_preserves_unknown_cell_means(make_manager):
     target = make_manager()
     target.load_checkpoint_state_dict(source.checkpoint_state_dict())
     assert_same_checkpoint(source.checkpoint_state_dict(), target.checkpoint_state_dict())
-    assert all(torch.isnan(stats.reward_mean).all() for stats in get_term(target).cell_statistics.values())
+    assert torch.isnan(get_term(target).cell_statistics.reward_mean).all()
 
 
 def test_checkpoint_is_independent_of_source_and_restored_tensors(make_manager):
@@ -196,10 +203,10 @@ def test_checkpoint_is_independent_of_source_and_restored_tensors(make_manager):
     target = make_manager()
     target.load_checkpoint_state_dict(state)
     saved = next(iter(state["terms"].values()))
-    saved["groups"]["motion"]["tensors"]["cell_reward_mean"].add_(100)
-    saved["config"]["reward_sources"]["motion"]["reward"] = 99
+    saved["space"]["tensors"]["cell_reward_mean"].add_(100)
+    saved["config"]["reward_sources"]["reward"] = 99
     assert_same_checkpoint(source.checkpoint_state_dict(), target.checkpoint_state_dict())
-    assert get_term(source).reward_sources["motion"]["reward"] is None
+    assert get_term(source).reward_sources["reward"] is None
 
 
 def test_loading_allows_new_environment_count_and_float_dtype(make_manager, runtime_context):
@@ -209,16 +216,17 @@ def test_loading_allows_new_environment_count_and_float_dtype(make_manager, runt
     target.load_checkpoint_state_dict(source.checkpoint_state_dict())
     assert_same_checkpoint(source.checkpoint_state_dict(), target.checkpoint_state_dict())
     assert get_term(target).episode_step_count.shape == (5,)
-    assert get_term(target).last_reward_mean["motion"].dtype == torch.float64
+    assert get_term(target).last_reward_mean.dtype == torch.float64
     target.reset()
-    assert all(buffer.assigned_cell_ids.shape == (5,) for buffer in get_term(target).buffers.values())
+    target.resample()
+    assert get_term(target).buffer.assigned_cell_ids.shape == (5,)
 
 
 @pytest.mark.parametrize("options", [
     {"normalize_by_episode_steps": True}, {"temperature": 2.0},
     {"exploration": 0.5}, {"min_samples_per_cell": 3},
     {"reward_weight": 3.0},
-    {"reward_sources": {"motion": [{"reward/action_diff_l2": 0.25}], "posture": ["reward"]}},
+    {"reward_sources": [{"reward/action_diff_l2": 0.25}], "posture": ["reward"]},
 ])
 def test_changed_scoring_or_sampling_config_is_rejected(make_manager, options):
     source = make_manager()
@@ -231,27 +239,27 @@ def test_changed_scoring_or_sampling_config_is_rejected(make_manager, options):
 
 
 @pytest.mark.parametrize("corruption", [
-    "term", "type", "group", "dimensions", "grid", "shape", "dtype",
+    "term", "type", "space", "dimensions", "grid", "shape", "dtype",
     "negative_count", "probabilities", "valid_mean", "tensor_fields",
 ])
-def test_invalid_checkpoint_does_not_partially_restore_groups(make_manager, corruption):
+def test_invalid_checkpoint_does_not_partially_restore_instances(make_manager, corruption):
     source = make_manager()
     warm_up(source)
     state = deepcopy(source.checkpoint_state_dict())
     name = next(iter(state["terms"]))
     term_state = state["terms"][name]
-    group = term_state["groups"]["posture"]
-    tensors = group["tensors"]
+    space = term_state["space"]
+    tensors = space["tensors"]
     if corruption == "term":
         state["terms"]["missing"] = state["terms"].pop(name)
     elif corruption == "type":
         term_state["type"] = "OtherCurriculum"
-    elif corruption == "group":
-        term_state["groups"].pop("posture")
+    elif corruption == "space":
+        term_state.pop("space")
     elif corruption == "dimensions":
-        group["dimension_names"] = ("unknown",)
+        space["dimension_names"] = ("unknown",)
     elif corruption == "grid":
-        group["cell_starts"].add_(1)
+        space["cell_starts"].add_(1)
     elif corruption == "shape":
         tensors["sample_count"] = torch.zeros(2, dtype=torch.long)
     elif corruption == "dtype":
@@ -267,48 +275,50 @@ def test_invalid_checkpoint_does_not_partially_restore_groups(make_manager, corr
     target = make_manager()
     update(target, [10.0, 10.0, 10.0])
     before = target.checkpoint_state_dict()
-    pending = get_term(target).episode_reward_sum["motion"].clone()
+    pending = get_term(target).episode_reward_sum.clone()
     with pytest.raises(ValueError):
         target.load_checkpoint_state_dict(state)
     assert_same_checkpoint(before, target.checkpoint_state_dict())
-    torch.testing.assert_close(get_term(target).episode_reward_sum["motion"], pending)
+    torch.testing.assert_close(get_term(target).episode_reward_sum, pending)
 
 
 def test_completed_batches_continue_from_restored_pending_episodes(make_manager):
     source = make_manager()
     term = get_term(source)
-    for buffer in term.buffers.values():
-        buffer.assigned_cell_ids.copy_(torch.tensor([0, 1, 2]))
+    for instance in source.terms.values():
+        cast(BaseLpacReward, instance).buffer.assigned_cell_ids.copy_(torch.tensor([0, 1, 2]))
     update(source, [2.0, 4.0, 6.0])
     source.reset()
+    source.resample()
     target = make_manager()
     target.load_checkpoint_state_dict(source.checkpoint_state_dict())
     for manager in (source, target):
-        for buffer in get_term(manager).buffers.values():
-            buffer.assigned_cell_ids.copy_(torch.tensor([0, 1, 2]))
+        for instance in manager.terms.values():
+            cast(BaseLpacReward, instance).buffer.assigned_cell_ids.copy_(torch.tensor([0, 1, 2]))
         update(manager, [4.0, 6.0, 8.0])
         manager.reset()
+        manager.resample()
     assert_same_checkpoint(source.checkpoint_state_dict(), target.checkpoint_state_dict())
-    torch.testing.assert_close(get_term(target).cell_statistics["motion"].reward_mean, torch.tensor([6.0, 10.0, 14.0]))
+    torch.testing.assert_close(get_term(target).cell_statistics.reward_mean, torch.tensor([6.0, 10.0, 14.0]))
 
 
 def test_manager_validates_every_term_before_restoring_any(runtime_context, model_context):
     def make():
-        return CurriculumManager(
+        return build_curriculum_manager(
             num_envs=3, context=runtime_context, model_context=model_context,
             terms={
-                name: {"min_samples_per_cell": 2, "reward_sources": {group: ["reward"]}}
-                for name, group in (("lpac_command_reward", "motion"), ("fast_lpac_command_reward", "posture"))
+                name: {"type": name, "params": {"min_samples_per_cell": 2, "reward_sources": ["reward"]}}
+                for name in ("lpac_reward", "fast_lpac_reward")
             },
             manager_configs={
                 "command_manager_config": {"terms": {
-                    key: {"type": command_type, "params": {
-                        "group": group, "min_value": 0.0,
+                    key: {"type": "Curriculum", "params": {
+                        "curriculum": reference, "min_value": 0.0,
                         "max_value": 3.0, "num_cell": 3,
                     }}
-                    for key, command_type, group in (
-                        ("x", "LpacSampleOnReset", "motion"),
-                        ("yaw", "FastLpacSampleOnReset", "posture"),
+                    for key, reference in (
+                        ("x", "lpac_reward"),
+                        ("yaw", "fast_lpac_reward"),
                     )
                 }},
                 "reward_manager_config": {"terms": {"action_diff_l2": {"weight": 2.0}}},
@@ -318,13 +328,14 @@ def test_manager_validates_every_term_before_restoring_any(runtime_context, mode
     source = make()
     for _ in range(2):
         for raw_term in source.terms.values():
-            term = cast(BaseLpacCommandReward, raw_term)
-            for buffer in term.buffers.values():
-                buffer.assigned_cell_ids.copy_(torch.tensor([0, 1, 2]))
+            term = cast(BaseLpacReward, raw_term)
+            buffer = term.buffer
+            buffer.assigned_cell_ids.copy_(torch.tensor([0, 1, 2]))
         update(source, [1.0, 2.0, 3.0])
         source.reset()
+        source.resample()
     state = source.checkpoint_state_dict()
-    state["terms"]["fast_lpac_command_reward"]["groups"]["posture"]["tensors"]["sample_count"] = torch.zeros(2, dtype=torch.long)
+    state["terms"]["fast_lpac_reward"]["space"]["tensors"]["sample_count"] = torch.zeros(2, dtype=torch.long)
     target = make()
     before = target.checkpoint_state_dict()
     with pytest.raises(ValueError, match="tensor shape"):
@@ -339,6 +350,7 @@ def test_runner_saves_and_loads_curriculum(make_manager, make_runner, tmp_path, 
     # Keep both a completed partial batch and unfinished episodes at save time.
     update(source, [4.0, 5.0, 6.0])
     source.reset(torch.tensor([0]))
+    source.resample(torch.tensor([0]))
     update(source, [7.0, 8.0, 9.0])
     expected = source.checkpoint_state_dict()
     path = make_runner(source).save(tmp_path / "runner.pt")
@@ -353,15 +365,15 @@ def test_runner_saves_and_loads_curriculum(make_manager, make_runner, tmp_path, 
     assert_same_checkpoint(expected, target.checkpoint_state_dict())
     term = get_term(target)
     assert not term.episode_step_count.any()
-    for name, buffer in term.buffers.items():
-        assert (buffer.assigned_cell_ids == -1).all()
-        assert not term.episode_reward_sum[name].any()
+    buffer = term.buffer
+    assert (buffer.assigned_cell_ids == -1).all()
+    assert not term.episode_reward_sum.any()
 
     # train() starts with an environment reset even when the budget is exhausted.
     runner.train()
     assert_same_checkpoint(expected, target.checkpoint_state_dict())
-    for buffer in term.buffers.values():
-        assert (buffer.assigned_cell_ids >= 0).all()
+    buffer = term.buffer
+    assert (buffer.assigned_cell_ids >= 0).all()
 
 
 def test_runner_rejects_incompatible_curriculum(make_manager, make_runner, tmp_path):
@@ -408,7 +420,7 @@ def test_evaluation_does_not_replace_training_curriculum_checkpoint(make_manager
     runner = make_runner(manager)
     expected = manager.checkpoint_state_dict()
     runner.test(num_episodes=6)
-    assert get_term(manager).cell_statistics["motion"].revision.item() > 1
+    assert_same_checkpoint(expected, manager.checkpoint_state_dict())
     path = runner.save(tmp_path / "after_evaluation.pt")
     saved = torch.load(path, weights_only=False)["runner"]["environment"]["task"]["curriculum"]
     assert_same_checkpoint(expected, saved)
@@ -456,10 +468,10 @@ def test_task_without_persistent_state_uses_empty_checkpoint(runtime_context):
 def attach_stage(runner, manager, *, window=3):
     name = next(iter(manager.terms))
     callback = StageCallback(condition=[{
-        "metric": f"curriculum/{name}/motion/reward_min",
+        "metric": f"curriculum/{name}/reward_min",
         "method": "min", "operator": ">=", "threshold": 0.0,
-        "window": window, "sample_on_update": True,
-        "require_all_cells_valid": True,
+        "window": window, "revision_metric": f'curriculum/{name}/statistics_revision',
+        "validity_metric": f'curriculum/{name}/all_cells_valid',
     }])
     callback.set_runner(runner)
     runner.callbacks = [callback]
@@ -563,15 +575,15 @@ def make_scripted_training(make_runner, manager, *, normalize, invalidate_step=N
     name = next(iter(manager.terms))
     stage = StageCallback(condition=[
         {
-            "metric": f"curriculum/{name}/motion/reward_min",
+            "metric": f"curriculum/{name}/reward_min",
             "method": "min", "operator": ">=", "threshold": 0.0,
-            "window": 3, "sample_on_update": True, "require_all_cells_valid": True,
+            "window": 3, "revision_metric": f'curriculum/{name}/statistics_revision', "validity_metric": f'curriculum/{name}/all_cells_valid',
         },
         {
-            "metric": f"curriculum/{name}/posture/reward_min",
+            "metric": f"curriculum/{name}_posture/reward_min",
             "method": "min", "operator": ">=",
             "threshold": 1.25 if normalize else 2.5,
-            "window": 2, "sample_on_update": True, "require_all_cells_valid": True,
+            "window": 2, "revision_metric": f'curriculum/{name}_posture/statistics_revision', "validity_metric": f'curriculum/{name}_posture/all_cells_valid',
         },
         {
             "metric": "rollout/test_score", "method": "mean",
@@ -593,8 +605,8 @@ def make_scripted_training(make_runner, manager, *, normalize, invalidate_step=N
                 "stage": stage.checkpoint_state_dict(),
                 "metrics": manager.collect_metrics(),
                 "assignments": {
-                    group: buffer.assigned_cell_ids.clone()
-                    for group, buffer in term.buffers.items()
+                    instance_name: cast(BaseLpacReward, instance).buffer.assigned_cell_ids.clone()
+                    for instance_name, instance in manager.terms.items()
                 },
                 "episode_steps": term.episode_step_count.clone(),
             })
@@ -610,19 +622,19 @@ def make_scripted_training(make_runner, manager, *, normalize, invalidate_step=N
         term = get_term(manager)
         if index % 2 == 0:
             # Prescribed episode inputs isolate persistence from simulator/RNG state.
-            term.buffers["motion"].assigned_cell_ids.copy_(torch.tensor([0, 1, 2]))
-            term.buffers["posture"].assigned_cell_ids.copy_(torch.tensor([2, 1, 0]))
+            term.buffer.assigned_cell_ids.copy_(torch.tensor([0, 1, 2]))
+            cast(BaseLpacReward, manager.get_term(name + "_posture")).buffer.assigned_cell_ids.copy_(torch.tensor([2, 1, 0]))
         strength = index // 4 + 1
         update(manager, [strength, 2 * strength, 3 * strength])
         done = index % 2 == 1
         if done:
             torch.manual_seed(1000 + index)
             manager.reset()
+            manager.resample()
         if index == invalidate_step:
             # Evaluation batches are independent of LPAC's sampling windows.
             # Inject a failed evaluation without changing the sampling rewards.
-            term._record_cell_statistics(
-                "motion", torch.tensor([0, 0]), torch.tensor([float("nan"), float("nan")]),
+            term._record_cell_statistics(torch.tensor([0, 0]), torch.tensor([float("nan"), float("nan")]),
             )
         obs = torch.full((3, 1), float(index + 1))
         return (
@@ -669,7 +681,7 @@ def test_continuous_and_resumed_training_match_every_iteration(
     assert interrupted.train().reason is TrainStopReason.MAX_ITERATIONS_REACHED
     term = get_term(interrupted_manager)
     assert not term.episode_step_count.any()
-    assert all((stats.sample_count == 1).all() for stats in term.cell_statistics.values())
+    assert all((cast(BaseLpacReward, instance).cell_statistics.sample_count == 1).all() for instance in interrupted_manager.terms.values())
     path = interrupted.save(tmp_path / "interrupted.pt")
 
     resumed_manager = make_manager(normalize_by_episode_steps=normalize)
@@ -700,7 +712,7 @@ def test_invalid_cell_evaluation_recovers_identically_after_resume(
     )
     interrupted.max_iterations = checkpoint_step
     interrupted.train()
-    assert not get_term(interrupted_manager).cell_statistics["motion"].valid[0]
+    assert not get_term(interrupted_manager).cell_statistics.valid[0]
     assert not stage._conditions[0].values
     assert stage._conditions[1].values
     path = interrupted.save(tmp_path / "invalid_evaluation.pt")
@@ -713,4 +725,4 @@ def test_invalid_cell_evaluation_recovers_identically_after_resume(
     resumed.load()
     assert resumed.train() == expected_result
     assert_same_training_trace(expected_trace, prefix + suffix)
-    assert get_term(resumed_manager).cell_statistics["motion"].valid.all()
+    assert get_term(resumed_manager).cell_statistics.valid.all()

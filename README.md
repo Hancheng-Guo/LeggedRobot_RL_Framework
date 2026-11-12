@@ -210,46 +210,44 @@ component:
 - `max_iterations`：正整数；
 - `transition`：非空条件列表，所有条件同时满足后进入下一阶段。
 
-每条 transition 必须包含以下字段，可额外配置布尔开关 `sample_on_update` 和 `require_all_cells_valid`：
+每条 transition 必须包含 `metric`、`method`、`operator`、`threshold` 和 `window`，还可显式关联更新版本 `revision_metric` 与有效性指标 `validity_metric` ：
 
 | 字段 | 可用值 | 含义 |
 |---|---|---|
-| `metric` | 明确的完整指标名，不支持通配符 | 如 `rollout/mean_len`、`reward/action_diff_l2` |
+| `metric` | 完整指标名，不支持通配符 | 如 `rollout/mean_len`、`reward/action_diff_l2` |
 | `method` | `mean`、`max`、`min` | 对最近窗口聚合 |
 | `operator` | `>`、`>=`、`<`、`<=`、`==`、`!=` | 与阈值比较 |
-| `threshold` | 数值 | 目标阈值 |
+| `threshold` | 有限数值 | 目标阈值 |
 | `window` | 正整数 | 连续记录窗口长度 |
-| `sample_on_update`（可选，仅 curriculum） | 布尔值，默认 `false` | 仅在同组 cell 统计更新时，向窗口记录一次评价 |
-| `require_all_cells_valid`（可选，仅 curriculum） | 布尔值，默认 `false` | 仅在同组全体 cell 的评价有效时记录；评价失效时清空窗口 |
+| `revision_metric`（可选） | 完整指标名，默认 `null` | 只在版本变化时记录一次；版本回退时清空窗口 |
+| `validity_metric`（可选） | 完整指标名，默认 `null` | 值为真或 `1` 时才记录；为假或 `0` 时清空窗口 |
 
-每条条件只对应一个指标，维护自己的缓存窗口，并按 `method`、`operator` 和 `threshold` 判断。需要同时检查多个指标时，将它们分别写成多条 transition，所有条件都满足后才切换阶段。向量指标先在环境维度取平均。
+每条条件维护自己的缓存窗口，所有条件同时满足后才切换阶段。目标向量指标在环境维度取平均； `revision_metric` 与 `validity_metric` 对应的两个控制指标必须是标量。未配置控制指标时，每次收到目标指标都记录。
 
-配置 `metric` 时包含通配符会立即报错。对于 `curriculum/` 开头的条件，Stage 还会在训练开始前检查 curriculum term、group 和指标名是否存在；即使首批 cell 评价尚未完成，也能校验名称。所有条件都会在初始化时建立缓存，无需等待指标值首次出现。
+Stage 只读取回调 `info` 中配置指定的字段，不识别课程路径、不推导关联字段，也不访问 task 或 manager。三个指标名均禁止通配符；指标存在性在收到相关数据后检查。所有条件都会在初始化时建立缓存。
 
-`sample_on_update` 和 `require_all_cells_valid` 仅用于 curriculum 指标，不能用于普通 reward、rollout 等指标。只要任一开关为 `true`，`metric` 就必须采用 `curriculum/<term>/<group>/<metric>` 格式，否则配置校验会报错。Stage 会自动关联同组的统计更新版本和评价有效性，无需额外配置。普通指标保持这两个开关为 `false` 或省略即可。
-
-用于全空间 cell 评价的配置示例（阈值仅示意，需按奖励来源和 episode 归一化设置校准）：
+课程 cell 评价可按如下方式接入（阈值仅示意，需按奖励来源和 episode 归一化设置校准）：
 
 ```yaml
 transition:
-  - metric: curriculum/fast_lpac_command_reward/velocity/reward_min
+  - metric: curriculum/locomotion/reward_min
     method: min
     operator: ">="
     threshold: 3000.0
     window: 3
-    sample_on_update: true
-    require_all_cells_valid: true
+    revision_metric: curriculum/locomotion/statistics_revision
+    validity_metric: curriculum/locomotion/all_cells_valid
 ```
 
-上例要求全体 cell 都有有效评价，并且最近三次统计更新中的最弱 cell 分数均不低于 `3000.0`。其中，`reward_min` 取同组有效 cell 分数的最小值，`method: min` 再取窗口内三次评价的最小值。若改为 `method: mean`，则比较这三次评价的平均值。配置多条 transition 时，仍需所有条件同时满足才切换阶段。启用 `sample_on_update` 后，`window` 按统计更新次数计数；同一份统计不会重复入窗。上述 `window: 3` 不表示三个环境步，也不表示三轮完整的全空间重新采样，各 cell 的评价仍可能来自不同时刻。
+上例要求全体 cell 都有有效评价，且最近三次统计更新中的最弱 cell 分数均不低于 `3000.0`。`reward_min` 取有效 cell 分数的最小值，`method: min` 再取窗口内三次评价的最小值。配置版本指标后，`window` 按不同版本计数；同一份统计不会重复入窗，各 cell 的评价仍可能来自不同时刻。其他来源同样可以显式提供自己的版本与有效性指标，无需采用课程指标的命名。
 
 窗口的保留与清空规则如下：
 
-- 启用 `require_all_cells_valid` 后，若有 cell 的评价失效，清空该条件窗口；若同时启用 `sample_on_update`，从下一次有效的统计更新开始重新积累。
-- 已收到该条件的相关数据，但缺少已启用开关所需的同组 `statistics_revision` 或 `all_cells_valid` 时，直接报错，并提示缺失的完整指标名。
-- 启用 `sample_on_update` 后，版本号必须是有限的非负整数；NaN/Inf、负数或非整数会直接报错。
-- 启用 `require_all_cells_valid` 且有效性检查通过后，主指标缺失会直接报错；未启用时保留等待逻辑，允许首批评价尚未产生。主指标出现 NaN/Inf 时清空窗口。
-- 本次回调完全没有该条件的相关数据时，保持窗口不变，等待后续数据。
+- 本次回调没有目标及已配置的控制指标时，保持窗口不变，等待后续数据。一旦出现相关字段，缺少任一已配置控制指标会明确报错。
+- 版本必须是有限的非负整数。相同版本不重复入窗，版本回退时清空旧窗口。
+- 有效性必须是布尔值或数值 `0/1`。无效时清空窗口；若同时配置版本指标，该无效版本仍会被记录，从下一次有效的新版本重新积累。
+- 有效性为真但目标指标缺失时明确报错；未配置有效性指标时，允许目标尚未产生，清空窗口后继续等待。目标指标出现 NaN/Inf 时清空窗口。
+- 检查点保存目标及控制指标引用、窗口和最后版本。恢复时核对三者引用；未恢复环境状态时，依赖控制指标的窗口重新积累。旧开关与缺少指标引用元数据的旧检查点不做兼容。
 
 ### 3.2 component 写法与多阶段继承
 
@@ -622,18 +620,18 @@ reset_state:
 
 ## 9. locomotion 任务配置
 
-任务文件必须提供以下八个顶层字段。`event_manager_config` 当前仍为预留项，写 `{}` 即可。`randomization_manager_config` 已接入 task，目前支持 `terms.terrain`；不启用随机化时写 `{}`。
+以下六项 manager 配置必填，`task_state_manager_config` 未启用时填写 `{}`：
 
 ```yaml
+task_state_manager_config: {}
 action_manager_config: {terms: {}}
 command_manager_config: {terms: {}}
 observation_manager_config: {terms: {}}
 reward_manager_config: {terms: {}}
 termination_manager_config: {terms: {}}
-curriculum_manager_config: {terms: {}}
-event_manager_config: {}
-randomization_manager_config: {}
 ```
+
+`curriculum_manager_config`、`event_manager_config` 和 `randomization_manager_config` 可省略或写 `null`，分别表示不启用课程、事件和随机化，也可显式写 `{}`。event manager 当前仍为预留项，不接受非空配置。未启用随机化时使用 simulator 原有地面。命令若引用了未配置的课程，仍会明确报错，不自动退回独立采样。
 
 可用 YAML anchor 复用常量：
 
@@ -651,7 +649,7 @@ reward_manager_config:
 
 ### 9.1 Task State Manager
 
-`task_state_manager_config` 可省略；配置的 task state term 在每个仿真步更新一次，局部 reset 时只清理对应环境。reward 和 observation 可通过 `TaskContext` 读取同一份状态。
+`task_state_manager_config` 必须显式提供，未启用时填写 `{}`；配置的 task state term 在每个仿真步更新一次，局部 reset 时只清理对应环境。reward 和 observation 可通过 `TaskContext` 读取同一份状态。
 
 ```yaml
 task_state_manager_config:
@@ -692,7 +690,7 @@ action_manager_config:
 command_manager_config:
   terms:
     lin_vel_x:
-      type: UniformOnReset
+      type: Uniform
       params: {min_value: -1.0, max_value: 1.0}
   constraints:
     lin_vel_x:
@@ -704,15 +702,13 @@ term 的键是命令维度名称；`type` 使用类名（区分大小写）：
 
 | `type` | `params` |
 |---|---|
-| `UniformOnReset` | 必填 `min_value`、`max_value` |
-| `LpacSampleOnReset` | 必填 `group`、`min_value`、`max_value`、`num_cell` |
-| `SymmetricLpacSampleOnReset` | 同上，但 min/max 必须非负，采样后随机取正负 |
-| `FastLpacSampleOnReset` | 必填 `group`、`min_value`、`max_value`、`num_cell` |
-| `SymmetricFastLpacSampleOnReset` | 同上，但 min/max 必须非负 |
+| `Uniform` | 必填 `min_value`、`max_value` |
+| `Curriculum` | 必填 `curriculum`（课程实例名）、`min_value`、`max_value`、`num_cell` |
+| `SymmetricCurriculum` | 同上，但 min/max 必须非负，采样后随机取正负 |
 
-LPAC term 必须搭配同类 curriculum term。`group` 相同的命令组成联合课程空间；`num_cell` 为该维度划分格数，且各空间总格数不能超过 curriculum 的 `max_cells`。
+课程命令必须显式通过 `curriculum` 指定课程实例，缺失、`null` 或空字符串会报错。引用同一实例的命令组成一个联合空间；引用不同实例时独立采样。`num_cell` 为该维度划分格数，空间过大时会触发内部资源保护上限，可减少各维度的格数。命令采样类型与课程算法解耦，使用普通或对称的通用课程采样类型。
 
-约束的 `operator` 支持 `<=`、`>=`、`<`、`>`、`!=`；表达式用 `{命令名}` 引用其他维度，可使用 `torch` 和 `abs`。`!=` 还支持 `direction: positive|negative`（默认 `positive`）决定相等时向哪一侧偏移。课程空间内的约束不能跨 `group`。
+约束的 `operator` 支持 `<=`、`>=`、`<`、`>`、`!=`；表达式用 `{命令名}` 引用其他维度，可使用 `torch` 和 `abs`。`!=` 还支持 `direction: positive|negative`（默认 `positive`）决定相等时向哪一侧偏移。课程空间内的约束不能跨课程实例。
 
 ### 9.4 Observation Manager
 
@@ -832,35 +828,69 @@ Episode 达到 `max_episode_steps` 属于 `truncated`，不是 termination term�
 ```yaml
 curriculum_manager_config:
   terms:
-    fast_lpac_command_reward:
-      temperature: 0.01
-      exploration: 0.1
-      max_cells: 100000
-      min_samples_per_cell: 5
-      normalize_by_episode_steps: false
-      min_coverage: 0.8
-      reward_sources:
-        velocity:
+    locomotion:
+      type: fast_lpac_reward
+      params:
+        temperature: 0.01
+        exploration: 0.1
+        min_samples_per_cell: 5
+        normalize_by_episode_steps: false
+        min_coverage: 0.8
+        reward_sources:
           - reward/track_linear_velocity_x_l2_exp_and_logcosh
           - reward/track_angular_velocity_z_l2_exp_and_logcosh: 0.5
 ```
 
 | 名称 | 参数 |
 |---|---|
-| `lpac_command_reward` | `temperature=0.01`（>0）、`exploration=0.1`（[0,1]）、`max_cells=1000`、`min_samples_per_cell=5`（正整数）、`normalize_by_episode_steps=false`（布尔值） |
-| `fast_lpac_command_reward` | 同上，并增加 `min_coverage=0.8`（(0,1]） |
+| `lpac_reward` | `temperature=0.01`（>0）、`exploration=0.1`（[0,1]）、`min_samples_per_cell=5`（正整数）、`normalize_by_episode_steps=false`（布尔值） |
+| `fast_lpac_reward` | 同上，并增加 `min_coverage=0.8`（(0,1]） |
 
-`lpac_command_reward` 对应 `LpacSampleOnReset`/`SymmetricLpacSampleOnReset`；`fast_lpac_command_reward` 对应 Fast 版本。没有课程学习时写 `terms: {}`。
+课程条目必须显式填写 `type`，算法参数放在 `params` 中（无参数时可省略）。一个实例对应一个联合采样空间，独立持有奖励统计与采样概率。同一种算法可以构建多个实例，例如分别学习平移与转向：
 
-`reward_sources` 为必填配置，必须覆盖该 curriculum 的所有 command group，且不能包含未知 group。每个 group 是非空列表，元素为来源字符串或单项字典：
+```yaml
+curriculum_manager_config:
+  terms:
+    translation: {type: fast_lpac_reward, params: {reward_sources: [reward/track_linear_velocity_x_l2_exp_and_logcosh]}}
+    rotation: {type: fast_lpac_reward, params: {reward_sources: [reward/track_angular_velocity_z_l2_exp_and_logcosh]}}
+
+command_manager_config:
+  terms:
+    lin_vel_x: {type: Curriculum, params: {curriculum: translation, min_value: -1.0, max_value: 1.0, num_cell: 10}}
+    ang_vel_z: {type: Curriculum, params: {curriculum: rotation, min_value: -1.0, max_value: 1.0, num_cell: 5}}
+```
+
+若需要联合规划这两个命令维度，就让它们引用同一个实例，并为该实例配置共同的 `reward_sources` :
+
+```yaml
+curriculum_manager_config:
+  terms:
+    locomotion:
+      type: fast_lpac_reward
+      params:
+        reward_sources:
+          - reward/track_linear_velocity_x_l2_exp_and_logcosh
+          - reward/track_angular_velocity_z_l2_exp_and_logcosh
+
+command_manager_config:
+  terms:
+    lin_vel_x: {type: Curriculum, params: {curriculum: locomotion, min_value: -1.0, max_value: 1.0, num_cell: 10}}
+    ang_vel_z: {type: Curriculum, params: {curriculum: locomotion, min_value: -1.0, max_value: 1.0, num_cell: 5}}
+```
+
+上例将两个命令维度划分为 `10 × 5 = 50` 个联合 cell，并用两项奖励共同评价每个速度组合，学习对应的采样概率。无需课程学习时，可省略 `curriculum_manager_config` 或配置为空，command 使用独立的 `Uniform` 采样。
+
+回合结束后，课程先结算该回合的奖励，再为新回合分配 cell，command 随后在对应区间内采样。评估与播放时冻结 cell 评价和采样概率，仍允许从冻结分布生成命令。
+
+联合空间过大时会报错，应减少各维度的格数或拆分课程实例。目前课程采样支持 command，terrain 的独立与联合课程采样尚未接入。
+
+`reward_sources` 为该课程实例的必填非空列表，元素为来源字符串或单项字典：
 
 - `reward/<name>`：使用该项原始奖励 × 训练权重。
 - `reward/<name>: c`：使用该项原始奖励 × 覆盖系数 `c`，替换训练权重，不是额外乘一次。允许有限的负数和零；显式 `null` 不表示省略系数，应改用字符串形式。
-- `reward`：使用逐环境的所有奖励按训练权重加权后的总和。整体奖励不支持覆盖系数，可写作 `velocity: [reward]`。
+- `reward`：使用逐环境的所有奖励按训练权重加权后的总和。整体奖励不支持覆盖系数，可写作 `reward_sources: [reward]`。
 
-以上来源均不做整体 `dt` 缩放；同组来源直接求和，不自动归一化。仅接受完整名称，同组不能重复配置同一来源，不能全部为显式零系数。`reward` 可以和逐项来源混合，选中的逐项会再次计入，不做隐式去重。解析结果使用 `None` 保留未指定系数的状态，显式 `0.0` 则保留为零。
-
-`reward_sources` 已用于实际 curriculum 更新：任务将 RewardManager 的原始与加权逐项奖励，以及已计算的逐环境加权总奖励 `total_reward` 传入 curriculum，每个 group 按配置独立组合并累计奖励。`reward` 直接使用该总奖励，不重复求和，也不使用日志中的环境均值；各项奖励每步只计算一次。
+以上来源均不做整体 `dt` 缩放；同一实例的来源直接求和，不自动归一化。仅接受完整名称，同一实例不能重复配置同一来源，不能全部为显式零系数。`reward` 可以和逐项来源混合，选中的逐项会再次计入，不做隐式去重。
 
 **Episode 累计奖励的统计口径与注意事项：**
 
@@ -874,13 +904,13 @@ LPAC/FastLPAC 通过 `normalize_by_episode_steps` 决定 episode 结束时如何
 - 当每步奖励主要为正时，相近质量下更长的 episode 通常得到更高累计分数；当每步奖励主要为负时，更早结束可能因少累计负奖励而得到更高分。例如每步均为 `-0.1`，1000 步累计为 `-100`，100 步累计为 `-10`，后者分数更高。应根据所选奖励的组合判断它是否符合预期的存活偏好。
 - learning progress 通常使用当前 cell 分数与历史分数之差，不是 PPO advantage。上述例子会产生 `+90` 的差分；减去历史基线不能消除由 episode 长度变化带来的影响。FastLPAC 首次初始化另有 baseline 填充规则。
 - 累计分数的尺度会受到 episode 长度、最大步数和奖励权重影响；修改这些设置后，应重新检查采样 `temperature` 及使用相关分数的阈值，避免直接沿用每步均值口径下的数值。
-- curriculum 使用未乘 `control_dt` 的 group 奖励，累计模式对其逐步求和，归一化模式再除以实际步数；训练传给 PPO 的总奖励仍由环境统一乘 `control_dt`，两条链路的缩放相互独立。切换来源、归一化模式或控制步长后，应重新检查 `temperature` 和相关阈值。
+- curriculum 使用未乘 `control_dt` 的课程奖励，累计模式对其逐步求和，归一化模式再除以实际步数；训练传给 PPO 的总奖励仍由环境统一乘 `control_dt`，两条链路的缩放相互独立。切换来源、归一化模式或控制步长后，应重新检查 `temperature` 和相关阈值。
 
 **Cell 评价统计：**
 
-每个 group 使用独立的 cell 评价缓冲，每个 cell 收集至少 `min_samples_per_cell` 个已结束 episode 后，保存这批 episode 分数的均值，再清空该批累计；下一批未完成时保留上次评价。episode 分数受 `reward_sources` 和 `normalize_by_episode_steps` 控制。FastLPAC 为未采样 cell 填充的 baseline 不计入真实评价，也不会提高覆盖率。
+每个课程实例使用独立的 cell 评价缓冲，每个 cell 收集至少 `min_samples_per_cell` 个已结束 episode 后，保存这批 episode 分数的均值，再清空该批累计；下一批未完成时保留上次评价。episode 分数受 `reward_sources` 和 `normalize_by_episode_steps` 控制。FastLPAC 为未采样 cell 填充的 baseline 不计入真实评价，也不会提高覆盖率。
 
-指标前缀为 `curriculum/<term>/<group>/`，例如 `curriculum/fast_lpac_command_reward/velocity/coverage`：
+指标前缀为 `curriculum/<instance>/`，例如 `curriculum/locomotion/coverage`：
 
 | 指标 | 含义 |
 |---|---|
@@ -888,23 +918,27 @@ LPAC/FastLPAC 通过 `normalize_by_episode_steps` 决定 episode 结束时如何
 | `valid_cell_count` | 有效评价 cell 数 |
 | `num_cells` | 总 cell 数 |
 | `all_cells_valid` | 全部 cell 均有有效评价时为 1，否则为 0 |
-| `statistics_revision` | 本 group 每次有一批 cell 评价完成时递增；仅收集指标或无新步骤的 reset 不递增 |
+| `statistics_revision` | 本实例每次有一批 cell 评价完成时递增；仅收集指标或无新步骤的 reset 不递增 |
 | `reward_mean` | 有效 cell 最新批次均值的等权平均，不按 cell 的采样次数加权 |
 | `reward_min` | 有效 cell 最新评价的最小值 |
 | `reward_max` | 有效 cell 最新评价的最大值 |
 | `reward_std` | 有效 cell 最新评价的总体标准差；只有一个有效 cell 时为 0 |
+| `learning_progress` | 各 cell 的学习进度向量，沿用现有 TensorBoard 直方图记录 |
+| `probabilities` | 各 cell 当前的采样概率向量，按相同 cell 顺序记录为直方图 |
 
-初始化时覆盖率为 0，尚无有效 cell 时不导出 `reward_*` 指标，避免用零分或估计值冒充真实结果。有限评价不会因采样窗口清空或新批次尚未完成而失效；若新一批评价为 NaN/Inf，则该 cell 标记为无效。各 cell 使用自己最后一次完成的批次评价，可能来自不同时刻。任务指标在本步 done 环境 reset、cell 结算完成后收集，返回的标量是独立快照。
+初始化时覆盖率为 0，尚无有效 cell 时不导出 `reward_*` 指标，避免用零分或估计值冒充真实结果。有限评价不会因采样窗口清空或新批次尚未完成而失效；若新一批评价为 NaN/Inf，则该 cell 标记为无效。各 cell 使用自己最后一次完成的批次评价，可能来自不同时刻。任务指标在本步 done 环境 reset、cell 结算完成后统一收集，返回值均为独立快照；评估时也会导出冻结的学习进度与采样概率。
 
-Stage 可通过 `sample_on_update: true` 避免重复计入同一份结果，通过 `require_all_cells_valid: true` 要求同一 group 的全体 cell 评价有效，配置方式见 3.1 节。
+Stage 可将 `revision_metric` 指向实例的 `statistics_revision`，避免重复计入同一份结果，并将 `validity_metric` 指向 `all_cells_valid`，要求该实例的全体 cell 评价有效；配置方式见 3.1 节。
 
-训练检查点会保存 curriculum 的采样状态、cell 统计，以及 Stage 条件窗口和已采样的统计版本，续训时会校验配置并恢复；启用 `sample_on_update: true` 时，同一统计版本不会重复计入窗口。
+训练检查点会保存 curriculum 的采样状态、cell 统计，以及 Stage 条件窗口和已采样的统计版本，续训时会校验配置并恢复；配置 `revision_metric` 时，同一统计版本不会重复计入窗口。
 
-未结束 episode 的累计数据不会恢复，新 episode 按恢复后的概率采样。由于模拟器状态没有恢复，且新 episode 的初始化会消耗随机数，仍不保证续训后的仿真轨迹与连续训练逐步一致。不含环境状态的检查点不会恢复 curriculum 数据，启用 `sample_on_update` 或 `require_all_cells_valid` 的条件窗口也会重新积累。
+未结束 episode 的累计数据不会恢复，新 episode 按恢复后的概率采样。由于模拟器状态没有恢复，且新 episode 的初始化会消耗随机数，仍不保证续训后的仿真轨迹与连续训练逐步一致。不含环境状态的检查点不会恢复 curriculum 数据，配置 `revision_metric` 或 `validity_metric` 的条件窗口也会重新积累。
 
 ### 9.8 Randomization Manager
 
-`RandomizationManager` 通过注册表构建和调度随机化 term，目前支持 `terrain`。配置属于 **task YAML**；`randomization_manager_config: {}` 表示关闭随机化，保留默认平地行为。
+`RandomizationManager` 通过注册表构建和调度随机化 term，目前支持 `terrain`。配置属于 **task YAML**；省略 `randomization_manager_config` 或显式写 `{}` 表示关闭随机化，使用 simulator 原有地面。
+
+该 manager 由 `LocomotionTaskLogic` 构建和管理，包括物理配置准备、后端绑定及 reset 钩子；`BaseTaskLogic` 仅提供通用生命周期接口，不持有 randomization manager。
 
 **配置与支持范围**
 
@@ -994,8 +1028,8 @@ pytest -q
 
 - **找不到配置**：`ApplicationEntry` 名称和 `configs/<name>.yaml` 必须一致；组件 `config` 名称也必须对应其默认目录中的文件。
 - **第一阶段缺组件**：stage 继承只能复用已经构建的实例，首个 stage 必须提供完整组件集合。
-- **阶段无法切换**：检查 metric 是否真实产生、各条件的 `window` 是否已积累满，以及所有 transition 是否同时满足。Stage 不支持通配符；curriculum 指标名错误会在训练开始前报错。
-- **课程命令报错**：LPAC command 与 curriculum 类型必须配对；同组命令的格点乘积不能超过 `max_cells`。
+- **阶段无法切换**：检查 metric 是否真实产生、各条件的 `window` 是否已积累满，以及所有 transition 是否同时满足。Stage 不支持通配符；相关数据出现后会检查已配置控制指标，有效性为真而主指标缺失时也会报错。
+- **课程命令报错**：检查 `curriculum` 引用的实例是否存在；若联合空间过大，应减少各维度的格数或拆分实例。
 - **CUDA 不可用**：`runtime.device: cuda` 会严格检查 `torch.cuda.is_available()`，不会自动回退 CPU。
 - **确定性算法报错**：部分 CUDA/Isaac 操作不支持确定性实现，可将 `deterministic_ops` 设为 `false`。
 - **录制失败**：使用 `render_mode: rgb_array`，并确保所选仿真后端已配置相机或能返回 RGB 帧。

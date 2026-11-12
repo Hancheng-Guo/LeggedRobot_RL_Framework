@@ -1,12 +1,22 @@
 import torch
 from typing import Any
+from collections.abc import Mapping
 
+from .terms import BaseActionTerm, get_action_class
 from envs.simulators.utils import ModelContext
-from envs.tasks.managers.action.terms import BaseActionTerm, get_action_class
+from envs.tasks.managers.curriculum.types import CurriculumSpaceConfigs
 from utils import RuntimeContext
 
 
 class ActionManager:
+
+    @classmethod
+    def get_curriculum_space_config(
+        cls,
+        config: Mapping[str, Any] | None,
+    ) -> CurriculumSpaceConfigs:
+        return {}
+
 
     def __init__(
         self,

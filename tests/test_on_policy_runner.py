@@ -238,6 +238,7 @@ def test_stage_change_and_evaluation_clear_pending_callback_history(
     runner._pending_callback_states = [{"type": "StageCallback", "state": {}}]
     runner.environment = cast(BaseEnv, SimpleNamespace(
         reset=lambda: None, checkpoint_state_dict=lambda: {},
+        set_training_mode=lambda training: None,
     ))
     runner.algorithm = cast(OnPolicyAlgorithm, SimpleNamespace(set_eval_mode=lambda: None))
     runner.callbacks = cast(

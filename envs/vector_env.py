@@ -250,7 +250,7 @@ class VectorEnv(BaseEnv):
             self._task_config = load_yaml(component.task.config)
         elif not hasattr(self, "task") or self.task is None:
             raise RuntimeError("task instance is required.")
-        self.task.prepare(deepcopy(self._task_config))
+        self.task.prepare(config=deepcopy(self._task_config))
 
 
     def _build_task(
@@ -266,12 +266,16 @@ class VectorEnv(BaseEnv):
             model_context=model_context,
             **deepcopy(self._task_config),
         )
-        self.task.bind(self.simulator)
+        self.task.bind(simulator=self.simulator)
 
 
     def checkpoint_state_dict(self) -> dict[str, Any]:
         """Save task training state without simulator or unfinished episode state."""
         return {"task": self.task.checkpoint_state_dict()}
+
+
+    def set_training_mode(self, training: bool) -> None:
+        self.task.set_training_mode(training)
 
 
     def load_checkpoint_state_dict(

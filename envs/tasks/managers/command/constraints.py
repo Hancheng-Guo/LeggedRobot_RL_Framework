@@ -110,21 +110,21 @@ class CommandConstraintSet:
         return tuple(built)
 
 
-    def validate_groups(self, term_groups: dict[str, str]) -> None:
+    def validate_curricula(self, term_curricula: dict[str, str]) -> None:
 
         for constraint in self.constraints:
 
-            if constraint.target not in term_groups:
+            if constraint.target not in term_curricula:
                 continue
 
-            target_group = term_groups[constraint.target]
+            target_curriculum = term_curricula[constraint.target]
 
             for referenced_term in constraint.referenced_terms:
 
-                if term_groups.get(referenced_term) != target_group:
+                if term_curricula.get(referenced_term) != target_curriculum:
                     raise ValueError(
                         f"Constraint '{constraint.target}' crosses "
-                        "curriculum groups."
+                        "curriculum instances."
                     )
 
 

@@ -226,9 +226,9 @@ def test_prepare_task_reuses_instance_and_config_before_model_setup(
             super().__init__(context)
             events.append("create")
 
-        def prepare(self, config):
+        def prepare(self, *, config, **kwargs):
             events.append("prepare")
-            super().prepare(config)
+            super().prepare(config=config)
             config["nested"]["value"] = -1
 
         def config_update(self, component, num_envs, model_context, **config):
@@ -236,7 +236,7 @@ def test_prepare_task_reuses_instance_and_config_before_model_setup(
             assert config["nested"]["value"] == 7
             config["nested"]["value"] = -2
 
-        def bind(self, simulator):
+        def bind(self, *, simulator, **kwargs):
             events.append("bind")
 
     def load_config(path):
@@ -504,7 +504,7 @@ def test_empty_requirements_support_legacy_backend_and_release_only_old_resource
     env = VectorEnv(runtime_context)
     env.num_envs = 2
     env.task = BaseTaskLogic(runtime_context)
-    env.task.prepare({})
+    env.task.prepare(config={})
     calls = []
 
     def legacy_config_update(component, num_envs):
@@ -519,7 +519,7 @@ def test_empty_requirements_support_legacy_backend_and_release_only_old_resource
     env.simulator = cast(BaseSimulator, SimpleNamespace(config_update=lambda **kwargs: configurations.append(kwargs)))
     env._build_simulator(component)
     env.task = BaseTaskLogic(runtime_context)
-    env.task.prepare({})
+    env.task.prepare(config={})
     env._build_simulator(component)
     env._build_simulator(component)
     assert configurations[-2] == {"component": component, "num_envs": 2, "custom_resource": None}
@@ -537,7 +537,7 @@ def test_new_backend_does_not_receive_previous_backend_resource_clears(runtime_c
     env = VectorEnv(runtime_context)
     env.num_envs = 2
     env.task = BaseTaskLogic(runtime_context)
-    env.task.prepare({})
+    env.task.prepare(config={})
     env._simulator_requirement_keys = {"old_resource"}
     monkeypatch.setattr("envs.vector_env.SIM_TYPE_MAP", {"legacy": LegacyBackend})
     monkeypatch.setattr("envs.vector_env.load_yaml", lambda path: {})

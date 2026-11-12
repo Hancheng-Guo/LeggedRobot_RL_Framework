@@ -8,6 +8,7 @@ import torch
 import yaml
 from envs.vector_env import VectorEnv
 from envs.tasks.managers.randomization.terms.terrain import TerrainRandomizationTerm
+from envs.tasks.locomotion import LocomotionTaskLogic
 from envs.simulators.terrain import TerrainPatch
 from envs.tasks.managers.reward.terms.contact import IllegalContactL1
 from envs.tasks.managers.termination.terms.contact import BodyContact
@@ -58,6 +59,7 @@ def test_equivalent_stances_on_actual_slope_have_equal_height_signals(runtime_co
     path.write_text(yaml.safe_dump(config, sort_keys=False), encoding='utf-8')
     env = terrain_environment(runtime_context, path, 2)
     try:
+        assert isinstance(env.task, LocomotionTaskLogic)
         term = cast(TerrainRandomizationTerm, env.task.randomization_manager.terms['terrain'])
         assert term.patches[0] is not None
         geometry = term.patches[0].geometry
@@ -224,6 +226,7 @@ def test_existing_anymal_phase_config_runs_mixed_terrain_and_partial_reset(runti
         env.config_update(component,num_envs=3,max_episode_steps=100)
         observation = env.reset()
         assert observation.shape == (3,120)
+        assert isinstance(env.task, LocomotionTaskLogic)
         terrain = cast(TerrainRandomizationTerm,env.task.randomization_manager.terms['terrain'])
         assert [patch.terrain_type for patch in terrain.patches if patch is not None] == ['plane','slope','rough']
         assert terrain.config.spawn_size == (1.5,1.2)

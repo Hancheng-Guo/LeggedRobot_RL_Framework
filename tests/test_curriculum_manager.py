@@ -1,3 +1,4 @@
+from curriculum_helpers import build_curriculum_manager
 import torch
 import pytest
 from typing import cast
@@ -5,8 +6,8 @@ from typing import cast
 from envs.tasks.managers.command import CommandManager
 # from envs.tasks.managers.command.terms.curriculum import LrpcSampleOnReset
 from envs.tasks.managers.curriculum import CurriculumManager
-from envs.tasks.managers.curriculum.terms.command import (
-    LpacCommandReward,
+from envs.tasks.managers.curriculum.terms.reward import (
+    LpacReward,
     # LrpcCommandReward,
 )
 
@@ -24,7 +25,7 @@ def make_command_terms():
                 "min_value": -1.0,
                 "max_value": 1.0,
                 "num_cell": 3,
-                "group": "motion",
+
                 "noise_scale": 0.0,
             },
         },
@@ -34,7 +35,7 @@ def make_command_terms():
                 "min_value": -2.0,
                 "max_value": 2.0,
                 "num_cell": 2,
-                "group": "motion",
+
                 "noise_scale": 0.0,
             },
         },
@@ -42,7 +43,7 @@ def make_command_terms():
 
 
 def make_curriculum(runtime_context, model_context, num_envs=4):
-    return CurriculumManager(
+    return build_curriculum_manager(
         num_envs=num_envs,
         context=runtime_context,
         model_context=model_context,
@@ -66,28 +67,29 @@ def make_curriculum(runtime_context, model_context, num_envs=4):
 def make_lpac_curriculum(runtime_context, model_context, num_envs=3):
     terms = {
         "x": {
-            "type": "LpacSampleOnReset",
+            "type": "Curriculum",
             "params": {
+                "curriculum": "lpac_reward",
                 "min_value": -1.0,
                 "max_value": 1.0,
                 "num_cell": 3,
-                "group": "motion",
+
                 "noise_scale": 0.0,
             },
         },
     }
-    return CurriculumManager(
+    return build_curriculum_manager(
         num_envs=num_envs,
         context=runtime_context,
         model_context=model_context,
         terms={
-            "lpac_command_reward": {
+            "lpac_reward": {"type": "lpac_reward", "params": {
                 "temperature": 1.0,
                 "exploration": 0.0,
                 "min_coverage": 1.0,
                 "min_samples_per_cell": 1,
-                "reward_sources": {"motion": [{"reward/action_diff_l2": 1.0}]},
-            },
+                "reward_sources": [{"reward/action_diff_l2": 1.0}],
+            }},
         },
         manager_configs={
             "command_manager_config": {"terms": terms},
@@ -106,7 +108,7 @@ def test_curriculum_buffer_represents_joint_command_space(
         LrpcCommandReward,  # pyright: ignore[reportUndefinedVariable]
         manager.get_term("lrpc_command_reward"),
     )
-    buffer = term.buffers["motion"]
+    buffer = term.buffer
 
     assert buffer.dimension_names == ("x", "yaw")
     assert buffer.cell_starts.shape == (3, 2)
@@ -138,13 +140,13 @@ def test_lower_reward_cells_have_higher_sampling_probability(
         LrpcCommandReward,  # pyright: ignore[reportUndefinedVariable]
         manager.get_term("lrpc_command_reward"),
     )
-    buffer = term.buffers["motion"]
+    buffer = term.buffer
     buffer.sample_count.fill_(1)
     buffer.reward_sum.copy_(
         torch.tensor([-2.0, -1.0, 0.0])
     )
 
-    probabilities = term._get_probabilities("motion")
+    probabilities = term._get_probabilities()
 
     assert torch.all(probabilities[:-1] > probabilities[1:])
 
@@ -155,10 +157,10 @@ def test_lpac_uses_first_window_as_zero_progress_baseline(
 ):
     manager = make_lpac_curriculum(runtime_context, model_context)
     term = cast(
-        LpacCommandReward,
-        manager.get_term("lpac_command_reward"),
+        LpacReward,
+        manager.get_term("lpac_reward"),
     )
-    buffer = term.buffers["motion"]
+    buffer = term.buffer
     buffer.assigned_cell_ids.copy_(torch.tensor([0, 1, 2]))
 
     manager.update(
@@ -167,13 +169,14 @@ def test_lpac_uses_first_window_as_zero_progress_baseline(
         total_reward=torch.tensor([1.0, 2.0, 3.0]),
     )
     manager.reset(torch.tensor([0, 1, 2]))
+    manager.resample(torch.tensor([0, 1, 2]))
 
     torch.testing.assert_close(
-        term.last_reward_mean["motion"],
+        term.last_reward_mean,
         torch.tensor([1.0, 2.0, 3.0]),
     )
     torch.testing.assert_close(
-        term.learning_progress["motion"],
+        term.learning_progress,
         torch.tensor([1.0, 2.0, 3.0]),
     )
 
@@ -184,10 +187,10 @@ def test_lpac_prioritizes_positive_progress_after_second_window(
 ):
     manager = make_lpac_curriculum(runtime_context, model_context)
     term = cast(
-        LpacCommandReward,
-        manager.get_term("lpac_command_reward"),
+        LpacReward,
+        manager.get_term("lpac_reward"),
     )
-    buffer = term.buffers["motion"]
+    buffer = term.buffer
 
     buffer.assigned_cell_ids.copy_(torch.tensor([0, 1, 2]))
     manager.update(
@@ -196,6 +199,7 @@ def test_lpac_prioritizes_positive_progress_after_second_window(
         total_reward=torch.tensor([1.0, 2.0, 3.0]),
     )
     manager.reset(torch.tensor([0, 1, 2]))
+    manager.resample(torch.tensor([0, 1, 2]))
 
     buffer.assigned_cell_ids.copy_(torch.tensor([0, 1, 2]))
     manager.update(
@@ -204,12 +208,13 @@ def test_lpac_prioritizes_positive_progress_after_second_window(
         total_reward=torch.tensor([2.0, 1.0, 3.0]),
     )
     manager.reset(torch.tensor([0, 1, 2]))
+    manager.resample(torch.tensor([0, 1, 2]))
 
     torch.testing.assert_close(
-        term.learning_progress["motion"],
+        term.learning_progress,
         torch.tensor([1.0, -1.0, 0.0]),
     )
-    probabilities = term.probabilities["motion"]
+    probabilities = term.probabilities
     assert probabilities[0] > probabilities[2] > probabilities[1]
 
 
@@ -219,15 +224,16 @@ def test_lpac_waits_when_any_cell_is_below_sample_threshold(
 ):
     manager = make_lpac_curriculum(runtime_context, model_context)
     term = cast(
-        LpacCommandReward,
-        manager.get_term("lpac_command_reward"),
+        LpacReward,
+        manager.get_term("lpac_reward"),
     )
     term.min_samples_per_cell = 2
-    buffer = term.buffers["motion"]
+    buffer = term.buffer
     buffer.sample_count.copy_(torch.tensor([2, 2, 1]))
     buffer.reward_sum.copy_(torch.tensor([4.0, 6.0, 7.0]))
 
     manager.reset()
+    manager.resample()
 
     torch.testing.assert_close(
         buffer.sample_count,
@@ -238,7 +244,7 @@ def test_lpac_waits_when_any_cell_is_below_sample_threshold(
         torch.tensor([4.0, 6.0, 7.0]),
     )
     torch.testing.assert_close(
-        term.last_reward_mean["motion"],
+        term.last_reward_mean,
         torch.zeros(3),
     )
 
@@ -261,13 +267,14 @@ def test_command_terms_share_one_joint_space_sample(
     )
 
     curriculum.reset()
+    curriculum.resample()
     command.reset()
 
     term = cast(
         LrpcCommandReward,  # pyright: ignore[reportUndefinedVariable]
         curriculum.get_term("lrpc_command_reward"),
     )
-    buffer = term.buffers["motion"]
+    buffer = term.buffer
     expected = buffer.cell_starts[buffer.assigned_cell_ids]
     torch.testing.assert_close(command.command["x"], expected[:, 0:1])
     torch.testing.assert_close(command.command["yaw"], expected[:, 1:2])
@@ -283,7 +290,7 @@ def test_curriculum_accumulates_reward_by_assigned_joint_cell(
         LrpcCommandReward,  # pyright: ignore[reportUndefinedVariable]
         manager.get_term("lrpc_command_reward"),
     )
-    buffer = term.buffers["motion"]
+    buffer = term.buffer
     buffer.assigned_cell_ids.copy_(torch.tensor([0, 1, 0, 2]))
 
     manager.update(
@@ -303,15 +310,15 @@ def test_curriculum_accumulates_reward_by_assigned_joint_cell(
 
 
 @LRPC_DISABLED
-def test_curriculum_rejects_constraint_across_groups(
+def test_curriculum_rejects_constraint_across_instances(
     runtime_context,
     model_context,
 ):
     terms = make_command_terms()
-    terms["yaw"]["params"]["group"] = "rotation"
+    terms["yaw"]["params"]["curriculum"] = "rotation"
 
-    with pytest.raises(ValueError, match="crosses curriculum groups"):
-        CurriculumManager(
+    with pytest.raises(ValueError, match="crosses curriculum instances"):
+        build_curriculum_manager(
             num_envs=4,
             context=runtime_context,
             model_context=model_context,
@@ -338,12 +345,10 @@ def test_curriculum_command_noise_scale_uses_bin_width(
     num_envs = 20_000
 
     class FixedSampler:
-        buffers = {}
-
-        def resample(self, space_names, env_ids=None):
+        def resample(self, env_ids=None):
             pass
 
-        def get_command(self, space_name, dimension, env_ids=None):
+        def get_command(self, dimension, env_ids=None):
             selected_count = num_envs if env_ids is None else env_ids.numel()
             return torch.zeros(selected_count, 1)
 
@@ -353,7 +358,6 @@ def test_curriculum_command_noise_scale_uses_bin_width(
         model_context=model_context,
         curriculum_sampler=FixedSampler(),
         term_name="x",
-        group="motion",
         min_value=-1.0,
         max_value=1.0,
         num_cell=3,
@@ -381,12 +385,12 @@ def test_curriculum_supports_multidimensional_command_term(
                 "min_value": -1.0,
                 "max_value": 1.0,
                 "num_cell": 2,
-                "group": "phase",
+
                 "noise_scale": 0.0,
             },
         },
     }
-    curriculum = CurriculumManager(
+    curriculum = build_curriculum_manager(
         num_envs=32,
         context=runtime_context,
         model_context=model_context,
@@ -404,13 +408,14 @@ def test_curriculum_supports_multidimensional_command_term(
     )
 
     curriculum.reset()
+    curriculum.resample()
     command.reset()
 
     term = cast(
         LrpcCommandReward,  # pyright: ignore[reportUndefinedVariable]
         curriculum.get_term("lrpc_command_reward"),
     )
-    buffer = term.buffers["phase"]
+    buffer = term.buffer
     expected = buffer.cell_starts[buffer.assigned_cell_ids]
 
     assert buffer.dimension_names == ("foot_phase[0]", "foot_phase[1]")
@@ -429,12 +434,10 @@ def test_multidimensional_curriculum_noise_is_independent(
     num_envs = 10_000
 
     class FixedSampler:
-        buffers = {}
-
-        def resample(self, space_names, env_ids=None):
+        def resample(self, env_ids=None):
             pass
 
-        def get_command(self, space_name, dimension, env_ids=None):
+        def get_command(self, dimension, env_ids=None):
             selected_count = num_envs if env_ids is None else env_ids.numel()
             return torch.zeros(selected_count, 4)
 
@@ -444,7 +447,6 @@ def test_multidimensional_curriculum_noise_is_independent(
         model_context=model_context,
         curriculum_sampler=FixedSampler(),
         term_name="foot_phase",
-        group="phase",
         dim=4,
         min_value=-1.0,
         max_value=1.0,
@@ -484,12 +486,12 @@ def test_curriculum_filters_strict_and_not_equal_constraints(
                 "min_value": -1.0,
                 "max_value": 1.0,
                 "num_cell": 3,
-                "group": "motion",
+
                 "noise_scale": 0.0,
             },
         },
     }
-    manager = CurriculumManager(
+    manager = build_curriculum_manager(
         num_envs=2,
         context=runtime_context,
         model_context=model_context,
@@ -513,6 +515,6 @@ def test_curriculum_filters_strict_and_not_equal_constraints(
     )
 
     torch.testing.assert_close(
-        term.buffers["motion"].cell_starts.squeeze(-1),
+        term.buffer.cell_starts.squeeze(-1),
         torch.tensor(expected, dtype=runtime_context.dtype),
     )

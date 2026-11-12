@@ -5,6 +5,9 @@ constants:
   action_lags: &action_lags 4
 
 
+task_state_manager_config: {}
+
+
 action_manager_config:
   terms:
     tanh_map: {}
@@ -13,9 +16,9 @@ action_manager_config:
 
 command_manager_config:
   terms:
-    lin_vel_x: {type: SymmetricFastLpacSampleOnReset, params: {group: velocity, min_value: 0.0, max_value: 2.5, num_cell: 10}}
-    lin_vel_y: {type: UniformOnReset, params: {min_value: -0.5, max_value: 0.5}}
-    ang_vel_z: {type: SymmetricFastLpacSampleOnReset, params: {group: velocity, min_value: 0.0, max_value: 1.5, num_cell: 3}}
+    lin_vel_x: {type: SymmetricCurriculum, params: {curriculum: locomotion, min_value: 0.0, max_value: 2.5, num_cell: 10}}
+    lin_vel_y: {type: Uniform, params: {min_value: -0.5, max_value: 0.5}}
+    ang_vel_z: {type: SymmetricCurriculum, params: {curriculum: locomotion, min_value: 0.0, max_value: 1.5, num_cell: 3}}
 
 
 observation_manager_config:
@@ -77,10 +80,10 @@ termination_manager_config:
 
 curriculum_manager_config:
   terms:
-    fast_lpac_command_reward:
-      max_cells: 100000
-      reward_sources:
-        velocity:
+    locomotion:
+      type: fast_lpac_reward
+      params:
+        reward_sources:
           - reward
 
 

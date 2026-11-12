@@ -20,6 +20,7 @@ class BaseCurriculumTerm(ABC):
         self.num_envs = num_envs
         self.context = context
         self.model_context = model_context
+        self.training = True
 
 
     @abstractmethod
@@ -48,6 +49,13 @@ class BaseCurriculumTerm(ABC):
 
     def checkpoint_state_dict(self) -> dict[str, Any]:
         return {"type": type(self).__name__}
+
+
+    def resample(
+        self,
+        env_ids: torch.Tensor | None = None,
+    ) -> None:
+        pass
 
 
     def validate_checkpoint_state_dict(self, state: Mapping[str, Any]) -> None:

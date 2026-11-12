@@ -1,0 +1,44 @@
+{
+  "passed": true,
+  "num_envs": 4,
+  "rollout_length": 64,
+  "episode_steps": 32,
+  "evaluation_statistics_frozen": true,
+  "initial_updates": 2,
+  "resumed_updates": 2,
+  "resume_parameter_delta_l2": 2.230613382141522,
+  "finite_signals": true,
+  "cleanup_returned": true,
+  "verified_date": "2026-11-11",
+  "source_output_dir": "D:\\GHC\\LeggedRobot_RL_Framework\\temp\\reward_names_20261111",
+  "requires_explicit_curriculum_reference": true,
+  "checks": {
+    "mujoco_core": {
+      "passed": 1110,
+      "skipped": 11,
+      "deselected": 47
+    },
+    "isaac_core": {
+      "passed": 1046,
+      "skipped": 11,
+      "deselected": 111
+    },
+    "pyright_mujoco": "0 errors, 0 warnings",
+    "pyright_isaac": "0 errors, 0 warnings"
+  },
+  "source_sha256": {
+    "envs/tasks/managers/command/curriculum.py": "e593fa5323ba710dadbd6d0c87c38328946b51f30b909a50cf37cd02f49309d4",
+    "envs/tasks/managers/command/terms/curriculum.py": "0687a639ce87bb0dc0fd479a64f64aad302b5097f12d2b5d3e49c4cda7dbe724",
+    "envs/tasks/managers/command/base.py": "99410797cdde019666878a4744be7e09f1abcc2f30e41d72422cec08638820a2",
+    "configs/tasks/locomotion_anymal_c_phase.yaml": "07b8c8109218caf6b656ae2f965ca41c29aa0e94e45a43ef9291343eeb32e86f",
+    "configs/tasks/locomotion_unitree_go1_velocity.yaml": "6c298f52874e2a31b491e0edddac051be87e795ee166f258b351e33b9db8d696",
+    "configs/tasks/locomotion_unitree_go1_phase.yaml": "5df5c20d68fb7b0733bb2a3113446698955ccfe3c0253dd87c0578e7ba5bcb87",
+    "tests/manual/verify_command_curriculum.py": "252022101c49eca551ff645a14dc4e7ef119f447167a4bc61ea867455e81e220",
+    "envs/tasks/managers/curriculum/terms/reward.py": "d4c02273e1df5a2d98cc9c5f28f2f7d7b7e8e7d4ca8f60ff20f20b5645aed357",
+    "configs/anymal_c_mujoco_cpu_velocity_phase.yaml": "d56e3e98b687b7bc72541490d26d05d7a4304eb980ace549474e6fdc2ba4a6d5"
+  },
+  "curriculum_types": [
+    "lpac_reward",
+    "fast_lpac_reward"
+  ]
+}

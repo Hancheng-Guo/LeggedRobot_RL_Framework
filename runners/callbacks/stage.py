@@ -46,9 +46,8 @@ class _StageCondition:
     window: int
     values: deque[float] = field(init=False)
     last_revision: int | None = None
-    # Curriculum-only controls; leave disabled for reward/rollout metrics.
-    sample_on_update: bool = False
-    require_all_cells_valid: bool = False
+    revision_metric: str | None = None
+    validity_metric: str | None = None
 
 
     def __post_init__(self) -> None:
@@ -64,8 +63,8 @@ class _StageCondition:
 
 
     @property
-    def uses_curriculum_controls(self) -> bool:
-        return self.sample_on_update or self.require_all_cells_valid
+    def uses_control_metrics(self) -> bool:
+        return self.revision_metric is not None or self.validity_metric is not None
 
 
     def reset(self) -> None:
@@ -73,11 +72,12 @@ class _StageCondition:
         self.last_revision = None
 
 
-    def curriculum_control_names(self) -> tuple[str | None, str | None]:
-        prefix = self.metric.rsplit("/", 1)[0]
-        revision = f"{prefix}/statistics_revision" if self.sample_on_update else None
-        validity = f"{prefix}/all_cells_valid" if self.require_all_cells_valid else None
-        return revision, validity
+    def get_metric_config(self) -> dict[str, str | None]:
+        return {
+            "metric": self.metric,
+            "revision_metric": self.revision_metric,
+            "validity_metric": self.validity_metric,
+        }
 
 
     def get_values(self) -> ConditionValues:
@@ -113,12 +113,12 @@ def _build_condition(detail: Mapping[str, Any]) -> _StageCondition:
     expected_keys = {
         "metric", "method", "operator", "threshold", "window"
     }
-    optional_keys = {"sample_on_update", "require_all_cells_valid"}
+    optional_keys = {"revision_metric", "validity_metric"}
     if not expected_keys <= set(detail) or set(detail) - (expected_keys | optional_keys):
         raise ValueError(
             "Each stage transition condition must contain: "
             "metric, method, operator, threshold, window; "
-            "optional fields: sample_on_update, require_all_cells_valid."
+            "optional fields: revision_metric, validity_metric."
         )
 
     metric = detail["metric"]
@@ -127,23 +127,21 @@ def _build_condition(detail: Mapping[str, Any]) -> _StageCondition:
             "Stage metric must be a non-empty string."
         )
     if has_magic(metric):
-        raise ValueError("Stage metric must be an exact metric name; wildcards are not supported.")
+        raise ValueError(
+            "Stage metric must be an exact metric name; wildcards are not supported."
+        )
 
     for key in optional_keys:
-        if key in detail and not isinstance(detail[key], bool):
-            raise TypeError(f"Stage {key} must be a bool.")
-
-    if any(detail.get(key, False) for key in optional_keys):
-        parts = metric.split("/")
-        if (
-            len(parts) != 4
-            or parts[0] != "curriculum"
-            or not all(parts[1:])
-        ):
+        value = detail.get(key)
+        if value is None:
+            continue
+        if not isinstance(value, str) or not value:
+            raise TypeError(
+                f"Stage {key} must be a non-empty string or None."
+            )
+        if has_magic(value):
             raise ValueError(
-                "Stage curriculum options require "
-                "'curriculum/<term>/<group>/<metric>' with explicit "
-                "term and group names."
+                f"Stage {key} must be an exact metric name; wildcards are not supported."
             )
 
     method_name = detail["method"]
@@ -193,8 +191,8 @@ def _build_condition(detail: Mapping[str, Any]) -> _StageCondition:
         compare=OPERATOR_MAP[operator_name],
         threshold=float(threshold),
         window=window,
-        sample_on_update=detail.get("sample_on_update", False),
-        require_all_cells_valid=detail.get("require_all_cells_valid", False),
+        revision_metric=detail.get("revision_metric"),
+        validity_metric=detail.get("validity_metric"),
     )
 
 
@@ -218,39 +216,7 @@ class StageCallback(BaseCallback):
         self.stop_training = False
         for condition in self._conditions:
             condition.reset()
-        self._validate_curriculum_metrics()
         return True
-
-
-    def _validate_curriculum_metrics(self) -> None:
-
-        conditions = [
-            condition for condition in self._conditions
-            if condition.metric.startswith("curriculum/")
-        ]
-        if not conditions:
-            return
-
-        environment = getattr(self.runner, "environment", None)
-        task = getattr(environment, "task", None)
-        curriculum_manager = getattr(task, "curriculum_manager", None)
-        if curriculum_manager is None:
-            raise ValueError(
-                "Stage curriculum metrics require a task with a curriculum manager."
-            )
-
-        available = curriculum_manager.get_metric_names()
-        for condition in conditions:
-            if condition.metric not in available:
-                raise KeyError(
-                    f"Stage curriculum metric {condition.metric!r} is not a supported metric; "
-                    f"available: {', '.join(sorted(available))}."
-                )
-            for control in condition.curriculum_control_names():
-                if control is not None and control not in available:
-                    raise KeyError(
-                        f"Stage condition {condition.metric!r} requires unsupported metric {control!r}."
-                    )
 
 
     def _on_step_end(
@@ -293,78 +259,77 @@ class StageCallback(BaseCallback):
         info: Mapping[str, Any],
     ) -> None:
 
-        metric_name = condition.metric
-        revision_name, validity_name = condition.curriculum_control_names()
-        if not any(
-            key is not None and key in info
-            for key in (metric_name, revision_name, validity_name)
-        ):
+        metric_names = (
+            condition.metric,
+            condition.revision_metric,
+            condition.validity_metric,
+        )
+        if not any(name is not None and name in info for name in metric_names):
             return
 
-        is_new_revision = self._check_revision(condition, info, revision_name)
-        if not self._check_validity(condition, info, validity_name):
+        # Validate both controls before changing the window or revision.
+        revision = self._read_revision(condition, info)
+        valid = self._read_validity(condition, info)
+        if revision is None:
+            should_sample = True
+        else:
+            previous_revision = condition.last_revision
+            should_sample = revision != previous_revision
+
+            if previous_revision is not None and revision < previous_revision:
+                condition.values.clear()
+            condition.last_revision = revision
+
+        if not valid:
+            condition.values.clear()
             return
 
         value = self._read_metric(condition, info)
-        if value is not None and is_new_revision:
+        if value is not None and should_sample:
             condition.values.append(value)
 
 
-    def _check_revision(
-        self, condition: _StageCondition,
+    def _read_revision(
+        self,
+        condition: _StageCondition,
         info: Mapping[str, Any],
-        revision_name: str | None,
-    ) -> bool:
+    ) -> int | None:
 
-        if revision_name is None:
-            return True
-        if revision_name not in info:
+        name = condition.revision_metric
+        if name is None:
+            return None
+        if name not in info:
             raise KeyError(
-                f"Stage condition {condition.metric!r} requires control metric "
-                f"{revision_name!r} when sample_on_update is enabled."
+                f"Stage condition {condition.metric!r} requires revision metric {name!r}."
             )
-
-        value = self._control_scalar(info[revision_name], revision_name)
-        if (
-            not math.isfinite(value)
-            or value < 0 or
-            not value.is_integer()
-        ):
+        value = self._control_scalar(info[name], name)
+        if not math.isfinite(value) or value < 0 or not value.is_integer():
             raise ValueError(
-                f"Stage revision metric {revision_name!r} must be a finite non-negative integer, "
+                f"Stage revision metric {name!r} must be a finite non-negative integer, "
                 f"got {value!r}."
             )
-
-        revision = int(value)
-        if revision == condition.last_revision:
-            return False
-
-        if (
-            condition.last_revision is not None
-            and revision < condition.last_revision
-        ):
-            condition.values.clear()
-        condition.last_revision = revision
-        return True
+        return int(value)
 
 
-    def _check_validity(
-        self, condition: _StageCondition,
+    def _read_validity(
+        self,
+        condition: _StageCondition,
         info: Mapping[str, Any],
-        validity_name: str | None,
     ) -> bool:
 
-        if validity_name is None:
+        name = condition.validity_metric
+        if name is None:
             return True
-        if validity_name not in info:
+        if name not in info:
             raise KeyError(
-                f"Stage condition {condition.metric!r} requires control metric "
-                f"{validity_name!r} when require_all_cells_valid is enabled."
+                f"Stage condition {condition.metric!r} requires validity metric {name!r}."
             )
-        if self._control_scalar(info[validity_name], validity_name) != 1.0:
-            condition.values.clear()
-            return False
-        return True
+        value = self._control_scalar(info[name], name)
+        if value not in (0.0, 1.0):
+            raise ValueError(
+                f"Stage validity metric {name!r} must be a boolean or 0/1, got {value!r}."
+            )
+        return value == 1.0
 
 
     def _read_metric(
@@ -375,9 +340,10 @@ class StageCallback(BaseCallback):
 
         metric_name = condition.metric
         if metric_name not in info:
-            if condition.require_all_cells_valid:
+            if condition.validity_metric is not None:
                 raise KeyError(
-                    f"Stage metric {metric_name!r} is missing despite all_cells_valid being 1."
+                    f"Stage metric {metric_name!r} is missing despite validity metric "
+                    f"{condition.validity_metric!r} being 1."
                 )
             condition.values.clear()
             return None
@@ -439,6 +405,10 @@ class StageCallback(BaseCallback):
     def checkpoint_state_dict(self) -> dict[str, Any]:
         return {
             "stop_training": self.stop_training,
+            "condition_metrics": [
+                condition.get_metric_config()
+                for condition in self._conditions
+            ],
             "condition_values": [
                 condition.get_values()
                 for condition in self._conditions
@@ -457,6 +427,18 @@ class StageCallback(BaseCallback):
         environment_restored: bool = False,
     ) -> None:
 
+        if not isinstance(state, Mapping):
+            raise TypeError("Stage checkpoint must be a mapping.")
+
+        expected_metrics = [
+            condition.get_metric_config()
+            for condition in self._conditions
+        ]
+        if state.get("condition_metrics") != expected_metrics:
+            raise ValueError(
+                "Checkpoint stage metric references do not match configuration."
+            )
+
         saved: Sequence[ConditionValues] = state.get(
             "condition_values", ()
         )
@@ -465,13 +447,15 @@ class StageCallback(BaseCallback):
                 "Checkpoint stage-condition count does not match configuration."
             )
 
-        revisions = state.get("condition_revisions", [None] * len(self._conditions))
+        revisions = state.get("condition_revisions")
         if not isinstance(revisions, Sequence) or len(revisions) != len(self._conditions):
-            raise ValueError("Checkpoint stage-condition revision count does not match configuration.")
+            raise ValueError(
+                "Checkpoint stage-condition revision count does not match configuration."
+            )
 
         discarded_history = False
         for condition, values, revision in zip(self._conditions, saved, revisions):
-            if condition.uses_curriculum_controls and not environment_restored:
+            if condition.uses_control_metrics and not environment_restored:
                 condition.reset()
                 discarded_history = True
                 continue
@@ -490,10 +474,12 @@ class StageCallback(BaseCallback):
             or isinstance(revision, bool)
             or revision < 0
         ):
-            raise ValueError("Checkpoint stage revision must be a non-negative integer or None.")
+            raise ValueError(
+                "Checkpoint stage revision must be a non-negative integer or None."
+            )
         condition.restore_values(values)
         if not all(math.isfinite(value) for value in condition.values):
             raise ValueError("Checkpoint stage samples must be finite.")
-        if condition.sample_on_update and condition.values and revision is None:
-            raise ValueError("Checkpoint stage samples require their last statistics revision.")
-        condition.last_revision = revision if condition.sample_on_update else None
+        if condition.revision_metric is not None and condition.values and revision is None:
+            raise ValueError("Checkpoint stage samples require their last revision.")
+        condition.last_revision = revision if condition.revision_metric is not None else None

@@ -30,7 +30,7 @@ def build_training_component(output_dir: Path, command_speed: float = 0.) -> Com
     # Fixed diagnostic commands live only in the generated acceptance config.
     for name, value in (("lin_vel_x", command_speed), ("lin_vel_y", 0.), ("ang_vel_z", 0.)):
         task_config["command_manager_config"]["terms"][name] = {
-            "type":"UniformOnReset", "params":{"min_value":value,"max_value":value}}
+            "type":"Uniform", "params":{"min_value":value,"max_value":value}}
     task_config["curriculum_manager_config"] = {"terms":{}}
     task_path = output_dir.resolve() / ("moving_task.yaml" if command_speed else "standing_task.yaml")
     task_path.write_text(yaml.safe_dump(task_config, sort_keys=False), encoding="utf-8")

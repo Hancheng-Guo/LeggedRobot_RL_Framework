@@ -56,6 +56,7 @@ def make_rng_runner(runtime_context):
 
         # A generic environment: RNG persistence must not depend on curriculum.
         runner.environment = cast(BaseEnv, SimpleNamespace(
+            set_training_mode=lambda training: None,
             num_envs=1, reset=reset, step=step, close=lambda: None,
             checkpoint_state_dict=lambda: {}, load_checkpoint_state_dict=lambda state: None,
         ))

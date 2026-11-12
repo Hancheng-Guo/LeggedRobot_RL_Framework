@@ -26,7 +26,7 @@ def test_playback_terms_use_constraints_and_restore_original_sampling(
         context=runtime_context,
         model_context=model_context,
         terms={
-            name: {"type": "UniformOnReset", "params": {"min_value": 0.0, "max_value": 0.0}}
+            name: {"type": "Uniform", "params": {"min_value": 0.0, "max_value": 0.0}}
             for name in ("lin_vel_x", "lin_vel_y", "ang_vel_z")
         },
         constraints={"lin_vel_x": {"operator": "<=", "expression": "0.3"}},
@@ -40,7 +40,7 @@ def test_playback_terms_use_constraints_and_restore_original_sampling(
     assert source.polls == 0
 
     source.current["lin_vel_x"] = -0.4
-    manager.update(None)  # type: ignore[arg-type]  # UniformOnReset ignores context.
+    manager.update(None)  # type: ignore[arg-type]  # Uniform ignores context.
     torch.testing.assert_close(manager.last_command["lin_vel_x"][:, 0], torch.tensor([0.0, 0.3, 0.0]))
     assert manager.command["lin_vel_x"][1, 0] == -0.4
     assert source.polls == 0
@@ -58,7 +58,7 @@ def test_partial_reset_keeps_playback_command_when_another_env_resets(
         context=runtime_context,
         model_context=model_context,
         terms={
-            name: {"type": "UniformOnReset", "params": {"min_value": 0.0, "max_value": 0.0}}
+            name: {"type": "Uniform", "params": {"min_value": 0.0, "max_value": 0.0}}
             for name in ("lin_vel_x", "lin_vel_y", "ang_vel_z")
         },
     )
@@ -77,7 +77,7 @@ def test_deactivate_before_first_reset_does_not_resample_commands(
         model_context=model_context,
         terms={
             "lin_vel_x": {
-                "type": "UniformOnReset",
+                "type": "Uniform",
                 "params": {"min_value": 0.0, "max_value": 0.0},
             },
         },
@@ -100,7 +100,7 @@ def test_playback_wraps_all_configured_commands(runtime_context, model_context) 
         model_context=model_context,
         terms={
             "body_height": {
-                "type": "UniformOnReset",
+                "type": "Uniform",
                 "params": {"min_value": 0.0, "max_value": 0.0},
             },
         },
@@ -125,7 +125,7 @@ def test_playback_rejects_incomplete_source(runtime_context, model_context) -> N
         context=runtime_context,
         model_context=model_context,
         terms={
-            name: {"type": "UniformOnReset", "params": {"min_value": 0.0, "max_value": 0.0}}
+            name: {"type": "Uniform", "params": {"min_value": 0.0, "max_value": 0.0}}
             for name in ("lin_vel_x", "body_height")
         },
     )
@@ -146,8 +146,8 @@ def test_playback_uses_fixed_vector_commands(runtime_context, model_context) -> 
         context=runtime_context,
         model_context=model_context,
         terms={
-            "lin_vel_x": {"type": "UniformOnReset", "params": {"min_value": 0.0, "max_value": 0.0}},
-            "foot_phase_real": {"type": "UniformOnReset", "params": {"dim": 4, "min_value": 0.0, "max_value": 0.0}},
+            "lin_vel_x": {"type": "Uniform", "params": {"min_value": 0.0, "max_value": 0.0}},
+            "foot_phase_real": {"type": "Uniform", "params": {"dim": 4, "min_value": 0.0, "max_value": 0.0}},
         },
     )
     source = Source()
@@ -183,8 +183,8 @@ def test_playback_rejects_conflicting_or_wrong_size_fixed_commands(
         context=runtime_context,
         model_context=model_context,
         terms={
-            "lin_vel_x": {"type": "UniformOnReset", "params": {"min_value": 0.0, "max_value": 0.0}},
-            "foot_phase_real": {"type": "UniformOnReset", "params": {"dim": 4, "min_value": 0.0, "max_value": 0.0}},
+            "lin_vel_x": {"type": "Uniform", "params": {"min_value": 0.0, "max_value": 0.0}},
+            "foot_phase_real": {"type": "Uniform", "params": {"dim": 4, "min_value": 0.0, "max_value": 0.0}},
         },
     )
     source = Source()

@@ -44,6 +44,8 @@ def _named_tensor_squeeze(
 @register_reward
 class TrotLoopDurationTanh(BaseRewardTerm):
 
+    RESET_STATE_FIELDS = ('gait_is_moving', 'gait_loop_duration', 'gait_phases')
+
     def __init__(
         self,
         num_envs: int,

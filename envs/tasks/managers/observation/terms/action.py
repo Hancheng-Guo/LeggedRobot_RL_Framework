@@ -8,6 +8,8 @@ from envs.tasks.utils import TaskContext
 @register_observation
 class LastAction(BaseObservationTerm):
 
+    RESET_STATE_FIELDS = ('history', 'recorded_step')
+
     def __init__(
         self,
         action_dim: int,

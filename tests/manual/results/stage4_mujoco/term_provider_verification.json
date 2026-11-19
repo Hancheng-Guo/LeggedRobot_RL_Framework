@@ -1,0 +1,146 @@
+{
+  "uniform": {
+    "passed": true,
+    "render_requested": false,
+    "initial_updates": 2,
+    "resumed_updates": 2,
+    "transitions": 1024,
+    "finite_signals": true,
+    "parameter_delta_l2": 1.9906808776174822,
+    "evaluation_frozen": true,
+    "exact_height_buffer_reconstruction": true,
+    "four_future_assignments_equal": true,
+    "single_environment_playback_fixed": true,
+    "render_verified": false,
+    "checkpoint_sha256": "6aa2eb30863d1445a1312fcee96532b029dcc24333b9a310d2dd90db76b9a221",
+    "sampled_types": [
+      "plane",
+      "rough",
+      "slope"
+    ],
+    "cleanup_returned": true
+  },
+  "terrain_only": {
+    "passed": true,
+    "render_requested": false,
+    "initial_updates": 2,
+    "resumed_updates": 2,
+    "transitions": 1024,
+    "finite_signals": true,
+    "parameter_delta_l2": 1.9553251354648598,
+    "evaluation_frozen": true,
+    "exact_height_buffer_reconstruction": true,
+    "four_future_assignments_equal": true,
+    "single_environment_playback_fixed": true,
+    "render_verified": false,
+    "checkpoint_sha256": "eab5bcf5f717a6da670e9c8308cb4441d6f6727179c98e028e07232619452b15",
+    "sampled_types": [
+      "plane",
+      "rough"
+    ],
+    "cleanup_returned": true
+  },
+  "joint": {
+    "passed": true,
+    "render_requested": false,
+    "initial_updates": 2,
+    "resumed_updates": 2,
+    "transitions": 1024,
+    "finite_signals": true,
+    "parameter_delta_l2": 2.0914415260106156,
+    "evaluation_frozen": true,
+    "exact_height_buffer_reconstruction": true,
+    "four_future_assignments_equal": true,
+    "single_environment_playback_fixed": true,
+    "render_verified": false,
+    "checkpoint_sha256": "ef4c557907278096ce06aa04befba8b434b02f02fafa5318e5de0c400c27f634",
+    "sampled_types": [
+      "plane",
+      "rough",
+      "slope"
+    ],
+    "cleanup_returned": true
+  },
+  "separate": {
+    "passed": true,
+    "render_requested": false,
+    "initial_updates": 2,
+    "resumed_updates": 2,
+    "transitions": 1024,
+    "finite_signals": true,
+    "parameter_delta_l2": 1.873843197329279,
+    "evaluation_frozen": true,
+    "exact_height_buffer_reconstruction": true,
+    "four_future_assignments_equal": true,
+    "single_environment_playback_fixed": true,
+    "render_verified": false,
+    "checkpoint_sha256": "164eb283454d249e2e6ef0bc1a9e89220e2674d8f8852385ebf9b25c9477ad2f",
+    "sampled_types": [
+      "plane",
+      "rough",
+      "slope"
+    ],
+    "cleanup_returned": true
+  },
+  "difficulty_only": {
+    "passed": true,
+    "render_requested": false,
+    "initial_updates": 2,
+    "resumed_updates": 2,
+    "transitions": 1024,
+    "finite_signals": true,
+    "parameter_delta_l2": 1.826556457067787,
+    "evaluation_frozen": true,
+    "exact_height_buffer_reconstruction": true,
+    "four_future_assignments_equal": true,
+    "single_environment_playback_fixed": true,
+    "render_verified": false,
+    "checkpoint_sha256": "8d1c4ce8bd179b02b067f6226e07f03f68964e3b8a60be332dd2b46749d752b8",
+    "sampled_types": [
+      "plane",
+      "rough",
+      "slope"
+    ],
+    "cleanup_returned": true
+  },
+  "type_only": {
+    "passed": true,
+    "render_requested": false,
+    "initial_updates": 2,
+    "resumed_updates": 2,
+    "transitions": 1024,
+    "finite_signals": true,
+    "parameter_delta_l2": 1.8472376716464334,
+    "evaluation_frozen": true,
+    "exact_height_buffer_reconstruction": true,
+    "four_future_assignments_equal": true,
+    "single_environment_playback_fixed": true,
+    "render_verified": false,
+    "checkpoint_sha256": "13fb3b49690989fd72e963fa7ee27019e130a284d25dce4eb9bd979a827b5e5c",
+    "sampled_types": [
+      "rough",
+      "slope"
+    ],
+    "cleanup_returned": true
+  },
+  "axis_separate": {
+    "passed": true,
+    "render_requested": false,
+    "initial_updates": 2,
+    "resumed_updates": 2,
+    "transitions": 1024,
+    "finite_signals": true,
+    "parameter_delta_l2": 1.9824117824705925,
+    "evaluation_frozen": true,
+    "exact_height_buffer_reconstruction": true,
+    "four_future_assignments_equal": true,
+    "single_environment_playback_fixed": true,
+    "render_verified": false,
+    "checkpoint_sha256": "bcd46221ab518d0b6cd2f9264c2d7c1addf75ea02ee772c3435eb95391e5fe0c",
+    "sampled_types": [
+      "rough",
+      "slope"
+    ],
+    "cleanup_returned": true
+  }
+}

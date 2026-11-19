@@ -1,18 +1,21 @@
 import torch
 from abc import ABC, abstractmethod
 
-from envs.tasks.utils import TaskContext
+from envs.tasks.utils import TaskContext, StateOwner
 from utils import RuntimeContext
 
 
-class BaseTerminationTerm(ABC):
+class BaseTerminationTerm(StateOwner, ABC):
 
     def __init__(
         self,
+        name: str,
         context: RuntimeContext,
-        *args,
-        **kwargs,
+        *args, **kwargs,
     ) -> None:
+        
+        super().__init__(name=name)
+
         self.context = context
 
 

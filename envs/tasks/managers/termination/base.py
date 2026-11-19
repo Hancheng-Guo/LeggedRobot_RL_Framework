@@ -5,11 +5,13 @@ from collections.abc import Mapping
 from .terms import BaseTerminationTerm, get_termination_class
 from envs.simulators.utils import ModelContext
 from envs.tasks.managers.curriculum.types import CurriculumSpaceConfigs
-from envs.tasks.utils import TaskContext
+from envs.tasks.utils import TaskContext, StateManager
 from utils import RuntimeContext
 
 
-class TerminationManager:
+class TerminationManager(StateManager):
+
+    RESET_STATE_FIELDS = ('term_terminated',)
 
     @classmethod
     def get_curriculum_space_config(
@@ -60,6 +62,7 @@ class TerminationManager:
 
             cls = get_termination_class(name)
             self.terms[name] = cls(
+                name=name,
                 context=self.context,
                 model_context=self.model_context,
                 **config,

@@ -168,7 +168,7 @@ def test_lpac_uses_first_window_as_zero_progress_baseline(
         term_rewards={"action_diff_l2": torch.tensor([1.0, 2.0, 3.0])},
         total_reward=torch.tensor([1.0, 2.0, 3.0]),
     )
-    manager.reset(torch.tensor([0, 1, 2]))
+    manager.finalize_episodes(torch.tensor([0, 1, 2]))
     manager.resample(torch.tensor([0, 1, 2]))
 
     torch.testing.assert_close(
@@ -198,7 +198,7 @@ def test_lpac_prioritizes_positive_progress_after_second_window(
         term_rewards={"action_diff_l2": torch.tensor([1.0, 2.0, 3.0])},
         total_reward=torch.tensor([1.0, 2.0, 3.0]),
     )
-    manager.reset(torch.tensor([0, 1, 2]))
+    manager.finalize_episodes(torch.tensor([0, 1, 2]))
     manager.resample(torch.tensor([0, 1, 2]))
 
     buffer.assigned_cell_ids.copy_(torch.tensor([0, 1, 2]))
@@ -207,7 +207,7 @@ def test_lpac_prioritizes_positive_progress_after_second_window(
         term_rewards={"action_diff_l2": torch.tensor([2.0, 1.0, 3.0])},
         total_reward=torch.tensor([2.0, 1.0, 3.0]),
     )
-    manager.reset(torch.tensor([0, 1, 2]))
+    manager.finalize_episodes(torch.tensor([0, 1, 2]))
     manager.resample(torch.tensor([0, 1, 2]))
 
     torch.testing.assert_close(
@@ -232,7 +232,7 @@ def test_lpac_waits_when_any_cell_is_below_sample_threshold(
     buffer.sample_count.copy_(torch.tensor([2, 2, 1]))
     buffer.reward_sum.copy_(torch.tensor([4.0, 6.0, 7.0]))
 
-    manager.reset()
+    manager.finalize_episodes()
     manager.resample()
 
     torch.testing.assert_close(
@@ -266,7 +266,7 @@ def test_command_terms_share_one_joint_space_sample(
         },
     )
 
-    curriculum.reset()
+    curriculum.finalize_episodes()
     curriculum.resample()
     command.reset()
 
@@ -348,7 +348,7 @@ def test_curriculum_command_noise_scale_uses_bin_width(
         def resample(self, env_ids=None):
             pass
 
-        def get_command(self, dimension, env_ids=None):
+        def get_bounds(self, dimension, env_ids=None):
             selected_count = num_envs if env_ids is None else env_ids.numel()
             return torch.zeros(selected_count, 1)
 
@@ -407,7 +407,7 @@ def test_curriculum_supports_multidimensional_command_term(
         terms=terms,
     )
 
-    curriculum.reset()
+    curriculum.finalize_episodes()
     curriculum.resample()
     command.reset()
 
@@ -437,7 +437,7 @@ def test_multidimensional_curriculum_noise_is_independent(
         def resample(self, env_ids=None):
             pass
 
-        def get_command(self, dimension, env_ids=None):
+        def get_bounds(self, dimension, env_ids=None):
             selected_count = num_envs if env_ids is None else env_ids.numel()
             return torch.zeros(selected_count, 4)
 

@@ -32,6 +32,12 @@ def build_training_component(output_dir: Path, command_speed: float = 0.) -> Com
         task_config["command_manager_config"]["terms"][name] = {
             "type":"Uniform", "params":{"min_value":value,"max_value":value}}
     task_config["curriculum_manager_config"] = {"terms":{}}
+    task_config["randomization_manager_config"]["terms"]["terrain"]["category"]["type"] = "Weighted"
+    task_config["randomization_manager_config"]["terms"]["terrain"]["category"]["params"].pop("curriculum", None)
+    task_config["randomization_manager_config"]["terms"]["terrain"]["difficulty"]["type"] = "Fixed"
+    task_config["randomization_manager_config"]["terms"]["terrain"]["difficulty"]["params"].pop("curriculum", None)
+    task_config["randomization_manager_config"]["terms"]["terrain"]["difficulty"]["params"]["values"] = [.25]
+    task_config["randomization_manager_config"]["terms"]["terrain"]["seed"] = 39
     task_path = output_dir.resolve() / ("moving_task.yaml" if command_speed else "standing_task.yaml")
     task_path.write_text(yaml.safe_dump(task_config, sort_keys=False), encoding="utf-8")
     return Component(

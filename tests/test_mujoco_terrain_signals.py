@@ -9,6 +9,7 @@ import yaml
 from envs.vector_env import VectorEnv
 from envs.tasks.managers.randomization.terms.terrain import TerrainRandomizationTerm
 from envs.tasks.locomotion import LocomotionTaskLogic
+from envs.tasks.managers.curriculum.types import CurriculumSampler
 from envs.simulators.terrain import TerrainPatch
 from envs.tasks.managers.reward.terms.contact import IllegalContactL1
 from envs.tasks.managers.termination.terms.contact import BodyContact
@@ -22,6 +23,12 @@ def terrain_task_config():
     config = load_yaml(ROOT/'configs/tasks/locomotion_unitree_go1_standing.yaml')
     config['randomization_manager_config'] = load_yaml(
         ROOT/'configs/tasks/locomotion_anymal_c_phase.yaml')['randomization_manager_config']
+    config["randomization_manager_config"]["terms"]["terrain"]["category"]["type"] = "Weighted"
+    config["randomization_manager_config"]["terms"]["terrain"]["category"]["params"].pop("curriculum", None)
+    config["randomization_manager_config"]["terms"]["terrain"]["difficulty"]["type"] = "Fixed"
+    config["randomization_manager_config"]["terms"]["terrain"]["difficulty"]["params"].pop("curriculum", None)
+    config["randomization_manager_config"]["terms"]["terrain"]["difficulty"]["params"]["values"] = [.25]
+    config["randomization_manager_config"]["terms"]["terrain"]["seed"] = 39
     return config
 
 
@@ -32,6 +39,9 @@ def terrain_environment(runtime_context, task_path, num_envs=3):
         ComponentInfo('locomotion', task_path))
     env.config_update(component, num_envs=num_envs, max_episode_steps=50)
     env.reset()
+    # Hold the diagnostic surfaces while testing signals and automatic resets.
+    assert isinstance(env.task, LocomotionTaskLogic)
+    env.task.randomization_manager.set_training_mode(False)
     return env
 
 
@@ -54,7 +64,7 @@ def task_context(env, env_ids=None):
 
 def test_equivalent_stances_on_actual_slope_have_equal_height_signals(runtime_context, tmp_path):
     config = terrain_task_config()
-    config['randomization_manager_config']['terms']['terrain']['types'] = {'slope':{'max_slope':.3}}
+    config['randomization_manager_config']['terms']['terrain']['category']['params']['values'] = {'slope':{'max_slope':.3}}
     path = tmp_path/'task.yaml'
     path.write_text(yaml.safe_dump(config, sort_keys=False), encoding='utf-8')
     env = terrain_environment(runtime_context, path, 2)
@@ -131,9 +141,9 @@ def test_real_trunk_contact_detected_on_all_three_surfaces(env):
     positions[:, 2] = ground + .02
     env.simulator.set_root_positions(torch.arange(3), positions)
     context=task_context(env)
-    assert BodyContact(context=env.context,model_context=env.simulator.model_context,
+    assert BodyContact(name="BodyContact", context=env.context,model_context=env.simulator.model_context,
                        body_names=['trunk']).compute(context).all()
-    penalty=IllegalContactL1(context=env.context,model_context=env.simulator.model_context,num_envs=3).compute(context)
+    penalty=IllegalContactL1(name="IllegalContactL1", context=env.context,model_context=env.simulator.model_context,num_envs=3).compute(context)
     assert (penalty>0).all()
 
 
@@ -228,7 +238,12 @@ def test_existing_anymal_phase_config_runs_mixed_terrain_and_partial_reset(runti
         assert observation.shape == (3,120)
         assert isinstance(env.task, LocomotionTaskLogic)
         terrain = cast(TerrainRandomizationTerm,env.task.randomization_manager.terms['terrain'])
-        assert [patch.terrain_type for patch in terrain.patches if patch is not None] == ['plane','slope','rough']
+        assert all(patch is not None and patch.terrain_type in terrain.config.category.values for patch in terrain.patches)
+        course = cast(CurriculumSampler, env.task.curriculum_manager.get_term('locomotion'))
+        assert terrain.assignments is not None
+        lower, upper = course.get_bounds('terrain_category')
+        assert [terrain.config.category.resolve_index(int(index)) for index in lower[:, 0].tolist()] == terrain.assignments.categories
+        torch.testing.assert_close(lower, upper)
         assert terrain.config.spawn_size == (1.5,1.2)
         seen = torch.zeros(3,4,dtype=torch.bool)
         for _ in range(30):
@@ -242,6 +257,8 @@ def test_existing_anymal_phase_config_runs_mixed_terrain_and_partial_reset(runti
         env.current_episode_steps[1] = 99
         env.step(torch.zeros(3,12))
         assert env.current_episode_steps.tolist() == [31,0,31]
-        assert all(a is b for a,b in zip(patches,terrain.patches))
+        assert patches[0] is terrain.patches[0] and patches[2] is terrain.patches[2]
+        lower, _ = course.get_bounds('terrain_difficulty')
+        assert [terrain.config.difficulty.resolve_index(int(index)) for index in lower[:, 0].tolist()] == terrain.assignments.difficulties
     finally:
         env.close()

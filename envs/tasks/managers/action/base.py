@@ -5,10 +5,13 @@ from collections.abc import Mapping
 from .terms import BaseActionTerm, get_action_class
 from envs.simulators.utils import ModelContext
 from envs.tasks.managers.curriculum.types import CurriculumSpaceConfigs
+from envs.tasks.utils import StateManager
 from utils import RuntimeContext
 
 
-class ActionManager:
+class ActionManager(StateManager):
+
+    RESET_STATE_FIELDS = ('action', 'control', 'last_action', 'last_control')
 
     @classmethod
     def get_curriculum_space_config(
@@ -76,6 +79,7 @@ class ActionManager:
                 params = {}
 
             self.terms[name] = cls(
+                name=name,
                 output_dim=dim,
                 context=self.context,
                 model_context=self.model_context,

@@ -342,7 +342,7 @@ def test_task_routes_real_reward_sources_without_dt_scaling(
     torch.testing.assert_close(task.reward_manager.raw_term_rewards["action_diff_l2"], torch.tensor([5.0, 4.0]))
     torch.testing.assert_close(task.reward_manager.term_rewards["joint_velocity_l2"], torch.tensor([-30.0, -15.0]))
 
-    manager.reset(torch.tensor([0]))
+    manager.finalize_episodes(torch.tensor([0]))
     manager.resample(torch.tensor([0]))
     torch.testing.assert_close(term.buffer.reward_sum, torch.tensor([expected[0], 0.0]))
     torch.testing.assert_close(cast(LpacReward | FastLpacReward, manager.get_term("posture")).buffer.reward_sum, torch.tensor([15.0, 0.0]))
@@ -369,7 +369,7 @@ def test_total_reward_source_uses_supplied_vector_without_term_summation(
     total_reward = torch.tensor([2.0, -5.0])
     # A total-only source needs no per-term data and must not rebuild the sum.
     manager.update(raw_term_rewards={}, term_rewards={}, total_reward=total_reward)
-    manager.reset()
+    manager.finalize_episodes()
     manager.resample()
 
     for instance in manager.terms.values():
@@ -401,7 +401,7 @@ def test_instance_rewards_settle_independently_and_clear_invalid_assignments(
             raw_term_rewards=raw, term_rewards=weighted,
             total_reward=torch.tensor([20.0, 40.0]),
         )
-    manager.reset(torch.tensor([0]))
+    manager.finalize_episodes(torch.tensor([0]))
     manager.resample(torch.tensor([0]))
 
     expected_posture = 6.0 if normalize else 12.0
@@ -412,7 +412,7 @@ def test_instance_rewards_settle_independently_and_clear_invalid_assignments(
     torch.testing.assert_close(term.episode_reward_sum, torch.tensor([0.0, 60.0]))
     torch.testing.assert_close(cast(LpacReward | FastLpacReward, manager.get_term("posture")).episode_reward_sum, torch.tensor([0.0, 24.0]))
 
-    manager.reset()
+    manager.finalize_episodes()
     manager.resample()
     expected_motion = 30.0 if normalize else 60.0
     torch.testing.assert_close(term.buffer.reward_sum, torch.tensor([0.0, expected_motion]))
@@ -473,7 +473,7 @@ def test_lpac_reset_records_episode_scores_for_different_lengths(
     term.min_samples_per_cell = 10
     buffer = term.buffer
     # Initial reset has no collected steps, including in normalized mode.
-    manager.reset()
+    manager.finalize_episodes()
     manager.resample()
     torch.testing.assert_close(buffer.reward_sum, torch.zeros(3))
     torch.testing.assert_close(buffer.sample_count, torch.zeros(3, dtype=torch.long))
@@ -485,7 +485,7 @@ def test_lpac_reset_records_episode_scores_for_different_lengths(
         term_rewards={"action_diff_l2": reward},
         total_reward=reward,
     )
-    manager.reset(torch.tensor([0]))
+    manager.finalize_episodes(torch.tensor([0]))
     manager.resample(torch.tensor([0]))
     torch.testing.assert_close(buffer.reward_sum, torch.tensor([1.0, 0.0, 0.0]))
     torch.testing.assert_close(term.episode_reward_sum, torch.tensor([0.0, -2.0, 3.0]))
@@ -496,14 +496,14 @@ def test_lpac_reset_records_episode_scores_for_different_lengths(
         term_rewards={"action_diff_l2": reward},
         total_reward=reward,
     )
-    manager.reset(torch.tensor([1]))
+    manager.finalize_episodes(torch.tensor([1]))
     manager.resample(torch.tensor([1]))
     manager.update(
         raw_term_rewards={"action_diff_l2": reward},
         term_rewards={"action_diff_l2": reward},
         total_reward=reward,
     )
-    manager.reset(torch.tensor([2]))
+    manager.finalize_episodes(torch.tensor([2]))
     manager.resample(torch.tensor([2]))
 
     expected = [1.0, -2.0, 3.0] if normalize else [1.0, -4.0, 9.0]
@@ -538,7 +538,7 @@ def test_lpac_full_reset_averages_episode_scores_per_cell(
         term_rewards={"action_diff_l2": torch.tensor([1.0, 2.0, 3.0])},
         total_reward=torch.tensor([1.0, 2.0, 3.0]),
     )
-    manager.reset()
+    manager.finalize_episodes()
     manager.resample()
 
     expected_sum = torch.tensor([3.0, 3.0, 0.0] if normalize else [6.0, 6.0, 0.0])
@@ -550,7 +550,7 @@ def test_lpac_full_reset_averages_episode_scores_per_cell(
     torch.testing.assert_close(term.episode_step_count, torch.zeros(3, dtype=torch.long))
 
     # Resetting again without a new step must not count another episode.
-    manager.reset()
+    manager.finalize_episodes()
     manager.resample()
     torch.testing.assert_close(buffer.reward_sum, expected_sum)
     torch.testing.assert_close(buffer.sample_count, torch.tensor([2, 1, 0]))
@@ -585,7 +585,7 @@ def test_curriculum_sampling_metrics_are_collected_after_settlement_as_snapshots
         raw_term_rewards={"action_diff_l2": reward},
         term_rewards={"action_diff_l2": reward}, total_reward=reward,
     ) == {}
-    manager.reset()
+    manager.finalize_episodes()
     settled = manager.collect_metrics()
     torch.testing.assert_close(settled[prefix + "learning_progress"], reward)
     torch.testing.assert_close(settled[prefix + "probabilities"], term.probabilities)
@@ -599,7 +599,7 @@ def test_curriculum_sampling_metrics_are_collected_after_settlement_as_snapshots
         raw_term_rewards={"action_diff_l2": next_reward},
         term_rewards={"action_diff_l2": next_reward}, total_reward=next_reward,
     )
-    manager.reset()
+    manager.finalize_episodes()
     torch.testing.assert_close(settled[prefix + "learning_progress"], reward)
 
     # Consumers may modify their snapshot without changing the sampler.
@@ -626,7 +626,7 @@ def test_cell_statistics_require_real_episode_samples_before_becoming_valid(
     assert initial[prefix + "num_cells"].item() == 3
     assert initial[prefix + "all_cells_valid"].item() == 0
     assert prefix + "reward_mean" not in initial
-    manager.reset()
+    manager.finalize_episodes()
     manager.resample()
     assert manager.collect_metrics()[prefix + "statistics_revision"].item() == 0
 
@@ -637,7 +637,7 @@ def test_cell_statistics_require_real_episode_samples_before_becoming_valid(
             raw_term_rewards={"action_diff_l2": reward},
             term_rewards={"action_diff_l2": reward}, total_reward=reward,
         )
-        manager.reset(torch.tensor([0]))
+        manager.finalize_episodes(torch.tensor([0]))
         manager.resample(torch.tensor([0]))
         if reward[0] == 2.0:
             assert manager.collect_metrics()[prefix + "coverage"].item() == 0
@@ -673,7 +673,7 @@ def test_cell_statistics_exclude_inferred_baselines_and_survive_window_clears(
             raw_term_rewards={"action_diff_l2": reward},
             term_rewards={"action_diff_l2": reward}, total_reward=reward,
         )
-    manager.reset()
+    manager.finalize_episodes()
     manager.resample()
     scale = 1.0 if normalize else 2.0
     first = manager.collect_metrics()
@@ -687,7 +687,7 @@ def test_cell_statistics_exclude_inferred_baselines_and_survive_window_clears(
     assert torch.isnan(stats.reward_mean[2])
     if fast:
         assert torch.isfinite(term.last_reward_mean[2])
-    manager.reset()
+    manager.finalize_episodes()
     manager.resample()
     assert manager.collect_metrics()[prefix + "statistics_revision"].item() == 1
 
@@ -697,7 +697,7 @@ def test_cell_statistics_exclude_inferred_baselines_and_survive_window_clears(
         raw_term_rewards={"action_diff_l2": reward},
         term_rewards={"action_diff_l2": reward}, total_reward=reward,
     )
-    manager.reset(torch.tensor([0]))
+    manager.finalize_episodes(torch.tensor([0]))
     manager.resample(torch.tensor([0]))
     second = manager.collect_metrics()
     assert second[prefix + "coverage"].item() == 1.0
@@ -727,7 +727,7 @@ def test_cell_statistics_use_equal_cell_weights_and_independent_instances(
     term.buffer.assigned_cell_ids.copy_(torch.tensor([0, 0, 1]))
     cast(LpacReward | FastLpacReward, manager.get_term("posture")).buffer.assigned_cell_ids.copy_(torch.tensor([0, 1, 1]))
     manager.update(raw_term_rewards={}, term_rewards={}, total_reward=torch.tensor([2.0, 4.0, 9.0]))
-    manager.reset()
+    manager.finalize_episodes()
     manager.resample()
     info = manager.collect_metrics()
     assert info[f"curriculum/{name}/reward_mean"].item() == 6.0
@@ -756,11 +756,11 @@ def test_stage_consumes_only_fresh_fully_covered_cell_statistics(
         raw_term_rewards={"action_diff_l2": reward},
         term_rewards={"action_diff_l2": reward}, total_reward=reward,
     )
-    manager.reset(torch.tensor([0]))
+    manager.finalize_episodes(torch.tensor([0]))
     manager.resample(torch.tensor([0]))
     callback._on_step_end(manager.collect_metrics())
     assert not callback._conditions[0].values
-    manager.reset(torch.tensor([1, 2]))
+    manager.finalize_episodes(torch.tensor([1, 2]))
     manager.resample(torch.tensor([1, 2]))
     info = manager.collect_metrics()
     assert info[prefix + "all_cells_valid"].item() == 1.0
@@ -775,7 +775,7 @@ def test_stage_consumes_only_fresh_fully_covered_cell_statistics(
         raw_term_rewards={"action_diff_l2": reward},
         term_rewards={"action_diff_l2": reward}, total_reward=reward,
     )
-    manager.reset()
+    manager.finalize_episodes()
     manager.resample()
     callback._on_step_end(manager.collect_metrics())
     assert callback.stop_training

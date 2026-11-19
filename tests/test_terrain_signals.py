@@ -46,10 +46,10 @@ HEIGHT_TERMS = [
 @pytest.mark.parametrize('cls,params', HEIGHT_TERMS)
 def test_ground_height_signals_are_translation_invariant(runtime_context, model_context, cls, params):
     context = height_context(model_context)
-    term = cls(context=runtime_context, model_context=model_context, **params)
+    term = cls(name=cls.__name__, context=runtime_context, model_context=model_context, **params)
     value = term.compute(context)
     torch.testing.assert_close(value[0], value[1], rtol=1e-5, atol=1e-6)
-    world = cls(context=runtime_context, model_context=model_context, height_reference='world', **params)
+    world = cls(name=cls.__name__, context=runtime_context, model_context=model_context, height_reference='world', **params)
     world_value = world.compute(context)
     assert not torch.allclose(world_value[0], world_value[1])
 
@@ -57,7 +57,7 @@ def test_ground_height_signals_are_translation_invariant(runtime_context, model_
 @pytest.mark.parametrize('cls,params', HEIGHT_TERMS)
 def test_flat_fallback_and_zero_ground_are_exactly_compatible(runtime_context, model_context, cls, params):
     context = height_context(model_context, relative=False)
-    term = cls(context=runtime_context, model_context=model_context, **params)
+    term = cls(name=cls.__name__, context=runtime_context, model_context=model_context, **params)
     old_value = term.compute(context)
     sampled = replace(context, state=replace(context.state, base_ground_height=torch.zeros(2),
                       foot_ground_heights=torch.zeros(2,1), ground_valid=torch.ones(2,dtype=torch.bool)))
@@ -67,14 +67,14 @@ def test_flat_fallback_and_zero_ground_are_exactly_compatible(runtime_context, m
 @pytest.mark.parametrize('cls,params', HEIGHT_TERMS)
 def test_invalid_height_reference_rejected(runtime_context, model_context, cls, params):
     with pytest.raises(ValueError, match='height_reference'):
-        cls(context=runtime_context, model_context=model_context, height_reference='invalid', **params)
+        cls(name=cls.__name__, context=runtime_context, model_context=model_context, height_reference='invalid', **params)
 
 
 @pytest.mark.parametrize('cls,params', HEIGHT_TERMS)
 def test_invalid_ground_signals_are_masked_without_fake_height_rewards(runtime_context, model_context, cls, params):
     context = height_context(model_context)
     context.state.ground_valid = torch.tensor([True, False])
-    value = cls(context=runtime_context, model_context=model_context, **params).compute(context)
+    value = cls(name=cls.__name__, context=runtime_context, model_context=model_context, **params).compute(context)
     assert torch.count_nonzero(value[1]) == 0
     assert torch.isfinite(value).all()
 
@@ -82,7 +82,7 @@ def test_invalid_ground_signals_are_masked_without_fake_height_rewards(runtime_c
 def test_empty_contact_reward_uses_selected_batch_size(runtime_context, model_context):
     context = height_context(model_context)
     context = replace(context, state=context.state.select(torch.tensor([1])), env_ids=torch.tensor([1]))
-    term = IllegalContactL1(context=runtime_context, model_context=model_context, num_envs=2)
+    term = IllegalContactL1(name="IllegalContactL1", context=runtime_context, model_context=model_context, num_envs=2)
     assert term.compute(context).shape == (1,)
 
 
@@ -103,8 +103,8 @@ def test_manual_training_components_reuse_existing_configs(tmp_path):
     assert load_yaml(component.environment.config) == {'num_envs':8,'max_episode_steps':200}
     source = load_yaml(root/'configs/tasks/locomotion_anymal_c_phase.yaml')
     diagnostic = load_yaml(component.task.config)
-    assert list(diagnostic['randomization_manager_config']['terms']['terrain']['types']) == list(
-        source['randomization_manager_config']['terms']['terrain']['types'])
+    assert list(diagnostic['randomization_manager_config']['terms']['terrain']['category']['params']['values']) == list(
+        source['randomization_manager_config']['terms']['terrain']['category']['params']['values'])
     assert list(diagnostic['observation_manager_config']['terms']) == list(
         source['observation_manager_config']['terms'])
     moving = module.build_training_component(tmp_path/'moving', .3)
@@ -229,7 +229,7 @@ def test_terrain_bounds_term_is_optional_and_uses_region_not_ground_valid(runtim
     context.state.terrain_in_bounds = None if in_bounds is None else torch.tensor(in_bounds)
     context.state.ground_valid = torch.tensor([False, True])
     expected = torch.zeros(2, dtype=torch.bool) if in_bounds is None else ~torch.tensor(in_bounds)
-    term = TerrainBounds(context=runtime_context)
+    term = TerrainBounds(name="TerrainBounds", context=runtime_context)
     torch.testing.assert_close(term.compute(context), expected)
     manager = TerminationManager(2, runtime_context, model_context, terms={})
     terminated, info = manager.compute(context)

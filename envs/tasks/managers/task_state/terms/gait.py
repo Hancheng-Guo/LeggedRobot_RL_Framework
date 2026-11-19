@@ -13,6 +13,8 @@ _IDLE_SPEED_THRESHOLD = 0.1
 @register_task_state
 class QuadrupedalGaitPhase(BaseTaskStateTerm):
 
+    RESET_STATE_FIELDS = ('_value',)
+
     def __init__(
         self,
         command_names: Sequence[str] = ("lin_vel_x", "lin_vel_y", "ang_vel_z"),

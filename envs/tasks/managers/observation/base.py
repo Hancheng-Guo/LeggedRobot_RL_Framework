@@ -5,11 +5,13 @@ from collections.abc import Mapping
 from .terms import BaseObservationTerm, get_observation_class
 from envs.simulators.utils import ModelContext
 from envs.tasks.managers.curriculum.types import CurriculumSpaceConfigs
-from envs.tasks.utils import TaskContext
+from envs.tasks.utils import TaskContext, StateManager
 from utils import RuntimeContext
 
 
-class ObservationManager:
+class ObservationManager(StateManager):
+
+    RESET_STATE_FIELDS = ()
 
     @classmethod
     def get_curriculum_space_config(
@@ -71,6 +73,7 @@ class ObservationManager:
 
             cls = get_observation_class(name)
             self.terms[name] = cls(
+                name=name,
                 context=self.context,
                 model_context=self.model_context,
                 command_dim=self.command_dim,

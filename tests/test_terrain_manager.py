@@ -48,19 +48,20 @@ class PhysicalBackend:
         self.positions[env_ids_tensor] = positions
 
 
-def make_manager(context, num_envs=3):
-    config = TerrainConfig.from_mapping(dict(types={"rough": {"max_height": .05}},
-        spawn_size=[1, 1], difficulty_levels=[.25, 1], seed=17))
-    manager = TerrainRandomizationTerm(num_envs, context, **asdict(config))
+def make_manager(context, num_envs=3, difficulty_type="Fixed"):
+    config = TerrainConfig.from_mapping(dict(spawn_size=[1, 1], seed=17, category={'type': 'Fixed', 'params': {'values': {'rough': {'max_height': 0.05}}}}, difficulty={'type': difficulty_type, 'params': {'values': [.25] if difficulty_type == 'Fixed' else [.25, 1.]}}))
+    manager = TerrainRandomizationTerm(num_envs=num_envs, context=context, name="TerrainRandomizationTerm", **config.to_mapping())
     backend = PhysicalBackend(context, num_envs)
     manager.bind(backend)
     backend.events.clear()
     return manager, backend
 
 
-def reset_from_environment(term, backend, env_ids=None, difficulty_indices=None):
+def reset_from_environment(term, backend, env_ids=None, difficulties=None):
     try:
-        term.before_simulator_reset(env_ids, difficulty_indices)
+        if difficulties is not None:
+            term.set_difficulty(torch.arange(term.num_envs) if env_ids is None else env_ids, difficulties)
+        term.before_simulator_reset(env_ids)
         backend.reset(env_ids)
         term.after_simulator_reset(env_ids)
         term.commit_simulator_reset(env_ids)
@@ -70,7 +71,7 @@ def reset_from_environment(term, backend, env_ids=None, difficulty_indices=None)
 
 
 def test_manager_coordinates_geometry_reset_and_safe_spawn(runtime_context):
-    manager, backend = make_manager(runtime_context)
+    manager, backend = make_manager(runtime_context, difficulty_type="Uniform")
     original = manager.patches
     reset_from_environment(manager, backend, torch.tensor([2]), torch.tensor([1]))
     assert manager.patches[2] is not None
@@ -97,14 +98,14 @@ def test_manager_rejects_invalid_choices_before_backend_mutation(runtime_context
     assert manager.assignments is not None
     before = manager.assignments.state_dict()
     with pytest.raises(ValueError):
-        manager.before_simulator_reset(torch.tensor([1]), torch.tensor([2]))
+        manager.set_difficulty(torch.tensor([1]), torch.tensor([2]))
     assert manager.assignments.state_dict() == before
     assert backend.events == []
 
 
 def test_manager_validates_spawn_space_without_engine_objects(runtime_context):
-    config = TerrainConfig.from_mapping(dict(types={"rough": {"max_height": .05}}))
-    manager = TerrainRandomizationTerm(3, runtime_context, **asdict(config))
+    config = TerrainConfig.from_mapping(dict(category={'type': 'Fixed', 'params': {'values': {'rough': {'max_height': 0.05}}}}))
+    manager = TerrainRandomizationTerm(num_envs=3, context=runtime_context, name="TerrainRandomizationTerm", **config.to_mapping())
     backend = PhysicalBackend(runtime_context)
     backend.measured = replace(backend.measured, collision_upper=(.4, .1, .2))
     with pytest.raises(ValueError, match="collision footprint"):
@@ -113,7 +114,7 @@ def test_manager_validates_spawn_space_without_engine_objects(runtime_context):
 
 
 def test_legacy_plane_does_not_measure_allocate_or_move_spawn(runtime_context):
-    manager = TerrainRandomizationTerm(3, runtime_context)
+    manager = TerrainRandomizationTerm(num_envs=3, context=runtime_context, name="TerrainRandomizationTerm")
     backend = PhysicalBackend(runtime_context)
     manager.bind(backend)
     manager.before_simulator_reset()
@@ -124,7 +125,7 @@ def test_legacy_plane_does_not_measure_allocate_or_move_spawn(runtime_context):
 
 def test_task_randomization_owns_policy_and_preserves_unchanged_configuration(runtime_context, model_context):
     task = LocomotionTaskLogic(runtime_context)
-    config: dict[str, Any] = {"terms": {"terrain": dict(types={"rough": {"max_height": .05}}, spawn_size=[1, 1])}}
+    config: dict[str, Any] = {"terms": {"terrain": dict(spawn_size=[1, 1], category={'type': 'Weighted', 'params': {'values': {'rough': {'max_height': 0.05}}}})}}
     task.prepare(config={"randomization_manager_config": config})
     assert not hasattr(task, "randomization_manager")
     assert task.get_simulator_requirements()["terrain_geometry"] is not None
@@ -149,9 +150,11 @@ def test_task_randomization_owns_policy_and_preserves_unchanged_configuration(ru
     assert not any(isinstance(event, tuple) and event[0] == "reset" for event in backend.events)
     backend.reset(torch.tensor([1]))
     task.after_simulator_reset(torch.tensor([1]))
+    task.reset(torch.tensor([1]))
+    task.commit_simulator_reset(torch.tensor([1]))
     patches = terrain.patches
     # Explicit default weights and omitted weights describe the same policy.
-    config["terms"]["terrain"]["types"]["rough"]["weight"] = 1
+    config["terms"]["terrain"]["category"]["params"]["values"]["rough"]["weight"] = 1
     task.prepare(config={"randomization_manager_config": config})
     build_task()
     assert task.randomization_manager is manager
@@ -187,10 +190,10 @@ def test_base_task_has_no_randomization_dependency(runtime_context, model_contex
 
 
 def test_manager_configuration_matching_uses_effective_term_values(runtime_context):
-    terms = {"terrain": dict(types={"rough": {"max_height": .05}}, spawn_size=[1, 1])}
+    terms = {"terrain": dict(spawn_size=[1, 1], category={'type': 'Fixed', 'params': {'values': {'rough': {'max_height': 0.05}}}})}
     manager = RandomizationManager(3, runtime_context, terms=terms)
     assert manager.matches_config(3, terms=terms)
-    changed = {"terrain": dict(terms["terrain"], types={"rough":{"max_height":.1}})}
+    changed = {"terrain": dict(terms['terrain'], category={'type': 'Fixed', 'params': {'values': {'rough': {'max_height': 0.1}}}})}
     assert not manager.matches_config(3, terms=changed)
     assert not manager.matches_config(4, terms=terms)
     assert not manager.matches_config(3)
@@ -202,12 +205,12 @@ def test_layout_declaration_does_not_construct_randomization_terms(monkeypatch):
 
     monkeypatch.setattr(TerrainRandomizationTerm, "__init__", unexpected_construction)
     monkeypatch.setattr(RandomizationManager, "__init__", unexpected_construction)
-    config = {"terrain": dict(types={"rough": {"max_height": .05}}, spawn_size=[1, 1])}
+    config = {"terrain": dict(spawn_size=[1, 1], category={'type': 'Fixed', 'params': {'values': {'rough': {'max_height': 0.05}}}})}
     requirements = RandomizationManager.get_simulator_requirements(terms=config)
     assert requirements["terrain_geometry"] is not None
 
 
-@pytest.mark.parametrize("terms", [{"friction_typo": {}}, {"terrain": {"types": {"unknown":{}}}}])
+@pytest.mark.parametrize("terms", [{"friction_typo": {}}, {"terrain": {'category': {'type': 'Fixed', 'params': {'values': {'unknown': {}}}}}}])
 def test_task_randomization_rejects_invalid_terms(runtime_context, terms):
     with pytest.raises(ValueError):
         RandomizationManager(3, runtime_context, terms=terms)
@@ -239,9 +242,12 @@ def test_registry_dispatch_and_rollback_across_terms(runtime_context, monkeypatc
     events = []
 
     class Probe(BaseRandomizationTerm):
-        @classmethod
-        def normalize_config(cls, params):
-            return dict(params)
+        def __init__(self, *args, value, fail, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.config = {"value": value, "fail": fail}
+
+        def matches_config(self, params):
+            return self.config == params
 
         @classmethod
         def get_simulator_requirements(cls, params):
@@ -265,7 +271,7 @@ def test_registry_dispatch_and_rollback_across_terms(runtime_context, monkeypatc
             events.append("abort")
 
     monkeypatch.setitem(RANDOMIZATION_CLASS_MAP, "probe", Probe)
-    terrain = dict(types={"rough": {"max_height": .05}}, spawn_size=[1, 1])
+    terrain = dict(spawn_size=[1, 1], category={'type': 'Fixed', 'params': {'values': {'rough': {'max_height': 0.05}}}})
     terms = {"terrain": terrain, "probe": {"value": 7, "fail": True}}
     assert RandomizationManager.get_simulator_requirements(terms)["probe_resource"] == 7
     manager = RandomizationManager(3, runtime_context, terms)
@@ -281,10 +287,11 @@ def test_registry_dispatch_and_rollback_across_terms(runtime_context, monkeypatc
     assert events == ["bind", "before", "after", "abort"]
     assert term.assignments.state_dict() == old and term.patches == (None, None, None)
     assert torch.count_nonzero(backend.positions) == 0
-    manager.terms["probe"].config["fail"] = False
+    cast(Probe, manager.terms["probe"]).config["fail"] = False
     manager.before_simulator_reset(torch.tensor([1]))
     backend.reset(torch.tensor([1]))
     manager.after_simulator_reset(torch.tensor([1]))
+    manager.commit_simulator_reset(torch.tensor([1]))
     assert events[-3:] == ["before", "after", "commit"]
     assert term.assignments.generations == [0, 1, 0]
 
@@ -293,10 +300,6 @@ def test_requirements_reject_conflicting_resources(runtime_context, monkeypatch)
     from envs.tasks.managers.randomization.terms import BaseRandomizationTerm, RANDOMIZATION_CLASS_MAP
 
     class Resource(BaseRandomizationTerm):
-        @classmethod
-        def normalize_config(cls, params):
-            return dict(params)
-
         @classmethod
         def get_simulator_requirements(cls, params):
             return {"shared_resource": params["value"]}
@@ -333,12 +336,13 @@ def test_episode_reset_reuses_existing_terrain(runtime_context, monkeypatch, ids
 
 
 def test_only_changed_difficulty_regenerates_selected_terrain(runtime_context):
-    term, backend = make_manager(runtime_context)
+    term, backend = make_manager(runtime_context, difficulty_type="Uniform")
+    term.set_difficulty(torch.arange(3), torch.full((3,), .25))
     reset_from_environment(term, backend)
     assert term.assignments is not None
     patches = term.patches
     backend.events.clear()
-    term.set_difficulty(torch.tensor([2, 0]), torch.tensor([1, 0]))
+    term.set_difficulty(torch.tensor([2, 0]), torch.tensor([1., .25]))
     reset_from_environment(term, backend, torch.tensor([2, 0]))
     assert term.assignments.generations == [1, 1, 2]
     assert term.patches[0] is patches[0] and term.patches[1] is patches[1]

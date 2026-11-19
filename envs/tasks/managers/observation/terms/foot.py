@@ -96,6 +96,8 @@ class FootContactState(BaseObservationTerm):
 @register_observation
 class FootDurationTanh(BaseObservationTerm):
 
+    RESET_STATE_FIELDS = ('duration', 'initialized', 'last_foot_state')
+
     def __init__(
         self,
         num_envs: int,

@@ -30,6 +30,7 @@ class CurriculumSpaceConfig:
     dimensions: dict[str, CurriculumDimensionConfig]
     filters: tuple[CurriculumCellFilter, ...] = ()
     source_config: dict[str, Any] = field(default_factory=dict)
+    persistent_assignments: bool = False
 
 
 CurriculumSpaceConfigs = dict[str, CurriculumSpaceConfig]
@@ -44,6 +45,7 @@ class CurriculumSpace:
     cell_interval: torch.Tensor
     # Opaque source configuration participates in checkpoint compatibility checks.
     source_config: dict[str, Any] = field(default_factory=dict)
+    persistent_assignments: bool = False
 
 
 class CurriculumSpaceProvider(Protocol):
@@ -63,9 +65,9 @@ class CurriculumTermProvider(Protocol):
 
 
 @runtime_checkable
-class CommandCurriculumSampler(Protocol):
+class CurriculumSampler(Protocol):
 
-    def get_command(
+    def get_bounds(
         self,
         dimension: str,
         env_ids: torch.Tensor | None = None,

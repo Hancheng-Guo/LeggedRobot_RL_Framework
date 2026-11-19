@@ -2,18 +2,21 @@ import torch
 from abc import ABC, abstractmethod
 
 
-from envs.tasks.utils import TaskContext
+from envs.tasks.utils import TaskContext, StateOwner
 from utils import RuntimeContext
 
 
-class BaseObservationTerm(ABC):
+class BaseObservationTerm(StateOwner, ABC):
 
     def __init__(
         self,
+        name: str,
         context: RuntimeContext,
         scale: float = 1.0,
         *args, **kwargs,
     ) -> None:
+
+        super().__init__(name=name)
 
         if not isinstance(scale, (int, float)):
             raise TypeError("'scale' of observation term must be numeric.")

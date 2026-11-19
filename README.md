@@ -616,7 +616,7 @@ reset_state:
 
 ### 8.3 地形配置
 
-地形随机化由 task 的 Randomization Manager 控制，配置见 [9.8 Randomization Manager](#98-randomization-manager)。
+地形随机化由 task 的 Randomization Manager 控制，配置见 [9.8.1 Terrain](#981-terrain)。
 
 ## 9. locomotion 任务配置
 
@@ -880,9 +880,9 @@ command_manager_config:
 
 上例将两个命令维度划分为 `10 × 5 = 50` 个联合 cell，并用两项奖励共同评价每个速度组合，学习对应的采样概率。无需课程学习时，可省略 `curriculum_manager_config` 或配置为空，command 使用独立的 `Uniform` 采样。
 
-回合结束后，课程先结算该回合的奖励，再为新回合分配 cell，command 随后在对应区间内采样。评估与播放时冻结 cell 评价和采样概率，仍允许从冻结分布生成命令。
+回合结束后，课程通过 `finalize_episodes()` 结算该回合的奖励，再通过 `resample()` 为新回合分配 cell，command 随后在对应区间内采样。评估与播放时冻结 cell 评价和采样概率，仍允许从冻结分布生成命令。
 
-联合空间过大时会报错，应减少各维度的格数或拆分课程实例。目前课程采样支持 command，terrain 的独立与联合课程采样尚未接入。
+联合空间过大时会报错，应减少各维度的格数或拆分课程实例。terrain 的 `category`／`difficulty` 轴可通过 `type: Curriculum` 和 `params: {curriculum: locomotion}` 引用同一实例，将地形类型、难度与命令组成联合空间；引用另一实例则分别学习。地形采样方式见 [9.8.1 Terrain](#981-terrain)。
 
 `reward_sources` 为该课程实例的必填非空列表，元素为来源字符串或单项字典：
 
@@ -932,7 +932,7 @@ Stage 可将 `revision_metric` 指向实例的 `statistics_revision`，避免重
 
 训练检查点会保存 curriculum 的采样状态、cell 统计，以及 Stage 条件窗口和已采样的统计版本，续训时会校验配置并恢复；配置 `revision_metric` 时，同一统计版本不会重复计入窗口。
 
-未结束 episode 的累计数据不会恢复，新 episode 按恢复后的概率采样。由于模拟器状态没有恢复，且新 episode 的初始化会消耗随机数，仍不保证续训后的仿真轨迹与连续训练逐步一致。不含环境状态的检查点不会恢复 curriculum 数据，配置 `revision_metric` 或 `validity_metric` 的条件窗口也会重新积累。
+未结束 episode 的累计数据不会恢复。涉及 terrain 的课程会保存当前 cell 和独立采样随机状态，恢复后的首次 reset 保留该分配并重建地形，后续回合才重新采样；纯命令课程按恢复后的概率开始新 episode。检查点不保存完整模拟器动力学状态，因此不保证续训轨迹与连续训练逐步一致。不含环境状态的检查点不会恢复 curriculum 数据，配置 `revision_metric` 或 `validity_metric` 的条件窗口也会重新积累。
 
 ### 9.8 Randomization Manager
 
@@ -940,34 +940,42 @@ Stage 可将 `revision_metric` 指向实例的 `statistics_revision`，避免重
 
 该 manager 由 `LocomotionTaskLogic` 构建和管理，包括物理配置准备、后端绑定及 reset 钩子；`BaseTaskLogic` 仅提供通用生命周期接口，不持有 randomization manager。
 
+#### 9.8.1 Terrain
+
 **配置与支持范围**
 
 ```yaml
 randomization_manager_config:
   terms:
     terrain:
-      types:
-        plane: {weight: 1}
-        slope: {weight: 1, max_slope: 0.15}
-        rough: {weight: 1, max_height: 0.04}
+      category:
+        type: Weighted
+        params:
+          values:
+            plane: {weight: 1}
+            slope: {weight: 1, max_slope: 0.15}
+            rough: {weight: 1, max_height: 0.04}
+      difficulty:
+        type: Uniform
+        params:
+          values: [0.25, 0.6, 1.0]
       patch_size: [4, 4]
       resolution: 0.1
       spawn_size: [1.5, 1.2]
-      difficulty_levels: [0.25, 0.6, 1.0]
       seed: 0
 ```
 
 MuJoCo 支持三种地形（`plane`、`slope` 和 `rough`），Isaac Sim 当前只支持平地，非平地配置会明确报错。可配对使用 [ANYmal C 地形任务](configs/tasks/locomotion_anymal_c_phase.yaml) 与 [MuJoCo 仿真配置](configs/simulators/mujoco_anymal_c_rgb_array.yaml)；仿真器 YAML 只保存模型和物理参数。
 
-`types` 是按地形名组织的字典，每种类型的 `weight` 默认为 1，决定各环境的抽样概率，不保证各类型数量相等。尺寸、分辨率、出生区、难度等级和种子是公共参数，放在 `terrain` 层。
+`category` 和 `difficulty` 是 terrain 内部的两个采样子 term，均采用 `type + params`。`category.params.values` 按地形名保存候选及参数，仅 `Weighted` 允许填写 `weight`，默认为 1，决定类别采样概率；`Fixed` 和 `Curriculum` 均拒绝显式权重。`difficulty.params.values` 保存 `[0, 1]` 内不重复的难度候选，与地形类别不按位置对应。省略 category 时使用固定 plane；省略 difficulty 时使用固定难度 `1.0`。尺寸、分辨率、出生区、种子及重采样开关属于 terrain。
 
-**`plane`**：平坦地面，高度相对原地面为零。单独配置 `types: {plane: {}}` 时沿用原有无限平面；与其他类型混合配置时，使用同尺寸的有限高度场，所有顶点高度为零。
+**`plane`**：平坦地面，高度相对原地面为零。category 仅含 plane 时沿用原有无限平面；与其他类型混合配置时，使用同尺寸的有限高度场，所有顶点高度为零。
 
 **`slope`**：中央出生区保持平坦，区外沿 ±x、±y 四个方向同号起伏：正 `slope` 均抬升，负值均降低，接近外边界时回到零高度，与外围平地衔接。系数均匀采样于 `[-max_slope × difficulty, +max_slope × difficulty)`；`max_slope` 限制采样系数，不限制双轴合成后的实际坡度。
 
 **`rough`**：各网格顶点在 `[-max_height × difficulty, +max_height × difficulty)` 内独立均匀采样，形成随机起伏；中央出生区及其一圈网格保持平坦，最外圈顶点高度为零。网格间由三角形连接，`resolution` 控制最大网格间距；该类型不受 `max_slope` 约束。
 
-`difficulty_levels` 是各类型共用的难度候选集，与 `types` 不按位置对应；选中的难度系数缩放 slope 的采样系数和 rough 的高度幅度，plane 始终为零高度。
+选中的实际难度数值缩放 slope 的采样系数和 rough 的高度幅度；默认难度 `1.0` 使用配置的完整幅度，plane 始终为零高度。
 
 MuJoCo 非平地要求 `floor_geom_names` 指定一个未旋转、启用碰撞且属于 world body 的 plane，原位替换为高度场并保留地面配置。`spawn_size` 是中央平坦区的全尺寸，须容纳 reset 姿态下机器人的完整碰撞投影；ANYmal C 示例使用 `[1.5, 1.2]`。不支持额外 plane、倾斜地面或不适配的出生区。
 
@@ -975,16 +983,48 @@ MuJoCo 非平地要求 `floor_geom_names` 指定一个未旋转、启用碰撞�
 
 `task.prepare()` 只声明场景资源需求；仿真器构建后，task 在构建各 manager 时一并创建随机化 manager，再通过 `task.bind()` 绑定并校验资源。地形选择、难度和出生策略由 task 控制，后端只执行物理操作。
 
-回合重置沿用以下顺序，完整和局部 reset 使用同一流程：
+**采样策略**
 
-```python
-task.before_simulator_reset(env_ids)  # 保存回滚状态，按需应用候选地形
-simulator.reset(env_ids)             # 恢复机器人物理状态
-task.after_simulator_reset(env_ids)   # 设置出生位置，全部成功后提交分配
-task.reset(env_ids)                  # 清理任务回合状态
+两个轴支持的策略如下，候选放在各自的 `params.values` 中：
+
+| 策略 | category | difficulty |
+|---|---|---|
+| `Fixed` | `params.values` 必须且只能包含一个类别，直接选择它；拒绝 `weight` | `params.values` 必须且只能包含一个难度值 |
+| `Weighted` | 每次训练 reset 按类别权重抽样 | 不支持 |
+| `Uniform` | 不支持 | 每次训练 reset 均匀抽取难度候选 |
+| `Curriculum` | 将类别候选编号作为离散课程轴，拒绝 `weight` | 将难度候选编号作为离散课程轴 |
+
+课程轴必须填写 `params.curriculum: 实例名`。引用同一实例时联合规划，引用不同实例时分别学习；只有配置为 Curriculum 的轴贡献课程维度。课程处理离散编号，子 term 将编号映射回类别或难度；用户配置的难度值不是索引。独立采样不消费训练随机流。ANYmal 示例将两个轴与命令共同接入 locomotion：
+
+```yaml
+category:
+  type: Curriculum
+  params:
+    curriculum: locomotion
+    values:
+      plane: {}
+      slope: {max_slope: 0.15}
+      rough: {max_height: 0.04}
+difficulty:
+  type: Curriculum
+  params:
+    curriculum: locomotion
+    values: [0.25, 0.6, 1.0]
+resample_patch: false
+resample_spawn: false
 ```
 
-首次使用或请求的难度变化时生成地形；普通 reset 复用当前地形，不推进分配代数。重新绑定后端只重新应用缓存网格。难度请求通过 `task.randomization_manager.terms["terrain"].set_difficulty(env_ids_tensor, difficulty_indices)` 设置，相同难度不触发重生成；失败时恢复所选环境的物理状态和地形，不消耗难度请求。
+仅让难度参与课程时，将 category 的 type 改为 `Weighted` 或其他非 `Curriculum` type 并移除其 `params` 中的 `curriculum` ；仅让类别参与时，可省略 difficulty，或将其配置为其他非 `Curriculum` type 。固定 `seed` 可复现场景；`seed: null` 跟随运行种子。旧的 `types`、`difficulty_levels` 和 `sampling` 配置不再接受。
+
+类别和难度未变时复用当前 patch；设置 terrain 下的 `resample_patch: true` 才在每次训练 reset 主动更换同条件下的网格。出生位置默认由 patch 种子确定；`resample_spawn: true` 可独立重新抽取安全出生位置。两项默认均为 false。同条件换网格和换出生位置也可分别请求 `request_reallocation(env_ids)`、`request_spawn(env_ids)`；难度轴未使用课程时可通过 `set_difficulty(env_ids_tensor, difficulties)` 请求候选中的实际难度数值，难度轴使用课程时由课程决定。
+
+完整和局部 reset 都按“旧回合结算 → 分配候选条件 → 应用地形 → 物理 reset → 安全出生 → 初始化任务与观测 → 提交”执行。中途失败会回滚物理、课程、任务缓冲和采样进度，保留请求供重试；未选择的环境不受影响。普通复用 reset 仍保留回滚快照。
+
+**检查点、评估与播放**
+
+正式 runner 检查点保存地形配置、有效种子、类型与难度、patch 代数、采样与出生计数、待处理请求及相关课程分配。恢复后首次 reset 重建同一高度场和出生位置，不消费新条件或待处理请求；下一次训练 reset 才继续采样。候选顺序、配置、种子、环境数或状态版本不匹配会报错；本次配置结构调整前的 terrain 检查点不再接受。检查点不包含 MuJoCo 模型、viewer 或 GL 对象，也不恢复完整机器人动力学轨迹。
+
+评估和播放固定当前地形、出生及其联合 cell，不更新课程统计，也不消费训练中的待处理请求。临时单环境播放保留来源环境的 patch 身份；评估结束后 runner 恢复训练快照及随机状态。纯命令课程仍可从冻结概率生成新命令。
 
 **地面信号与使用边界**
 
@@ -994,7 +1034,7 @@ MuJoCo 几何地形外围每侧延伸 1000 米平地，高度为原地面世界 
 
 `ground_valid` 表示机身及全部足端的地面高度是否有效，`terrain_in_bounds` 表示它们是否全部处于随机区域内，两者均为 `[env]`。`termination_manager_config.terms.terrain_bounds: {}` 可选择越出随机区域即终止；当前地形示例未启用该项，可在外围继续运动；按需添加该项后，越出随机区域会终止。查询超出外围覆盖的位置返回 NaN，状态采集将该环境标记为 `ground_valid=False` 并屏蔽无定义高度信号。
 
-<!-- 短训练参数内置于 [手工验收脚本](tests/manual/verify_mujoco_terrain_training.py)，运行时仅在输出目录生成环境参数及可选的前进指令任务副本。几何与物理接口、渲染验证见 [阶段 2 记录](tests/manual/results/stage2_mujoco/README.md)；信号适配、越界和 PPO 验收见 [阶段 3 记录](tests/manual/results/stage3_mujoco/README.md)。正式地形检查点恢复尚未接入。 -->
+<!-- 短训练参数内置于 [手工验收脚本](tests/manual/verify_mujoco_terrain_training.py)，运行时仅在输出目录生成环境参数及可选的前进指令任务副本。几何与物理接口、渲染验证见 [阶段 2 记录](tests/manual/results/stage2_mujoco/README.md)；信号适配、越界和 PPO 验收见 [阶段 3 记录](tests/manual/results/stage3_mujoco/README.md)。阶段 4 的独立／联合采样、恢复及固定回放验收入口为 `tests/manual/verify_terrain_curriculum.py`。 -->
 
 ## 10. 完整组合示例
 

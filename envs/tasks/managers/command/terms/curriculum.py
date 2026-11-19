@@ -1,23 +1,66 @@
 import torch
+from collections.abc import Mapping
+from typing import Any
 
 from .base import BaseCommandTerm
 from .registry import register_command
-from envs.tasks.managers.curriculum import CommandCurriculumSampler
+from envs.tasks.managers.curriculum import (
+    CurriculumTermProvider, resolve_curriculum_samplers,
+    CurriculumSpaceConfigs, CurriculumSpaceConfig, ContinuousDimensionConfig,
+)
 from envs.tasks.utils import TaskContext
 
 
 @register_command
 class Curriculum(BaseCommandTerm):
 
-    uses_curriculum = True
+    RESET_STATE_FIELDS = ('command_start', 'command_end')
+
+    @classmethod
+    def get_curriculum_references(
+        cls,
+        params: Mapping[str, Any],
+    ) -> set[str]:
+
+        name = params.get("curriculum")
+        if not isinstance(name, str) or not name:
+            raise ValueError(
+                "Curriculum command sampling requires a non-empty 'curriculum' reference."
+            )
+        return {name}
+
+
+    @classmethod
+    def get_curriculum_space_config(
+        cls,
+        name: str,
+        params: Mapping[str, Any],
+    ) -> CurriculumSpaceConfigs:
+
+        curriculum_name, = cls.get_curriculum_references(params)
+        if "min_value" not in params or "max_value" not in params:
+            raise ValueError(f"Command term '{name}' requires min_value and max_value.")
+        return {
+            curriculum_name: CurriculumSpaceConfig(
+                dimensions={
+                    name: ContinuousDimensionConfig(
+                        min_value=params["min_value"],
+                        max_value=params["max_value"],
+                        num_cell=params.get("num_cell", 1),
+                        dim=params.get("dim", 1),
+                    ),
+                }
+            )
+        }
+
 
     def __init__(
         self,
-        curriculum_sampler: CommandCurriculumSampler,
-        term_name: str,
+        curriculum: str,
         min_value: float,
         max_value: float,
         num_cell: int,
+        curriculum_manager: CurriculumTermProvider,
         *args, **kwargs,
     ) -> None:
         
@@ -28,8 +71,10 @@ class Curriculum(BaseCommandTerm):
         if num_cell <= 0:
             raise ValueError("'num_cell' must be positive.")
         
-        self.curriculum_sampler = curriculum_sampler
-        self.dimension = term_name
+        curriculum_names = self.get_curriculum_references({"curriculum": curriculum, **kwargs})
+        self.curriculum_sampler = resolve_curriculum_samplers(
+            curriculum_names, curriculum_manager, f"Command term {self.name!r}",
+        )[curriculum]
         self.command_start = torch.zeros_like(self.command)
         self.command_end = torch.zeros_like(self.command)
 
@@ -46,8 +91,8 @@ class Curriculum(BaseCommandTerm):
         env_ids: torch.Tensor | None = None
     ) -> None:
         
-        command_start, command_end = self.curriculum_sampler.get_command(
-            self.dimension,
+        command_start, command_end = self.curriculum_sampler.get_bounds(
+            self.name,
             env_ids,
         )
         

@@ -37,9 +37,22 @@ class TerrainScenario:
     def assignments(self):
         return self.term.assignments
 
-    def reset(self, env_ids=None, difficulty_indices=None):
+    def reset(self, env_ids=None, difficulties=None):
+        # These physics scenarios explicitly hold the current difficulty unless
+        # the test requests another candidate; Uniform supplies the candidate pool.
+        if difficulties is None and self.term.config.difficulty.type == "Uniform":
+            env_ids_tensor = torch.arange(self.term.num_envs) if env_ids is None else env_ids
+            requests = self.term.difficulty.checkpoint_state_dict()["requests"]
+            selected_values = []
+            for env_id in env_ids_tensor.tolist():
+                patch = self.term.patches[env_id]
+                current = self.term.config.difficulty.initial_value if patch is None else patch.difficulty
+                selected_values.append(requests.get(env_id, current))
+            difficulties = torch.tensor(selected_values)
         try:
-            self.term.before_simulator_reset(env_ids, difficulty_indices)
+            if difficulties is not None:
+                self.term.set_difficulty(torch.arange(self.term.num_envs) if env_ids is None else env_ids, difficulties)
+            self.term.before_simulator_reset(env_ids)
             self.simulator.reset(env_ids)
             self.term.after_simulator_reset(env_ids)
             self.term.commit_simulator_reset(env_ids)
@@ -50,10 +63,27 @@ class TerrainScenario:
 
 def configure(context, *, num_envs=3, terrain=None, workers=1, model_path=None,
               feet=("FR", "FL", "RR", "RL"), keyframe: str | None = "home"):
-    config = TerrainConfig.from_mapping(terrain if terrain is not None else dict(
-        types={"plane":{}, "slope":{"max_slope":.15}, "rough":{"max_height":.04}},
-        spawn_size=[1, 1], seed=0))
-    manager = TerrainRandomizationTerm(num_envs, context, **asdict(config))
+    class StaticCategories:
+        # Geometry tests keep one known category per environment through real curriculum bounds.
+        def get_term(self, name):
+            return self
+
+        def get_bounds(self, dimension, env_ids=None):
+            env_ids_tensor = torch.arange(num_envs) if env_ids is None else env_ids
+            values = (env_ids_tensor % 3).to(context.dtype).reshape(-1, 1)
+            return values, values
+
+    default = {
+        "spawn_size": [1, 1], "seed": 39,
+        "category": {"type": "Curriculum", "params": {"curriculum": "surfaces", "values": {
+            "plane": {}, "slope": {"max_slope": .15}, "rough": {"max_height": .04},
+        }}},
+    }
+    config = TerrainConfig.from_mapping(default if terrain is None else terrain)
+    manager = TerrainRandomizationTerm(
+        num_envs=num_envs, context=context, name="TerrainRandomizationTerm",
+        curriculum_manager=StaticCategories() if terrain is None else None, **config.to_mapping(),
+    )
     simulator = MujocoSimulator(context)
     simulator.config_update(
         Component(None, None, None, None, None, None), num_envs=num_envs,
@@ -208,7 +238,7 @@ def test_probe_crosses_patch_seam_without_falling(runtime_context, tmp_path, dir
         <body pos="0 0 .3"><freejoint/><geom name="foot" type="sphere" size=".025" mass="1"/>
         </body></worldbody></mujoco>''', encoding='utf-8')
     scenario = configure(runtime_context, num_envs=1, model_path=path, feet=('foot',), keyframe=None,
-                         terrain=dict(types={'plane':{'weight':1e100},'rough':{'max_height':.04}}, seed=42))
+                         terrain=dict(seed=42, category={'type': 'Weighted', 'params': {'values': {'plane': {'weight': 1e+100}, 'rough': {'max_height': 0.04}}}}))
     sim = scenario.simulator
     try:
         scenario.reset()
@@ -250,13 +280,13 @@ def test_local_reset_changes_only_selected_environment(scenario):
 
 
 def test_reset_difficulty_and_invalid_updates_are_atomic(runtime_context):
-    sim = configure(runtime_context, num_envs=2, terrain=dict(types={"rough": {"max_height": .05}}, spawn_size=[1, 1], difficulty_levels=[0, 1]))
+    sim = configure(runtime_context, num_envs=2, terrain=dict(spawn_size=[1, 1], category={'type': 'Fixed', 'params': {'values': {'rough': {'max_height': 0.05}}}}, difficulty={'type': 'Uniform', 'params': {'values': [0, 1]}}))
     try:
         assert sim.simulator._terrain is not None
         assert sim.assignments is not None
         sim.reset()
         initial_other = sim.patches[1]
-        sim.reset(torch.tensor([0]), difficulty_indices=torch.tensor([1]))
+        sim.reset(torch.tensor([0]), difficulties=torch.tensor([1]))
         assert sim.patches[0].difficulty == 1
         assert np.ptp(sim.simulator._terrain.grids[0]) > .01
         assert sim.patches[1] == initial_other
@@ -266,7 +296,7 @@ def test_reset_difficulty_and_invalid_updates_are_atomic(runtime_context):
                             (torch.tensor([0]), torch.tensor([2])),
                             (torch.tensor([0]), torch.tensor([1, 0]))]:
             with pytest.raises(ValueError):
-                sim.reset(ids, difficulty_indices=levels)
+                sim.reset(ids, difficulties=levels)
             assert sim.assignments.state_dict() == state
             for model, array in zip(sim.simulator.models, arrays):
                 np.testing.assert_array_equal(model.hfield_data, array)
@@ -315,11 +345,7 @@ def test_actual_foot_contacts_on_nonflat_surface(runtime_context, tmp_path, kind
         <body pos="0 0 .2"><freejoint/><geom name="foot" type="sphere" size=".025" mass="1"/>
         </body></worldbody></mujoco>''', encoding="utf-8")
     sim = configure(runtime_context, num_envs=1, model_path=path, feet=("foot",),
-        keyframe=None, terrain=dict(types={
-            kind:dict(weight=1e100, **({'max_slope':.1} if kind == 'slope' else
-                                     {'max_height':.04} if kind == 'rough' else {})),
-            'plane' if kind != 'plane' else 'rough':{} if kind != 'plane' else {'max_height':.04},
-        }, spawn_size=[.5, .5], seed=42))
+        keyframe=None, terrain=dict(spawn_size=[0.5, 0.5], seed=42, category={'type': 'Weighted', 'params': {'values': {kind: dict(weight=1e+100, **{'max_slope': 0.1} if kind == 'slope' else {'max_height': 0.04} if kind == 'rough' else {}), 'plane' if kind != 'plane' else 'rough': {} if kind != 'plane' else {'max_height': 0.04}}}}))
     try:
         sim.reset()
         assert sim.patches[0].terrain_type == kind
@@ -361,7 +387,7 @@ def test_parallel_terrain_stepping_matches_serial(runtime_context):
 
 def test_legacy_plane_is_unchanged(runtime_context):
     implicit = configure(runtime_context, terrain={})
-    explicit = configure(runtime_context, terrain={"types": {"plane":{}}})
+    explicit = configure(runtime_context, terrain={'category': {'type': 'Fixed', 'params': {'values': {'plane': {}}}}})
     try:
         implicit.reset()
         explicit.reset()
@@ -379,7 +405,7 @@ def test_legacy_plane_is_unchanged(runtime_context):
 
 def test_too_small_safe_spawn_area_fails_before_first_reset(runtime_context):
     with pytest.raises(ValueError, match="collision footprint"):
-        configure(runtime_context, terrain=dict(types={"rough": {"max_height": .1}}))
+        configure(runtime_context, terrain=dict(category={'type': 'Fixed', 'params': {'values': {'rough': {'max_height': 0.1}}}}))
 
 
 @pytest.mark.parametrize("env_index", [0, 2])
@@ -420,7 +446,7 @@ def test_translated_floor_heights_and_spawn(runtime_context, tmp_path):
         <body pos="0 0 .3"><freejoint/><geom name="foot" type="sphere" size=".025" mass="1"/>
         </body></worldbody></mujoco>''', encoding="utf-8")
     sim = configure(runtime_context, num_envs=1, model_path=path, feet=("foot",),
-        keyframe=None, terrain=dict(types={"rough": {"max_height": .04}}, spawn_size=[.5, .5]))
+        keyframe=None, terrain=dict(spawn_size=[0.5, 0.5], category={'type': 'Fixed', 'params': {'values': {'rough': {'max_height': 0.04}}}}))
     try:
         sim.reset()
         position = sim.simulator.datas[0].qpos[:3]
@@ -446,7 +472,7 @@ def test_unsupported_ground_fails_early(runtime_context, tmp_path, floor, feet):
         path.write_text(path.read_text().replace('name="foot"', 'name="ball"'), encoding="utf-8")
     with pytest.raises(ValueError):
         configure(runtime_context, model_path=path, keyframe=None, feet=feet,
-            terrain=dict(types={"rough": {"max_height": .04}}, spawn_size=[.5, .5]))
+            terrain=dict(spawn_size=[0.5, 0.5], category={'type': 'Fixed', 'params': {'values': {'rough': {'max_height': 0.04}}}}))
 
 
 def test_backend_reset_executes_without_sampling_terrain(scenario):
@@ -490,6 +516,15 @@ def test_task_randomization_owns_terrain_and_routes_full_and_done_resets(runtime
     config = load_yaml(ROOT/'configs/tasks/locomotion_unitree_go1_standing.yaml')
     config['randomization_manager_config'] = load_yaml(
         ROOT/'configs/tasks/locomotion_anymal_c_phase.yaml')['randomization_manager_config']
+    config['randomization_manager_config']['terms']['terrain']['category']['type'] = 'Fixed'
+    config['randomization_manager_config']['terms']['terrain']['category']['params'].pop('curriculum', None)
+    config['randomization_manager_config']['terms']['terrain']['category']['params']['values'] = {
+        'rough': {'max_height': .04}}
+
+    config["randomization_manager_config"]["terms"]["terrain"]["difficulty"]["type"] = "Fixed"
+    config["randomization_manager_config"]["terms"]["terrain"]["difficulty"]["params"].pop("curriculum", None)
+    config["randomization_manager_config"]["terms"]["terrain"]["difficulty"]["params"]["values"] = [.25]
+    config["randomization_manager_config"]["terms"]["terrain"]["seed"] = 39
     path = tmp_path/'task.yaml'
     path.write_text(yaml.safe_dump(config, sort_keys=False),encoding='utf-8')
     env = VectorEnv(replace(runtime_context, load_dir=ROOT, save_dir=ROOT))
@@ -539,7 +574,7 @@ def test_spawn_bounds_do_not_require_named_feet(runtime_context, tmp_path):
         <body pos="0 0 .3"><freejoint/><geom name="ball" type="sphere" size=".025" mass="1"/>
         </body></worldbody></mujoco>''', encoding="utf-8")
     sim = configure(runtime_context, num_envs=1, model_path=path, feet=(), keyframe=None,
-        terrain=dict(types={"rough": {"max_height": .04}}, spawn_size=[.5, .5]))
+        terrain=dict(spawn_size=[0.5, 0.5], category={'type': 'Fixed', 'params': {'values': {'rough': {'max_height': 0.04}}}}))
     try:
         assert sim.simulator.model_context.foot_geom_ids.numel() == 0
         sim.reset()
@@ -570,7 +605,7 @@ def test_failed_environment_reset_restores_physics_and_allocation(rollback_scena
         backend.step(action)
     ids = torch.tensor([1]) if partial else torch.arange(3)
     if replace_terrain:
-        term.set_difficulty(env_ids_tensor=ids, difficulty_indices=torch.ones(len(ids), dtype=torch.long))
+        term.set_difficulty(env_ids_tensor=ids, difficulties=torch.ones(len(ids)))
     assignments, patches = term.assignments.state_dict(), term.patches
     states = [integration_state(m, d) for m, d in zip(backend.models, backend.datas)]
     accelerations = [d.qacc.copy() for d in backend.datas]
@@ -666,8 +701,7 @@ def test_renderer_upload_preserves_context_and_camera(rollback_scenario, monkeyp
 
 @pytest.fixture
 def rollback_scenario(runtime_context):
-    sim = configure(runtime_context, terrain=dict(types={"rough": {"max_height": .05}},
-        spawn_size=[1, 1], difficulty_levels=[.25, 1]))
+    sim = configure(runtime_context, terrain=dict(spawn_size=[1, 1], category={'type': 'Fixed', 'params': {'values': {'rough': {'max_height': 0.05}}}}, difficulty={'type': 'Uniform', 'params': {'values': [0.25, 1]}}))
     sim.reset()
     yield sim
     sim.simulator.close()

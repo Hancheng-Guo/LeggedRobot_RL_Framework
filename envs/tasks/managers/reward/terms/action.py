@@ -9,6 +9,8 @@ from envs.tasks.utils import TaskContext
 @register_reward
 class ActionDiffL2(BaseRewardTerm):
 
+    RESET_STATE_FIELDS = ('_action_history',)
+
     def __init__(
         self,
         num_envs: int,

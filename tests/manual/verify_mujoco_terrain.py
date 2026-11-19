@@ -32,13 +32,23 @@ def save_overview(model, data, path):
         Image.fromarray(renderer.render()).save(path)
 
 
-def reset_from_environment(simulator, randomization, env_ids=None, difficulty_indices=None):
-    if difficulty_indices is not None:
-        randomization.terms["terrain"].set_difficulty(env_ids, difficulty_indices)
+def reset_from_environment(simulator, randomization, env_ids=None, difficulties=None):
+    term = randomization.terms["terrain"]
+    env_ids_tensor = torch.arange(term.num_envs) if env_ids is None else env_ids
+    if difficulties is None:
+        requests = term.difficulty.checkpoint_state_dict()["requests"]
+        selected_values = []
+        for env_id in env_ids_tensor.tolist():
+            patch = term.patches[env_id]
+            current = term.config.difficulty.initial_value if patch is None else patch.difficulty
+            selected_values.append(requests.get(env_id, current))
+        difficulties = torch.tensor(selected_values)
+    term.set_difficulty(env_ids_tensor, difficulties)
     try:
         randomization.before_simulator_reset(env_ids)
         simulator.reset(env_ids)
         randomization.after_simulator_reset(env_ids)
+        randomization.commit_simulator_reset(env_ids)
     except Exception:
         randomization.abort_simulator_reset(env_ids)
         raise
@@ -58,7 +68,26 @@ def main():
     config = load_yaml(ROOT / "configs/simulators/mujoco_anymal_c_rgb_array.yaml")
     config["model_path"] = ROOT / config["model_path"]
     task_config = load_yaml(ROOT / "configs/tasks/locomotion_anymal_c_phase.yaml")
-    randomization = RandomizationManager(3, context, **task_config["randomization_manager_config"])
+    task_config["randomization_manager_config"]["terms"]["terrain"]["category"]["type"] = "Curriculum"
+    task_config["randomization_manager_config"]["terms"]["terrain"]["category"]["params"].pop("curriculum", None)
+    task_config["randomization_manager_config"]["terms"]["terrain"]["difficulty"]["type"] = "Uniform"
+    task_config["randomization_manager_config"]["terms"]["terrain"]["difficulty"]["params"].pop("curriculum", None)
+    task_config["randomization_manager_config"]["terms"]["terrain"]["seed"] = 39
+    task_config["randomization_manager_config"]["terms"]["terrain"]["category"]["params"]["curriculum"] = "surfaces"
+
+    class StaticCategories:
+        # Force all three surfaces for this physical acceptance, independently of learning.
+        def get_term(self, name):
+            return self
+
+        def get_bounds(self, dimension, env_ids=None):
+            env_ids_tensor = torch.arange(3) if env_ids is None else env_ids
+            values = (2 - env_ids_tensor % 3).to(context.dtype).reshape(-1, 1)
+            return values, values
+
+    randomization = RandomizationManager(
+        3, context, curriculum_manager=StaticCategories(), **task_config["randomization_manager_config"],
+    )
     manager = randomization.terms["terrain"]
     assert manager is not None
     config["terrain_geometry"] = manager.geometry
@@ -68,7 +97,7 @@ def main():
         randomization.bind(sim)
         initialization = time.perf_counter() - started
         reset_from_environment(sim, randomization)
-        assert [p.terrain_type for p in manager.patches] == ["plane", "slope", "rough"]
+        assert [p.terrain_type for p in manager.patches] == ["rough", "slope", "plane"]
         args.output_dir.mkdir(parents=True, exist_ok=True)
         report = dict(python=sys.version, mujoco=mujoco.__version__, platform=platform.platform(),
                       measured_at_utc=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -109,15 +138,10 @@ def main():
             assert torch.all((state.qpos[:, 2] - base_ground > target_height * .5)
                              & (state.qpos[:, 2] - base_ground < target_height * 1.5))
             if phase == "outside_spawn_on_surface":
-                for env_id in (1, 2):
-                    assert ground_heights[env_id].max() - ground_heights[env_id].min() > 1e-5
-            report["phases"].append(dict(name=phase, types=[p.terrain_type for p in manager.patches],
-                patch_ids=[p.patch_id for p in manager.patches],
-                final_qpos=state.qpos.tolist(), foot_contact_seen=seen.tolist(),
-                final_foot_ground_heights=ground_heights.tolist(),
-                difficulties=[p.difficulty for p in manager.patches],
-                final_foot_normal_force=state.foot_contact_normal_force.tolist(),
-                mean_step_and_state_ms=float(np.mean(times[50:]))))
+                for env_id, patch in enumerate(manager.patches):
+                    if patch.terrain_type != "plane":
+                        assert ground_heights[env_id].max() - ground_heights[env_id].min() > 1e-5
+            report["phases"].append(dict(name=phase, patch_ids=[p.patch_id for p in manager.patches], final_qpos=state.qpos.tolist(), foot_contact_seen=seen.tolist(), final_foot_ground_heights=ground_heights.tolist(), difficulties=[p.difficulty for p in manager.patches], final_foot_normal_force=state.foot_contact_normal_force.tolist(), mean_step_and_state_ms=float(np.mean(times[50:])), types=[p.terrain_type for p in manager.patches]))
         # Exercise a real offscreen context before and after env_0 changes terrain.
         if args.render:
             first = sim.render()
@@ -144,17 +168,10 @@ def main():
         untouched = [d.qpos.copy() for d in sim.datas]
         previous = manager.patches
         old_heights = sim.models[0].hfield_data.copy()
-        reset_from_environment(sim, randomization, torch.tensor([0]), difficulty_indices=torch.tensor([2]))
+        reset_from_environment(sim, randomization, torch.tensor([0]), difficulties=torch.tensor([1.]))
         if args.render:
-            # A difficulty change can legitimately select plane again. Require changed
-            # geometry here so image verification exercises heightfield upload,
-            # rather than only a different robot pose on the same flat surface.
-            # Alternate difficulty requests; ordinary resets reuse geometry.
-            for attempt in range(16):
-                if not np.array_equal(old_heights, sim.models[0].hfield_data):
-                    break
-                reset_from_environment(sim, randomization, torch.tensor([0]),
-                    difficulty_indices=torch.tensor([0 if attempt % 2 == 0 else 2]))
+            # Environment 0 is deliberately rough so difficulty changes exercise
+            # the visible heightfield upload, rather than only moving the robot.
             assert not np.array_equal(old_heights, sim.models[0].hfield_data)
         for i in (1, 2):
             np.testing.assert_array_equal(sim.datas[i].qpos, untouched[i])

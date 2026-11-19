@@ -5,11 +5,13 @@ from collections.abc import Mapping
 from .terms import BaseRewardTerm, get_reward_class
 from envs.simulators.utils import ModelContext
 from envs.tasks.managers.curriculum.types import CurriculumSpaceConfigs
-from envs.tasks.utils import TaskContext
+from envs.tasks.utils import TaskContext, StateManager
 from utils import RuntimeContext
 
 
-class RewardManager:
+class RewardManager(StateManager):
+
+    RESET_STATE_FIELDS = ('raw_term_rewards', 'term_rewards', 'total_reward')
 
     @classmethod
     def get_curriculum_space_config(
@@ -79,6 +81,7 @@ class RewardManager:
             )
 
         self.terms[name] = cls(
+            name=name,
             num_envs=self.num_envs,
             weight=weight,
             context=self.context,

@@ -1,18 +1,21 @@
 import torch
 from abc import ABC, abstractmethod
 
-from envs.tasks.utils import TaskContext
+from envs.tasks.utils import TaskContext, StateOwner
 from utils import RuntimeContext
 
 
-class BaseRewardTerm(ABC):
+class BaseRewardTerm(StateOwner, ABC):
 
     def __init__(
         self,
+        name: str,
         context: RuntimeContext,
         weight: float = 1.0,
         *args, **kwargs,
     ) -> None:
+
+        super().__init__(name=name)
 
         if not isinstance(weight, (int, float)):
             raise TypeError("'weight' of reward term must be numeric.")

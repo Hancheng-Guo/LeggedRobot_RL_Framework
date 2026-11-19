@@ -28,6 +28,10 @@ def build_curriculum_spaces(
                 raise ValueError(
                     f"Space references unknown curriculum '{curriculum_name}'."
                 )
+            if type(space.persistent_assignments) is not bool:
+                raise TypeError(
+                    "Curriculum persistent_assignments must be a bool."
+                )
             if not space.dimensions:
                 raise ValueError(
                     f"Curriculum space '{curriculum_name}' needs dimensions."
@@ -54,6 +58,9 @@ def build_curriculum_spaces(
                 dimensions=previous.dimensions | space.dimensions,
                 filters=previous.filters + space.filters,
                 source_config=merged_source_config,
+                persistent_assignments=(
+                    previous.persistent_assignments or space.persistent_assignments
+                ),
             )
 
     result = {}
@@ -94,6 +101,7 @@ def _build_space(
         cell_starts=filtered_cell_starts,
         cell_interval=cell_interval,
         source_config=space.source_config,
+        persistent_assignments=space.persistent_assignments,
     )
 
 

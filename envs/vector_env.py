@@ -152,6 +152,8 @@ class VectorEnv(BaseEnv):
                 num_envs=1,
                 max_episode_steps=self.max_episode_steps,
             )
+            temporary.task.load_checkpoint_state_dict(self.task.playback_state_dict(self.playback_env_index))
+            temporary.set_training_mode(False)
         except BaseException:
             temporary.close()
             raise
@@ -290,27 +292,31 @@ class VectorEnv(BaseEnv):
 
 
     def reset(self) -> torch.Tensor:
-
+        previous_steps = self.current_episode_steps.clone()
         try:
             self.task.before_simulator_reset()
             self.simulator.reset()
             self.task.after_simulator_reset()
+            self.task.reset()
+            self.current_episode_steps.zero_()
+            state = self.simulator.get_state()
+            task_context = self.task.build_task_context(
+                state=state,
+                episode_step=self.current_episode_steps,
+                step_dt=self.simulator.control_dt,
+            )
+            obs, _ = self.task.compute_observation(task_context)
+            self.task.commit_simulator_reset()
         except Exception as error:
+            self.current_episode_steps.copy_(previous_steps)
             try:
                 self.task.abort_simulator_reset()
             except Exception as rollback_error:
-                raise ExceptionGroup("Simulator reset and rollback failed", [error, rollback_error]) from error
+                raise ExceptionGroup(
+                    "Simulator reset and rollback failed",
+                    [error, rollback_error]
+                ) from error
             raise
-        self.task.reset()
-        self.current_episode_steps.zero_()
-        state = self.simulator.get_state()
-        task_context = self.task.build_task_context(
-            state=state,
-            episode_step=self.current_episode_steps,
-            step_dt=self.simulator.control_dt,
-        )
-        obs, _ = self.task.compute_observation(task_context)
-
         return obs
 
 
@@ -326,35 +332,40 @@ class VectorEnv(BaseEnv):
         if not torch.any(done):
             return obs
 
+        # nonzero returns ascending IDs for this 1-D mask; all reset hooks share this order.
         env_ids_tensor = torch.nonzero(
             done,
             as_tuple=False,
         ).squeeze(-1)
 
+        previous_steps = self.current_episode_steps[env_ids_tensor].clone()
         try:
             self.task.before_simulator_reset(env_ids_tensor)
             self.simulator.reset(env_ids_tensor)
             self.task.after_simulator_reset(env_ids_tensor)
+            self.task.reset(env_ids_tensor)
+            self.current_episode_steps[env_ids_tensor] = 0
+            state = self.simulator.get_state(env_ids_tensor)
+            task_context = self.task.build_task_context(
+                state=state,
+                episode_step=self.current_episode_steps[env_ids_tensor],
+                step_dt=self.simulator.control_dt,
+                env_ids=env_ids_tensor,
+            )
+            reset_obs, _ = self.task.compute_observation(
+                task_context, env_ids=env_ids_tensor
+            )
+            self.task.commit_simulator_reset(env_ids_tensor)
         except Exception as error:
+            self.current_episode_steps[env_ids_tensor] = previous_steps
             try:
                 self.task.abort_simulator_reset(env_ids_tensor)
             except Exception as rollback_error:
-                raise ExceptionGroup("Simulator reset and rollback failed", [error, rollback_error]) from error
+                raise ExceptionGroup(
+                    "Simulator reset and rollback failed",
+                    [error, rollback_error]
+                ) from error
             raise
-        self.task.reset(env_ids_tensor)
-        self.current_episode_steps[env_ids_tensor] = 0
-
-        state = self.simulator.get_state(env_ids_tensor)
-        task_context = self.task.build_task_context(
-            state=state,
-            episode_step=self.current_episode_steps[env_ids_tensor],
-            step_dt=self.simulator.control_dt,
-            env_ids=env_ids_tensor,
-        )
-        reset_obs, _ = self.task.compute_observation(
-            task_context,
-            env_ids=env_ids_tensor,
-        )
 
         next_obs = obs.clone()
         next_obs[env_ids_tensor] = reset_obs

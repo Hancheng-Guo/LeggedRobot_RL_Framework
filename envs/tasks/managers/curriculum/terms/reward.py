@@ -6,14 +6,22 @@ from dataclasses import dataclass
 from numbers import Real
 from collections.abc import Mapping
 from copy import deepcopy
+from typing import ClassVar
 
 from .base import BaseCurriculumTerm
 from .registry import register_curriculum
 from ..types import CurriculumSpace
+from envs.tasks.utils import StateOwner
 
 
 @dataclass
-class CurriculumBuffer:
+class CurriculumBuffer(StateOwner):
+
+    STATE_FIELDS: ClassVar[tuple[str, ...] | Mapping[str, str]] = (
+        "reward_sum", "sample_count"
+    )
+    RESET_STATE_FIELDS: ClassVar[tuple[str, ...]] = ("assigned_cell_ids",)
+
     dimension_names: tuple[str, ...]
     term_slices: dict[str, slice]
     cell_starts: torch.Tensor
@@ -24,7 +32,12 @@ class CurriculumBuffer:
 
 
 @dataclass
-class CellRewardStatistics:
+class CellRewardStatistics(StateOwner):
+
+    STATE_FIELDS: ClassVar[tuple[str, ...] | Mapping[str, str]] = (
+        "reward_sum", "sample_count", "reward_mean", "valid", "revision"
+    )
+
     reward_sum: torch.Tensor
     sample_count: torch.Tensor
     reward_mean: torch.Tensor
@@ -44,6 +57,7 @@ class RewardCurriculum(BaseCurriculumTerm, ABC):
         reward_sources: list[str | dict[str, float]],
         temperature: float = 0.01,
         exploration: float = 0.1,
+        sampling_seed: int | None = None,
         *args, **kwargs,
     ) -> None:
 
@@ -54,6 +68,13 @@ class RewardCurriculum(BaseCurriculumTerm, ABC):
         if not 0.0 <= exploration <= 1.0:
             raise ValueError("'exploration' must be between 0 and 1.")
 
+        self.sampling_seed = (
+            self.context.seed
+            if sampling_seed is None
+            else sampling_seed
+        )
+        self._sampling_generator = torch.Generator(
+            device="cpu").manual_seed(self.sampling_seed)
         self.temperature = temperature
         self.exploration = exploration
         self.space = sampling_space
@@ -137,7 +158,7 @@ class RewardCurriculum(BaseCurriculumTerm, ABC):
         )
 
 
-    def get_command(
+    def get_bounds(
         self,
         dimension: str,
         env_ids: torch.Tensor | None = None,
@@ -158,6 +179,21 @@ class RewardCurriculum(BaseCurriculumTerm, ABC):
 
 
 class BaseLpacReward(RewardCurriculum, ABC):
+
+    STATE_FIELDS = {
+        "space.tensors.last_reward_mean": "last_reward_mean",
+        "space.tensors.learning_progress": "learning_progress",
+        "space.tensors.probabilities": "probabilities",
+        "sampling_rng": "_sampling_generator",
+    }
+    RESET_STATE_FIELDS = (
+        "episode_reward_sum", "episode_step_count", "_restored_assignments", "_cell_metrics",
+    )
+    CHECKPOINT_STATE_FIELDS = {
+        "sampling_seed": "sampling_seed",
+    }
+    RESET_STATE_CHILDREN = ("buffer", "cell_statistics")
+
 
     min_coverage: float
 
@@ -201,6 +237,9 @@ class BaseLpacReward(RewardCurriculum, ABC):
         self.episode_step_count = torch.zeros(
             self.num_envs, dtype=torch.long, device=self.context.device,
         )
+        self._restored_assignments = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.context.device,
+        )
 
 
     def update(
@@ -232,7 +271,7 @@ class BaseLpacReward(RewardCurriculum, ABC):
         return {}
 
 
-    def reset(
+    def finalize_episodes(
         self,
         env_ids: torch.Tensor | None = None,
     ) -> None:
@@ -255,7 +294,9 @@ class BaseLpacReward(RewardCurriculum, ABC):
             self._record_cell_statistics(cell_ids, episode_reward)
             self._update_space()
 
-        buffer.assigned_cell_ids[selected] = -1
+        if not self.freeze_assignments:
+            discard = selected[~self._restored_assignments[selected]]
+            buffer.assigned_cell_ids[discard] = -1
         self.episode_step_count[selected] = 0
         self.episode_reward_sum[selected] = 0
 
@@ -336,26 +377,36 @@ class BaseLpacReward(RewardCurriculum, ABC):
         }
 
 
+    def _checkpoint_fields(self) -> dict[str, str]:
+        fields = super()._checkpoint_fields()
+        fields.update({f"space.tensors.{name}": f"buffer.{name}"
+                       for name in self.buffer.STATE_FIELDS})
+        for name in self.cell_statistics.STATE_FIELDS:
+            saved_name = (
+                f"statistics_{name}"
+                if name in {"reward_sum", "sample_count", "revision"}
+                else f"cell_{name}"
+            )
+            fields[f"space.tensors.{saved_name}"] = f"cell_statistics.{name}"
+        if self.persistent_assignments:
+            fields['assignments'] = 'buffer.assigned_cell_ids'
+        return fields
+
+
     def _checkpoint_tensors(self) -> dict[str, torch.Tensor]:
-        buffer = self.buffer
-        stats = self.cell_statistics
-        return {
-            "reward_sum": buffer.reward_sum,
-            "sample_count": buffer.sample_count,
-            "last_reward_mean": self.last_reward_mean,
-            "learning_progress": self.learning_progress,
-            "probabilities": self.probabilities,
-            "statistics_reward_sum": stats.reward_sum,
-            "statistics_sample_count": stats.sample_count,
-            "cell_reward_mean": stats.reward_mean,
-            "cell_valid": stats.valid,
-            "statistics_revision": stats.revision,
-        }
+        result = {}
+        for key, path in self._checkpoint_fields().items():
+            if key.startswith('space.tensors.'):
+                owner = self
+                for name in path.split('.'):
+                    owner = getattr(owner, name)
+                result[key.removeprefix('space.tensors.')] = owner
+        return result
 
 
-    def checkpoint_state_dict(self) -> dict[str, Any]:
+    def _checkpoint_metadata(self) -> dict[str, Any]:
         buffer = self.buffer
-        return super().checkpoint_state_dict() | {
+        return super()._checkpoint_metadata() | {
             "config": deepcopy(self._checkpoint_config()),
             "space": {
                 "dimension_names": buffer.dimension_names,
@@ -363,14 +414,17 @@ class BaseLpacReward(RewardCurriculum, ABC):
                     key: (value.start, value.stop)
                     for key, value in buffer.term_slices.items()
                 },
-                "cell_starts": buffer.cell_starts.detach().cpu().clone(),
-                "cell_interval": buffer.cell_interval.detach().cpu().clone(),
-                "tensors": {
-                    key: value.detach().cpu().clone()
-                    for key, value in self._checkpoint_tensors().items()
-                },
+                "cell_starts": buffer.cell_starts,
+                "cell_interval": buffer.cell_interval,
             },
         }
+
+
+    def playback_state_dict(self, env_index: int) -> dict[str, Any]:
+        state = self.checkpoint_state_dict()
+        if self.persistent_assignments:
+            state["assignments"] = state["assignments"][env_index:env_index + 1].clone()
+        return state
 
 
     def validate_checkpoint_state_dict(
@@ -384,9 +438,20 @@ class BaseLpacReward(RewardCurriculum, ABC):
             raise ValueError(
                 "Curriculum checkpoint configuration does not match current configuration."
             )
+        if state.get("sampling_seed") != self.sampling_seed:
+            raise ValueError(
+                "Curriculum sampling seed does not match checkpoint."
+            )
+        try:
+            torch.Generator(device="cpu").set_state(state["sampling_rng"].cpu())
+        except (KeyError, TypeError, AttributeError, RuntimeError) as error:
+            raise ValueError("Invalid curriculum sampling RNG state.") from error
         saved = state.get("space")
         buffer = self.buffer
-        slices = {key: (value.start, value.stop) for key, value in buffer.term_slices.items()}
+        slices = {
+            key: (value.start, value.stop)
+            for key, value in buffer.term_slices.items()
+        }
         if (
             not isinstance(saved, Mapping)
             or saved.get("dimension_names") != buffer.dimension_names
@@ -405,8 +470,22 @@ class BaseLpacReward(RewardCurriculum, ABC):
                     current.detach().to(device="cpu", dtype=torch.float64)
                 )
             ):
-                raise ValueError(f"Checkpoint {key} does not match curriculum space.")
+                raise ValueError(
+                    f"Checkpoint {key} does not match curriculum space."
+                )
         self._validate_checkpoint_tensors(saved.get("tensors"))
+        if self.persistent_assignments:
+            assigned = state.get("assignments")
+            if (
+                not isinstance(assigned, torch.Tensor)
+                or assigned.dtype != torch.long
+                or assigned.shape != (self.num_envs,)
+                or torch.any(assigned < -1)
+                or torch.any(assigned >= buffer.cell_starts.shape[0])
+            ):
+                raise ValueError(
+                    "Checkpoint assignments must match physical consumer environments."
+                )
 
 
     def _validate_checkpoint_tensors(
@@ -448,20 +527,15 @@ class BaseLpacReward(RewardCurriculum, ABC):
             )
 
 
-    def load_checkpoint_state_dict(
+    def _after_checkpoint_load(
         self,
         state: Mapping[str, Any],
     ) -> None:
 
-        self.validate_checkpoint_state_dict(state)
         with torch.no_grad():
-            saved = state["space"]["tensors"]
-            for key, target in self._checkpoint_tensors().items():
-                target.copy_(saved[key].to(
-                    device=target.device,
-                    dtype=target.dtype
-                ))
-            self.buffer.assigned_cell_ids.fill_(-1)
+            if not self.persistent_assignments:
+                self.buffer.assigned_cell_ids.fill_(-1)
+            self._restored_assignments.copy_(self.buffer.assigned_cell_ids >= 0)
             self.episode_reward_sum.zero_()
             self.episode_step_count.zero_()
             self._cell_metrics = self._summarize_cell_statistics()
@@ -477,6 +551,18 @@ class BaseLpacReward(RewardCurriculum, ABC):
         env_ids: torch.Tensor | None = None
     ) -> None:
 
+        selected = (
+            torch.arange(self.num_envs, device=self.context.device)
+            if env_ids is None
+            else env_ids
+        )
+        keep = self._restored_assignments[selected].clone()
+        if self.freeze_assignments:
+            keep |= self.buffer.assigned_cell_ids[selected] >= 0
+        self._restored_assignments[selected] = False
+        if torch.any(keep):
+            env_ids = selected[~keep]
+
         if env_ids is None:
             selected_count = self.num_envs
             active_steps = self.episode_step_count
@@ -489,9 +575,19 @@ class BaseLpacReward(RewardCurriculum, ABC):
             )
         if selected_count == 0:
             return
-        sampled_ids = torch.multinomial(
-            self._get_probabilities(), selected_count, replacement=True,
+        probabilities = self._get_probabilities()
+        # Physical consumers retain a separate stream across geometry reconstruction.
+        if self.persistent_assignments:
+            probabilities = probabilities.cpu()
+        generator = (
+            self._sampling_generator
+            if self.persistent_assignments
+            else None
         )
+        sampled_ids = torch.multinomial(
+            probabilities, selected_count,
+            replacement=True, generator=generator,
+        ).to(self.context.device)
         if env_ids is None:
             self.buffer.assigned_cell_ids.copy_(sampled_ids)
         else:

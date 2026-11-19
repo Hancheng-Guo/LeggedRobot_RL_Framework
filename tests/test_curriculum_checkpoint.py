@@ -8,6 +8,7 @@ import pytest
 import torch
 
 from envs.tasks.managers.curriculum import CurriculumManager
+from envs.tasks.managers.randomization import RandomizationManager
 from envs.tasks.managers.curriculum.terms.reward import BaseLpacReward
 from envs import VectorEnv
 from envs.tasks import BaseTaskLogic
@@ -76,7 +77,7 @@ def warm_up(manager):
         for instance in manager.terms.values():
             cast(BaseLpacReward, instance).buffer.assigned_cell_ids.copy_(torch.tensor([0, 1, 2]))
         update(manager, [1.0, 2.0, 3.0])
-        manager.reset()
+        manager.finalize_episodes()
         manager.resample()
 
 
@@ -91,14 +92,14 @@ def make_runner(runtime_context):
 
         def reset():
             if manager is not None:
-                manager.reset()
+                manager.finalize_episodes()
                 manager.resample()
             return obs
 
         def step(action):
             if manager is not None:
                 update(manager, [10.0, 20.0, 30.0])
-                manager.reset()
+                manager.finalize_episodes()
                 manager.resample()
             return (obs, obs, torch.ones(3), torch.ones(3, dtype=torch.bool),
                     torch.zeros(3, dtype=torch.bool), {})
@@ -109,6 +110,7 @@ def make_runner(runtime_context):
         else:
             task = LocomotionTaskLogic(runtime_context)
             task.curriculum_manager = manager
+            task.randomization_manager = RandomizationManager(3, runtime_context)
             environment.task = task
         environment.num_envs = 3
         environment.reset = reset
@@ -152,7 +154,7 @@ def test_checkpoint_round_trip_preserves_batches_but_discards_active_episodes(ma
     buffer = source_term.buffer
     buffer.assigned_cell_ids.copy_(torch.tensor([0, 1, 2]))
     update(source, [4.0, 5.0, 6.0])
-    source.reset(torch.tensor([0]))
+    source.finalize_episodes(torch.tensor([0]))
     source.resample(torch.tensor([0]))
     update(source, [7.0, 8.0, 9.0])
     assert source_term.episode_step_count.tolist() == [1, 2, 2]
@@ -181,7 +183,7 @@ def test_checkpoint_round_trip_preserves_batches_but_discards_active_episodes(ma
     torch.manual_seed(23)
     source_term.resample()
     torch.manual_seed(23)
-    target.reset()
+    target.finalize_episodes()
     target.resample()
     buffer = source_term.buffer
     torch.testing.assert_close(buffer.assigned_cell_ids, target_term.buffer.assigned_cell_ids)
@@ -217,7 +219,7 @@ def test_loading_allows_new_environment_count_and_float_dtype(make_manager, runt
     assert_same_checkpoint(source.checkpoint_state_dict(), target.checkpoint_state_dict())
     assert get_term(target).episode_step_count.shape == (5,)
     assert get_term(target).last_reward_mean.dtype == torch.float64
-    target.reset()
+    target.finalize_episodes()
     target.resample()
     assert get_term(target).buffer.assigned_cell_ids.shape == (5,)
 
@@ -288,7 +290,7 @@ def test_completed_batches_continue_from_restored_pending_episodes(make_manager)
     for instance in source.terms.values():
         cast(BaseLpacReward, instance).buffer.assigned_cell_ids.copy_(torch.tensor([0, 1, 2]))
     update(source, [2.0, 4.0, 6.0])
-    source.reset()
+    source.finalize_episodes()
     source.resample()
     target = make_manager()
     target.load_checkpoint_state_dict(source.checkpoint_state_dict())
@@ -296,7 +298,7 @@ def test_completed_batches_continue_from_restored_pending_episodes(make_manager)
         for instance in manager.terms.values():
             cast(BaseLpacReward, instance).buffer.assigned_cell_ids.copy_(torch.tensor([0, 1, 2]))
         update(manager, [4.0, 6.0, 8.0])
-        manager.reset()
+        manager.finalize_episodes()
         manager.resample()
     assert_same_checkpoint(source.checkpoint_state_dict(), target.checkpoint_state_dict())
     torch.testing.assert_close(get_term(target).cell_statistics.reward_mean, torch.tensor([6.0, 10.0, 14.0]))
@@ -332,7 +334,7 @@ def test_manager_validates_every_term_before_restoring_any(runtime_context, mode
             buffer = term.buffer
             buffer.assigned_cell_ids.copy_(torch.tensor([0, 1, 2]))
         update(source, [1.0, 2.0, 3.0])
-        source.reset()
+        source.finalize_episodes()
         source.resample()
     state = source.checkpoint_state_dict()
     state["terms"]["fast_lpac_reward"]["space"]["tensors"]["sample_count"] = torch.zeros(2, dtype=torch.long)
@@ -349,7 +351,7 @@ def test_runner_saves_and_loads_curriculum(make_manager, make_runner, tmp_path, 
     warm_up(source)
     # Keep both a completed partial batch and unfinished episodes at save time.
     update(source, [4.0, 5.0, 6.0])
-    source.reset(torch.tensor([0]))
+    source.finalize_episodes(torch.tensor([0]))
     source.resample(torch.tensor([0]))
     update(source, [7.0, 8.0, 9.0])
     expected = source.checkpoint_state_dict()
@@ -629,7 +631,7 @@ def make_scripted_training(make_runner, manager, *, normalize, invalidate_step=N
         done = index % 2 == 1
         if done:
             torch.manual_seed(1000 + index)
-            manager.reset()
+            manager.finalize_episodes()
             manager.resample()
         if index == invalidate_step:
             # Evaluation batches are independent of LPAC's sampling windows.

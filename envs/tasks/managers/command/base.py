@@ -7,22 +7,18 @@ from collections.abc import Mapping
 from .terms import BaseCommandTerm, get_command_class
 from .playback import PlaybackCommandSource, PlaybackCommands
 from .constraints import CommandConstraintSet
-from .curriculum import curriculum_reference
-from envs.tasks.managers.curriculum.types import (
-    ContinuousDimensionConfig,
+from envs.simulators.utils import ModelContext
+from envs.tasks.managers.curriculum import (
     CurriculumSpaceConfig,
     CurriculumSpaceConfigs,
 )
-from envs.simulators.utils import ModelContext
-from envs.tasks.utils import TaskContext
-from envs.tasks.managers.curriculum import (
-    CommandCurriculumSampler,
-    CurriculumTermProvider,
-)
+from envs.tasks.utils import TaskContext, StateManager
 from utils import RuntimeContext
 
 
-class CommandManager:
+class CommandManager(StateManager):
+
+    RESET_STATE_FIELDS = ('command', 'last_command', '_playback_reset_completed')
 
     @classmethod
     def get_curriculum_space_config(
@@ -35,7 +31,7 @@ class CommandManager:
         if not isinstance(command_terms, dict):
             raise ValueError("Command manager must define 'terms'.")
 
-        dimensions: dict[str, dict[str, ContinuousDimensionConfig]] = {}
+        spaces: CurriculumSpaceConfigs = {}
         term_curricula: dict[str, str] = {}
         for term_name, term_config in command_terms.items():
 
@@ -58,31 +54,35 @@ class CommandManager:
                     f"'params' of command term '{term_name}' must be a dict."
                 )
 
-            curriculum_name = curriculum_reference(get_command_class(type_name), params)
-            if curriculum_name is None:
-                continue
-
-            if "min_value" not in params or "max_value" not in params:
-                raise ValueError(f"Command term '{term_name}' requires min_value and max_value.")
-
-            curriculum_dimensions = dimensions.setdefault(curriculum_name, {})
-            curriculum_dimensions[term_name] = ContinuousDimensionConfig(
-                min_value=params["min_value"],
-                max_value=params["max_value"],
-                num_cell=params.get("num_cell", 1),
-                dim=params.get("dim", 1),
-            )
-            term_curricula[term_name] = curriculum_name
+            term_cls = get_command_class(type_name)
+            descriptions = term_cls.get_curriculum_space_config(term_name, params)
+            for curriculum_name, space in descriptions.items():
+                previous = spaces.get(curriculum_name, CurriculumSpaceConfig({}))
+                if previous.dimensions.keys() & space.dimensions.keys():
+                    raise ValueError(
+                        "Command terms contribute duplicate curriculum dimensions."
+                    )
+                spaces[curriculum_name] = CurriculumSpaceConfig(
+                    dimensions=previous.dimensions | space.dimensions,
+                    filters=previous.filters + space.filters,
+                    persistent_assignments=(
+                        previous.persistent_assignments or space.persistent_assignments
+                    ),
+                )
+                term_curricula[term_name] = curriculum_name
 
         constraints = CommandConstraintSet(set(command_terms), config.get("constraints"))
         constraints.validate_curricula(term_curricula)
         return {
             curriculum_name: CurriculumSpaceConfig(
-                dimensions=dict(curriculum_dimensions),
-                filters=(partial(constraints.filter, target_names=set(curriculum_dimensions)),),
+                dimensions=space.dimensions,
+                filters=space.filters + (
+                    partial(constraints.filter, target_names=set(space.dimensions)),
+                ),
+                persistent_assignments=space.persistent_assignments,
                 source_config={"command": deepcopy(dict(config))},
             )
-            for curriculum_name, curriculum_dimensions in dimensions.items()
+            for curriculum_name, space in spaces.items()
         }
 
 
@@ -120,6 +120,7 @@ class CommandManager:
             for term in self.terms.values()
         )
         self._playback_commands: PlaybackCommands | None = None
+        self._playback_reset_completed = False
 
 
     def activate_playback_commands(
@@ -169,7 +170,7 @@ class CommandManager:
     def _build_terms(
         self,
         terms: dict[str, dict[str, Any]],
-        *args, **kwargs
+        *args, **kwargs,
     ) -> None:
 
         for name, config in terms.items():
@@ -203,51 +204,14 @@ class CommandManager:
 
             cls = get_command_class(type_name)
             params = dict(params)
-            term_kwargs = self._get_term_kwargs(cls, name, params, *args, **kwargs)
-
             self.terms[name] = cls(
+                name=name,
                 num_envs=self.num_envs,
                 context=self.context,
                 model_context=self.model_context,
-                **term_kwargs,
+                **kwargs,
                 **params,
             )
-
-
-    def _get_term_kwargs(
-        self,
-        cls: type[BaseCommandTerm],
-        name: str,
-        params: dict[str, Any],
-        *args, **kwargs,
-    ) -> dict[str, Any]:
-
-        term_kwargs: dict[str, Any] = {}
-        curriculum_name = curriculum_reference(cls, params)
-
-        if curriculum_name is not None:
-
-            params.pop("curriculum")
-            curriculum_manager = kwargs.pop("curriculum_manager", None)
-            if not isinstance(curriculum_manager, CurriculumTermProvider):
-                raise ValueError(
-                    f"Command term '{name}' requires a "
-                    "curriculum term provider."
-                )
-
-            curriculum_term = curriculum_manager.get_term(
-                curriculum_name
-            )
-            if not isinstance(curriculum_term, CommandCurriculumSampler):
-                raise TypeError(
-                    f"Curriculum term '{curriculum_name}' "
-                    "does not provide command sampling."
-                )
-
-            term_kwargs["curriculum_sampler"] = curriculum_term
-            term_kwargs["term_name"] = name
-
-        return term_kwargs | kwargs
 
 
     def update(

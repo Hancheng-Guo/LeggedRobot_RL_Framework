@@ -47,7 +47,8 @@ class PlaybackCommands:
         self.original_terms = dict(terms)
         self.terms = {
             command_name: PlaybackCommandTerm(
-                term, source, command_name, env_index,
+                name=command_name, original=term,
+                source=source, env_index=env_index,
                 fixed_value=fixed_commands.get(command_name),
             )
             for command_name, term in terms.items()

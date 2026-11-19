@@ -6,9 +6,10 @@ from .types import (
     CurriculumSpaceConfigs,
     CurriculumSpaceProvider,
     CurriculumDimensionConfig,
-    CommandCurriculumSampler,
+    CurriculumSampler,
     CurriculumTermProvider,
 )
+from .sampling import resolve_curriculum_samplers
 from .base import CurriculumManager
 
 
@@ -20,8 +21,10 @@ __all__ = (
     "CurriculumSpaceConfigs",
     "CurriculumSpaceProvider",
     "CurriculumDimensionConfig",
-    "CommandCurriculumSampler",
+    "CurriculumSampler",
     "CurriculumTermProvider",
+
+    "resolve_curriculum_samplers",
 
     "CurriculumManager",
 )

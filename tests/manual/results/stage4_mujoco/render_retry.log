@@ -1,0 +1,24 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+_______________ test_peripheral_ground_renders_with_real_opengl _______________
+tests\test_mujoco_terrain_signals.py:217: in test_peripheral_ground_renders_with_real_opengl
+    image = env.simulator.render()
+            ^^^^^^^^^^^^^^^^^^^^^^
+envs\simulators\mujoco.py:720: in render
+    return self._rgb_array_render()
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+envs\simulators\mujoco.py:766: in _rgb_array_render
+    self.renderer = mujoco.Renderer(
+C:\Users\Guo Hancheng\miniconda3\envs\quadruped_rl\Lib\site-packages\mujoco\rendering\classic\renderer.py:92: in __init__
+    self._mjr_context = mujoco.MjrContext(model, font_scale.value)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   mujoco.FatalError: gladLoadGL error
+============================== warnings summary ===============================
+tests/test_mujoco_terrain_signals.py::test_peripheral_ground_renders_with_real_opengl
+  C:\Users\Guo Hancheng\miniconda3\envs\quadruped_rl\Lib\site-packages\glfw\__init__.py:917: GLFWError: (65542) b'WGL: The driver does not appear to support OpenGL'
+    warnings.warn(message, GLFWError)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/test_mujoco_terrain_signals.py::test_peripheral_ground_renders_with_real_opengl
+1 failed, 1 warning in 0.64s

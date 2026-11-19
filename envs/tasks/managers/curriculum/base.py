@@ -1,3 +1,4 @@
+import hashlib
 import torch
 from typing import Any
 from collections.abc import Mapping, Sequence
@@ -6,10 +7,13 @@ from .terms import BaseCurriculumTerm, get_curriculum_class
 from .types import CurriculumSpaceConfigs
 from .spaces import build_curriculum_spaces
 from envs.simulators.utils import ModelContext
+from envs.tasks.utils import StateManager
 from utils import RuntimeContext
 
 
-class CurriculumManager:
+class CurriculumManager(StateManager):
+
+    CHECKPOINT_KEEP_EMPTY_TERMS = True
 
     def __init__(
         self,
@@ -47,11 +51,16 @@ class CurriculumManager:
             term_kwargs = self._get_term_kwargs(cls, name, manager_configs)
 
             self.terms[name] = cls(
+                name=name,
                 num_envs=self.num_envs,
                 context=self.context,
                 model_context=self.model_context,
                 **term_kwargs,
                 **config,
+            )
+            space = self.sampling_spaces.get(name)
+            self.terms[name].persistent_assignments = (
+                space is not None and space.persistent_assignments
             )
 
 
@@ -93,6 +102,10 @@ class CurriculumManager:
             if name not in self.sampling_spaces:
                 raise ValueError(f"Curriculum term '{name}' requires a sampling space.")
             term_kwargs["sampling_space"] = self.sampling_spaces[name]
+            digest = hashlib.blake2b(
+                f"curriculum-v1:{self.context.seed}:{name}".encode("utf-8"), digest_size=8,
+            ).digest()
+            term_kwargs["sampling_seed"] = int.from_bytes(digest, "little")
 
         config_names = getattr(cls, "manager_config_names", ())
         for config_name in config_names:
@@ -151,13 +164,15 @@ class CurriculumManager:
         }
 
 
-    def reset(
+    def finalize_episodes(
         self,
         env_ids: torch.Tensor | None = None
     ) -> None:
+        """Settle and clear old episodes; new assignments are created by resample()."""
         
         for term in self.terms.values():
-            term.reset(env_ids)
+            term.finalize_episodes(env_ids)
+
 
     def resample(
         self,
@@ -171,39 +186,4 @@ class CurriculumManager:
 
     def set_training_mode(self, training: bool) -> None:
         for term in self.terms.values():
-            term.training = training
-
-
-    def checkpoint_state_dict(self) -> dict[str, Any]:
-        return {
-            "terms": {
-                name: term.checkpoint_state_dict()
-                for name, term in self.terms.items()
-            },
-        }
-
-
-    def load_checkpoint_state_dict(
-        self,
-        state: Mapping[str, Any],
-    ) -> None:
-
-        if not isinstance(state, Mapping):
-            raise TypeError(
-                "Curriculum manager checkpoint must be a mapping."
-            )
-
-        terms = state.get("terms")
-        if (
-            not isinstance(terms, Mapping)
-            or set(terms) != set(self.terms)
-        ):
-            raise ValueError(
-                "Checkpoint curriculum terms must match configured terms."
-            )
-
-        # Reject incompatible states before restoring any term.
-        for name, term in self.terms.items():
-            term.validate_checkpoint_state_dict(terms[name])
-        for name, term in self.terms.items():
-            term.load_checkpoint_state_dict(terms[name])
+            term.set_training_mode(training)

@@ -3,12 +3,14 @@ from typing import Any
 from collections.abc import Mapping
 
 from .terms import BaseTaskStateTerm, get_task_state_class
-from envs.tasks.utils import TaskContext
+from envs.tasks.utils import TaskContext, StateManager
 from envs.tasks.managers.curriculum.types import CurriculumSpaceConfigs
 from utils import RuntimeContext
 
 
-class TaskStateManager:
+class TaskStateManager(StateManager):
+
+    RESET_STATE_FIELDS = ()
 
     @classmethod
     def get_curriculum_space_config(
@@ -31,6 +33,7 @@ class TaskStateManager:
                 raise TypeError(f"Config of task state term '{name}' must be a dict.")
             term_class = get_task_state_class(name)
             self.terms[name] = term_class(
+                name=name,
                 num_envs=num_envs,
                 context=context,
                 **(params or {}),

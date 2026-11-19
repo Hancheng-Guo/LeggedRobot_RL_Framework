@@ -87,6 +87,12 @@ class FakeTask:
     def after_simulator_reset(self, env_ids=None):
         pass
 
+    def commit_simulator_reset(self, env_ids=None):
+        pass
+
+    def abort_simulator_reset(self, env_ids=None):
+        pass
+
     def build_task_context(
         self,
         state: SimulatorState,

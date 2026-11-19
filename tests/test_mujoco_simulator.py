@@ -357,9 +357,9 @@ def test_free_joint_body_velocity_matches_native_mujoco_and_tracking(runtime_con
                 last_command={'ang_vel_z':torch.ones(count,1)},action=torch.zeros(count,simulator.model_context.nu),
                 last_action=torch.zeros(count,simulator.model_context.nu),
                 episode_step=torch.ones(count,dtype=torch.long),step_dt=.002)
-            reward = TrackAngularVelocityZL2Exp(context=runtime_context, num_envs=count)
+            reward = TrackAngularVelocityZL2Exp(name="TrackAngularVelocityZL2Exp", context=runtime_context, num_envs=count)
             torch.testing.assert_close(reward.compute(context), torch.ones(count))
-            observation = TrackAngularVelocityZErrorIntegral(context=runtime_context,
+            observation = TrackAngularVelocityZErrorIntegral(name="TrackAngularVelocityZErrorIntegral", context=runtime_context,
                 num_envs=count, model_context=simulator.model_context)
             torch.testing.assert_close(observation.compute(context), torch.zeros(count,1))
     finally:

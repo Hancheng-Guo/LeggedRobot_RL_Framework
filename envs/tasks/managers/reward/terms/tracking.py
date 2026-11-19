@@ -45,6 +45,8 @@ class _BaseCommandTracking(BaseRewardTerm):
 
 class _BaseVelocityErrorIntegralL2(_BaseCommandTracking):
 
+    RESET_STATE_FIELDS = ('error_history', 'integral_count')
+
     def __init__(
         self,
         num_envs: int,

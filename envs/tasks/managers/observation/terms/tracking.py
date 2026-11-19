@@ -9,6 +9,8 @@ from envs.tasks.utils import TaskContext
 
 class _BaseVelocityErrorIntegral(BaseObservationTerm):
 
+    RESET_STATE_FIELDS = ('error_history', 'recorded_step')
+
     def __init__(
         self,
         num_envs: int,

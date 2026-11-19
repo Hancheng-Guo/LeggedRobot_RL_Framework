@@ -79,7 +79,7 @@ def test_foot_sliding_penalizes_mean_squared_xyz_velocity(runtime_context, model
     context.state.geom_xvel = torch.full((2,4,6), 1000.)
     context.state.geom_xvel[0,1,3:6] = torch.tensor(velocity)
     context.state.foot_ground_contact = torch.tensor([[True,False],[False,False]])
-    term = FootSlidingVelocityL2(context=runtime_context, model_context=model_context)
+    term = FootSlidingVelocityL2(name="FootSlidingVelocityL2", context=runtime_context, model_context=model_context)
     # One of two feet is grounded; average over two feet and three components.
     torch.testing.assert_close(term.compute(context), torch.tensor([25./6,0.]))
     selected = replace(context, state=context.state.select(torch.tensor([0])))
@@ -88,10 +88,10 @@ def test_foot_sliding_penalizes_mean_squared_xyz_velocity(runtime_context, model
 
 def test_joint_position_diff_groups_use_disjoint_model_ids(runtime_context, model_context):
     base = BaseJointPositionDiffL2(
-        context=runtime_context, num_envs=2, model_context=model_context,
+        name="BaseJointPositionDiffL2", context=runtime_context, num_envs=2, model_context=model_context,
     )
     leg = LegJointPositionDiffL2(
-        context=runtime_context, num_envs=2, model_context=model_context,
+        name="LegJointPositionDiffL2", context=runtime_context, num_envs=2, model_context=model_context,
     )
     assert base.qpos_ids.tolist() == [0]
     assert leg.qpos_ids.tolist() == [8]
@@ -432,20 +432,20 @@ def test_axis_specific_linear_velocity_rewards(
     task_context = make_state_reward_context()
     terms = (
         TrackLinearVelocityXL2Exp(
-            context=runtime_context,
+            name="TrackLinearVelocityXL2Exp", context=runtime_context,
             model_context=model_context,
         ),
         TrackLinearVelocityYL2Exp(
-            context=runtime_context,
+            name="TrackLinearVelocityYL2Exp", context=runtime_context,
             model_context=model_context,
         ),
         TrackLinearVelocityXL2ExpAndLogcosh(
-            context=runtime_context,
+            name="TrackLinearVelocityXL2ExpAndLogcosh", context=runtime_context,
             model_context=model_context,
             logcosh_weight=0.25,
         ),
         TrackLinearVelocityYL2ExpAndLogcosh(
-            context=runtime_context,
+            name="TrackLinearVelocityYL2ExpAndLogcosh", context=runtime_context,
             model_context=model_context,
             logcosh_weight=0.25,
         ),
@@ -487,7 +487,7 @@ def test_axis_specific_linear_velocity_rewards_reject_invalid_std(
     ):
         with pytest.raises(ValueError, match="positive and finite"):
             term_class(
-                context=runtime_context,
+                name=term_class.__name__, context=runtime_context,
                 model_context=model_context,
                 std=std,
             )
@@ -508,7 +508,7 @@ def test_axis_specific_linear_velocity_rewards_reject_invalid_logcosh_weight(
     ):
         with pytest.raises(ValueError, match=r"within \[0, 1\]"):
             term_class(
-                context=runtime_context,
+                name=term_class.__name__, context=runtime_context,
                 model_context=model_context,
                 logcosh_weight=logcosh_weight,
             )
@@ -682,7 +682,7 @@ def test_integral_tracking_terms_reject_invalid_length(
     ):
         with pytest.raises(ValueError, match="positive integer"):
             term_class(
-                context=runtime_context,
+                name=term_class.__name__, context=runtime_context,
                 model_context=model_context,
                 num_envs=2,
                 integral_length=integral_length,
@@ -873,7 +873,7 @@ def test_foot_lift_height_reward_is_gated_by_command(
         foot_geom_ids=torch.tensor([3, 4, 5, 6]),
     )
     term = FootLiftHeightDiffCommandWeightedExp(
-        context=runtime_context,
+        name="FootLiftHeightDiffCommandWeightedExp", context=runtime_context,
         model_context=quadrupedal_model_context,
         target_height=0.08,
         height_std=0.03,
@@ -906,7 +906,7 @@ def test_foot_lift_height_reward_rejects_invalid_command_std(
 ):
     with pytest.raises(ValueError, match="'command_std' must be positive"):
         FootLiftHeightDiffCommandWeightedExp(
-            context=runtime_context,
+            name="FootLiftHeightDiffCommandWeightedExp", context=runtime_context,
             model_context=model_context,
             target_height=0.08,
             command_std=command_std,
@@ -924,7 +924,7 @@ def test_foot_lift_height_diff_command_gated_l2_tracks_height_only_when_moving(
         foot_geom_ids=torch.tensor([3, 4, 5, 6]),
     )
     term = FootLiftHeightDiffCommandGatedL2(
-        context=runtime_context,
+        name="FootLiftHeightDiffCommandGatedL2", context=runtime_context,
         model_context=quadrupedal_model_context,
         target_height=0.1,
         height_std=0.1,
@@ -951,7 +951,7 @@ def test_foot_lift_height_diff_command_gated_l2_rejects_invalid_height_std(
 ):
     with pytest.raises(ValueError, match="'height_std' must be positive and finite"):
         FootLiftHeightDiffCommandGatedL2(
-            context=runtime_context,
+            name="FootLiftHeightDiffCommandGatedL2", context=runtime_context,
             model_context=model_context,
             target_height=0.1,
             height_std=height_std,
@@ -983,7 +983,7 @@ def test_command_adaptive_gait_phase_height_stops_below_command_threshold(
         foot_geom_ids=torch.tensor([3, 4, 5, 6]),
     )
     term = QuadrupedalCommandAdaptiveGaitPhaseHeightL2(
-        context=runtime_context,
+        name="QuadrupedalCommandAdaptiveGaitPhaseHeightL2", context=runtime_context,
         num_envs=2,
         model_context=phase_model_context,
         landing_distance=0.22,
@@ -1034,7 +1034,7 @@ def test_command_adaptive_gait_phase_height_lands_and_resumes(
         foot_geom_ids=torch.tensor([3, 4, 5, 6]),
     )
     term = QuadrupedalCommandAdaptiveGaitPhaseHeightL2(
-        context=runtime_context,
+        name="QuadrupedalCommandAdaptiveGaitPhaseHeightL2", context=runtime_context,
         num_envs=2,
         model_context=phase_model_context,
         landing_distance=0.22,
@@ -1099,7 +1099,7 @@ def test_command_adaptive_gait_phase_height_clamps_at_cycle_boundary(
         foot_geom_ids=torch.tensor([3, 4, 5, 6]),
     )
     term = QuadrupedalCommandAdaptiveGaitPhaseHeightL2(
-        context=runtime_context,
+        name="QuadrupedalCommandAdaptiveGaitPhaseHeightL2", context=runtime_context,
         num_envs=2,
         model_context=phase_model_context,
         landing_distance=0.22,
@@ -1169,7 +1169,7 @@ def test_command_adaptive_gait_phase_height_rejects_invalid_params(
     )
     with pytest.raises(ValueError, match=match):
         term_class(
-            context=runtime_context,
+            name=term_class.__name__, context=runtime_context,
             num_envs=2,
             model_context=phase_model_context,
             **{"landing_distance": 0.22, "lift_height": 0.12, **params},
@@ -1259,7 +1259,7 @@ def test_command_adaptive_gait_phase_height_matches_lift_and_error(
         foot_geom_ids=torch.tensor([3, 4, 5, 6]),
     )
     term = QuadrupedalCommandAdaptiveGaitPhaseHeightL2(
-        num_envs=2,
+        name="QuadrupedalCommandAdaptiveGaitPhaseHeightL2", num_envs=2,
         context=runtime_context,
         model_context=phase_model_context,
         landing_distance=0.22,
@@ -1296,7 +1296,7 @@ def test_command_adaptive_gait_phase_height_uses_independent_distances(
         foot_geom_ids=torch.tensor([3, 4, 5, 6]),
     )
     term = QuadrupedalCommandAdaptiveGaitPhaseHeightL2(
-        context=runtime_context,
+        name="QuadrupedalCommandAdaptiveGaitPhaseHeightL2", context=runtime_context,
         model_context=phase_model_context,
         landing_distance=0.3,
         lift_height=0.2,
@@ -1328,7 +1328,7 @@ def test_command_adaptive_gait_phase_height_defaults(
         foot_geom_ids=torch.tensor([3, 4, 5, 6]),
     )
     term = term_class(
-        context=runtime_context,
+        name=term_class.__name__, context=runtime_context,
         model_context=phase_model_context,
         landing_distance=0.22,
     )
@@ -1357,7 +1357,7 @@ def test_command_adaptive_gait_phase_height_uses_model_foot_order(
         foot_geom_ids=torch.tensor([3, 4, 5, 6]),
     )
     term = QuadrupedalCommandAdaptiveGaitPhaseHeightL2(
-        num_envs=2,
+        name="QuadrupedalCommandAdaptiveGaitPhaseHeightL2", num_envs=2,
         context=runtime_context,
         model_context=phase_model_context,
         landing_distance=0.22,
@@ -1390,7 +1390,7 @@ def test_command_adaptive_gait_phase_height_applies_per_foot_phase_shift(
         foot_geom_ids=torch.tensor([3, 4, 5, 6]),
     )
     term = QuadrupedalCommandAdaptiveGaitPhaseHeightL2(
-        context=runtime_context,
+        name="QuadrupedalCommandAdaptiveGaitPhaseHeightL2", context=runtime_context,
         model_context=phase_model_context,
         landing_distance=0.22,
         lift_height=0.12,
@@ -1464,7 +1464,7 @@ def test_command_adaptive_gait_phase_height_checks_phase_shift_shape(
         foot_geom_ids=torch.tensor([3, 4, 5, 6]),
     )
     term = QuadrupedalCommandAdaptiveGaitPhaseHeightL2(
-        context=runtime_context,
+        name="QuadrupedalCommandAdaptiveGaitPhaseHeightL2", context=runtime_context,
         model_context=phase_model_context,
         landing_distance=0.22,
         lift_height=0.12,
@@ -1488,7 +1488,7 @@ def test_command_adaptive_gait_phase_height_scales_with_command(
         foot_geom_ids=torch.tensor([3, 4, 5, 6]),
     )
     term = QuadrupedalCommandAdaptiveGaitPhaseHeightL2(
-        num_envs=2,
+        name="QuadrupedalCommandAdaptiveGaitPhaseHeightL2", num_envs=2,
         context=runtime_context,
         model_context=phase_model_context,
         landing_distance=0.22,
@@ -1519,7 +1519,7 @@ def test_trot_loop_duration_tracks_valid_contact_sequence_and_resets(
         foot_geom_ids=torch.tensor([3, 4, 5, 6]),
     )
     term = TrotLoopDurationTanh(
-        num_envs=2,
+        name="TrotLoopDurationTanh", num_envs=2,
         context=runtime_context,
         model_context=gait_model_context,
         growth_rate=2.0,
@@ -1594,7 +1594,7 @@ def test_trot_loop_duration_resets_on_invalid_contact_sequence(
         foot_geom_ids=torch.tensor([3, 4, 5, 6]),
     )
     term = TrotLoopDurationTanh(
-        num_envs=1,
+        name="TrotLoopDurationTanh", num_envs=1,
         context=runtime_context,
         model_context=gait_model_context,
         growth_rate=2.0,
@@ -1650,7 +1650,7 @@ def test_trot_loop_duration_treats_small_commands_as_idle(
         foot_geom_ids=torch.tensor([3, 4, 5, 6]),
     )
     term = TrotLoopDurationTanh(
-        num_envs=1,
+        name="TrotLoopDurationTanh", num_envs=1,
         context=runtime_context,
         model_context=gait_model_context,
     )
@@ -1699,7 +1699,7 @@ def test_command_adaptive_gait_phase_height_uses_base_plane_distance(
         foot_geom_ids=torch.tensor([3, 4, 5, 6]),
     )
     term = QuadrupedalCommandAdaptiveGaitPhaseHeightL2(
-        num_envs=1,
+        name="QuadrupedalCommandAdaptiveGaitPhaseHeightL2", num_envs=1,
         context=runtime_context,
         model_context=phase_model_context,
         landing_distance=0.22,

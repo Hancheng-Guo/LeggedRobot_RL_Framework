@@ -95,6 +95,10 @@ class BaseTaskLogic(ABC):
     def abort_simulator_reset(self, env_ids: torch.Tensor | None = None) -> None:
         pass
 
+    def commit_simulator_reset(self, env_ids: torch.Tensor | None = None) -> None:
+        """Finalize task-owned reset state after task initialization succeeds."""
+        pass
+
 
     def _build_action_manager(
         self,
@@ -175,13 +179,48 @@ class BaseTaskLogic(ABC):
         )
 
 
+    CHECKPOINT_MANAGERS = (
+        "task_state_manager", "action_manager", "command_manager",
+        "observation_manager", "reward_manager", "termination_manager",
+    )
+
+
     def checkpoint_state_dict(self) -> dict[str, Any]:
-        """Save persistent training statistics, excluding unfinished episodes."""
-        return {}
+        """Compose declared persistent manager state, excluding unfinished episodes."""
+        state = {}
+        for name in self.CHECKPOINT_MANAGERS:
+            if hasattr(self, name):
+                saved = getattr(self, name).checkpoint_state_dict()
+                if saved:
+                    state[name] = saved
+        return state
 
 
     def set_training_mode(self, training: bool) -> None:
         pass
+
+
+    def playback_state_dict(
+        self,
+        env_index: int,
+    ) -> dict[str, Any]:
+        """Project base-owned manager state; subclasses project their own additional fields."""
+        state = {}
+        for name in self.CHECKPOINT_MANAGERS:
+            if hasattr(self, name):
+                manager = getattr(self, name)
+                state_dict = manager.checkpoint_state_dict()
+                if state_dict:
+                    state[name] = manager.playback_state_dict(env_index)
+        if (
+            type(self).playback_state_dict is BaseTaskLogic.playback_state_dict
+            and set(self.checkpoint_state_dict()) != set(state)
+        ):
+            raise NotImplementedError(
+                "Tasks with checkpoint state must implement playback_state_dict() "
+                "to project state for the selected environment."
+            )
+        return state
 
 
     def load_checkpoint_state_dict(
@@ -190,8 +229,12 @@ class BaseTaskLogic(ABC):
     ) -> None:
         if not isinstance(state, Mapping):
             raise TypeError("Task checkpoint must be a mapping.")
-        if state:
+        if set(state) != set(BaseTaskLogic.checkpoint_state_dict(self)):
             raise ValueError("This task does not support the saved checkpoint state.")
+        for name, saved in state.items():
+            getattr(self, name).validate_checkpoint_state_dict(saved)
+        for name, saved in state.items():
+            getattr(self, name).load_checkpoint_state_dict(saved)
 
 
     def reset(

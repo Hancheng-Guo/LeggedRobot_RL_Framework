@@ -15,7 +15,7 @@ from .managers import (
 )
 from .managers.randomization import RandomizationBackend
 from .managers.curriculum.types import CurriculumSpaceConfigs, CurriculumSpaceProvider
-from .utils import TaskContext, TaskStepResult
+from .utils import TaskContext, TaskStepResult, ResetSnapshot, capture_task_reset_state
 
 
 class LocomotionTaskLogic(BaseTaskLogic):
@@ -47,6 +47,7 @@ class LocomotionTaskLogic(BaseTaskLogic):
         self.curriculum_manager: CurriculumManager
         self.randomization_manager: RandomizationManager
         self._simulator_requirements: dict[str, Any]
+        self._pending_reset: ResetSnapshot | None = None
         # self.event_manager: EventManager
 
 
@@ -130,11 +131,15 @@ class LocomotionTaskLogic(BaseTaskLogic):
             hasattr(self, "randomization_manager")
             and self.randomization_manager.matches_config(self.num_envs, **selected)
         ):
+            self.randomization_manager.config_update(
+                curriculum_manager=self.curriculum_manager
+            )
             return
 
         self.randomization_manager = RandomizationManager(
             num_envs=self.num_envs,
             context=self.context,
+            curriculum_manager=self.curriculum_manager,
             **selected,
         )
 
@@ -199,7 +204,23 @@ class LocomotionTaskLogic(BaseTaskLogic):
         env_ids: torch.Tensor | None = None,
     ) -> None:
         """Prepare task changes before the environment resets physics."""
-        self.randomization_manager.before_simulator_reset(env_ids)
+        if self._pending_reset is not None:
+            raise RuntimeError("Finish or abort the pending task reset first.")
+        managers = (
+            self.curriculum_manager, self.task_state_manager,
+            self.action_manager, self.command_manager,
+            self.observation_manager, self.reward_manager,
+            self.termination_manager,
+        )
+        self._pending_reset = capture_task_reset_state(managers)
+
+        try:
+            self.curriculum_manager.finalize_episodes(env_ids)
+            self.curriculum_manager.resample(env_ids)
+            self.randomization_manager.before_simulator_reset(env_ids)
+        except Exception:
+            self.abort_simulator_reset(env_ids)
+            raise
 
 
     def after_simulator_reset(
@@ -215,12 +236,45 @@ class LocomotionTaskLogic(BaseTaskLogic):
         env_ids: torch.Tensor | None = None,
     ) -> None:
         """Restore task-owned physical changes when a reset fails."""
-        self.randomization_manager.abort_simulator_reset(env_ids)
+        pending = self._pending_reset
+        try:
+            self.randomization_manager.abort_simulator_reset(env_ids)
+        finally:
+            if pending is not None:
+                try:
+                    pending.restore()
+                finally:
+                    self._pending_reset = None
+
+
+    def commit_simulator_reset(
+        self,
+        env_ids: torch.Tensor | None = None,
+    ) -> None:
+        self.randomization_manager.commit_simulator_reset(env_ids)
+        self._pending_reset = None
 
 
     def checkpoint_state_dict(self) -> dict[str, Any]:
-        return {
-            "curriculum": self.curriculum_manager.checkpoint_state_dict()
+        if self._pending_reset is not None:
+            raise RuntimeError("Cannot checkpoint an unfinished task reset.")
+        return super().checkpoint_state_dict() | {
+            "curriculum": self.curriculum_manager.checkpoint_state_dict(),
+            "randomization": self.randomization_manager.checkpoint_state_dict(),
+        }
+    
+
+    def playback_state_dict(
+        self,
+        env_index: int,
+    ) -> dict[str, Any]:
+        if not 0 <= env_index < self.num_envs:
+            raise ValueError("Playback environment index is out of range.")
+        if self._pending_reset is not None:
+            raise RuntimeError("Cannot project an unfinished task reset for playback.")
+        return super().playback_state_dict(env_index) | {
+            "curriculum": self.curriculum_manager.playback_state_dict(env_index),
+            "randomization": self.randomization_manager.playback_state_dict(env_index),
         }
 
 
@@ -230,19 +284,29 @@ class LocomotionTaskLogic(BaseTaskLogic):
     ) -> None:
         if not isinstance(state, Mapping):
             raise TypeError("Task checkpoint must be a mapping.")
-        if set(state) != {"curriculum"}:
-            raise ValueError("Locomotion task checkpoint must contain curriculum state.")
+        owned_fields = {"curriculum", "randomization"}
+        if not owned_fields.issubset(state):
+            raise ValueError(
+                "Locomotion task checkpoint must contain curriculum and randomization state."
+            )
+        if self._pending_reset is not None:
+            raise RuntimeError("Finish the current task reset before restoring.")
+
+        self.randomization_manager.validate_checkpoint_state_dict(state["randomization"])
+        self.curriculum_manager.validate_checkpoint_state_dict(state["curriculum"])
+        super().load_checkpoint_state_dict({
+            name: value for name, value in state.items() if name not in owned_fields
+        })
         self.curriculum_manager.load_checkpoint_state_dict(state["curriculum"])
+        self.randomization_manager.load_checkpoint_state_dict(state["randomization"])
 
 
     def reset(
         self,
         env_ids: torch.Tensor | None = None,
     ) -> None:
-        """Reset curriculum episode bookkeeping and task managers only."""
+        """Initialize task managers; course settlement and allocation belong to the pre-reset hook."""
 
-        self.curriculum_manager.reset(env_ids)
-        self.curriculum_manager.resample(env_ids)
         # self.event_manager.reset(env_ids)
         # Environment reset hooks have already applied physical randomization.
         super().reset(env_ids)
@@ -250,6 +314,7 @@ class LocomotionTaskLogic(BaseTaskLogic):
 
     def set_training_mode(self, training: bool) -> None:
         self.curriculum_manager.set_training_mode(training)
+        self.randomization_manager.set_training_mode(training)
 
 
 

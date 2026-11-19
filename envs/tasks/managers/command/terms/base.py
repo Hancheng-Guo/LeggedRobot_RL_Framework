@@ -1,22 +1,29 @@
-from abc import ABC, abstractmethod
-
 import torch
+from abc import ABC, abstractmethod
+from collections.abc import Mapping
+from typing import Any
 
 from envs.simulators.utils import ModelContext
-from envs.tasks.utils import TaskContext
+from envs.tasks.managers.curriculum import CurriculumSpaceConfigs
+from envs.tasks.utils import TaskContext, StateOwner
 from utils import RuntimeContext
 
 
-class BaseCommandTerm(ABC):
+class BaseCommandTerm(StateOwner, ABC):
+
+    RESET_STATE_FIELDS = ("command",)
 
     def __init__(
         self,
+        name: str,
         num_envs: int,
         context: RuntimeContext,
         model_context: ModelContext,
         dim: int = 1,
         *args, **kwargs,
     ) -> None:
+
+        super().__init__(name=name)
 
         if (
             not isinstance(dim, int)
@@ -35,6 +42,21 @@ class BaseCommandTerm(ABC):
             dtype=self.context.dtype,
             device=self.context.device,
         )
+
+
+    @classmethod
+    def get_curriculum_references(
+        cls,
+        params: Mapping[str, Any],
+    ) -> set[str]:
+        return set()
+
+
+    @classmethod
+    def get_curriculum_space_config(
+        cls, name: str, params: Mapping[str, Any],
+    ) -> CurriculumSpaceConfigs:
+        return {}
 
 
     @abstractmethod

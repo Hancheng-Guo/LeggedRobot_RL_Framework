@@ -11,12 +11,22 @@ import torch
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from copy import deepcopy
-from typing import cast, Any, TypeAlias
+from typing import cast, Any
 
-from envs.simulators.terrain import TerrainBackend, TerrainGeometry, TerrainPatch
-from utils import RuntimeContext
 from .base import BaseRandomizationTerm, RandomizationBackend
 from .registry import register_randomization
+from .terrain_category import (
+    TerrainCategoryConfig, TerrainCategoryTerm, PlaneTerrainConfig,
+    SlopeTerrainConfig, RoughTerrainConfig, finite_number,
+)
+from .terrain_difficulty import (
+    TerrainDifficultyConfig, TerrainDifficultyTerm, difficulty_value
+)
+from envs.simulators.terrain import TerrainBackend, TerrainGeometry, TerrainPatch
+from envs.tasks.managers.curriculum import (
+    CurriculumTermProvider, CurriculumSpaceConfig, CurriculumSpaceConfigs,
+)
+from utils import RuntimeContext
 
 
 @dataclass(frozen=True)
@@ -50,26 +60,6 @@ def terrain_patch_seed(
 
 
 @dataclass(frozen=True)
-class PlaneTerrainConfig:
-    weight: float = 1.0
-
-
-@dataclass(frozen=True)
-class SlopeTerrainConfig:
-    max_slope: float
-    weight: float = 1.0
-
-
-@dataclass(frozen=True)
-class RoughTerrainConfig:
-    max_height: float
-    weight: float = 1.0
-
-
-TerrainTypeConfig: TypeAlias = PlaneTerrainConfig | SlopeTerrainConfig | RoughTerrainConfig
-
-
-@dataclass(frozen=True)
 class TerrainConfig:
     """Shared terrain parameters; lengths are metres and slopes are rise/run.
 
@@ -79,14 +69,17 @@ class TerrainConfig:
     non-plane configurations until its geometry implementation is added.
     """
 
-    types: dict[str, TerrainTypeConfig] = field(
-        default_factory=lambda: {"plane": PlaneTerrainConfig()})
+    category: TerrainCategoryConfig = field(default_factory=TerrainCategoryConfig)
+    difficulty: TerrainDifficultyConfig = field(default_factory=TerrainDifficultyConfig)
+    resample_patch: bool = False
+    resample_spawn: bool = False
     patch_size: tuple[float, float] = (4.0, 4.0)
     resolution: float = 0.1
     spawn_margin: float = 0.5
     seed: int | None = None
-    difficulty_levels: tuple[float, ...] = (1.0,)
     spawn_size: tuple[float, float] = (0.5, 0.5)
+
+    _finite_number = staticmethod(finite_number)
 
 
     def __eq__(
@@ -97,14 +90,14 @@ class TerrainConfig:
             return NotImplemented
         # Type order defines weighted sampling intervals and must match on restore.
         return (
-            tuple(self.types) == tuple(other.types)
+            self.category == other.category
             and asdict(self) == asdict(other)
         )
 
 
     @property
     def is_plane(self) -> bool:
-        return len(self.types) == 1 and "plane" in self.types
+        return self.category.is_plane
 
 
     def effective_seed(
@@ -125,8 +118,9 @@ class TerrainConfig:
         if not isinstance(value, Mapping):
             raise TypeError("'terrain' must be a mapping.")
         unknown = set(value) - {
-            "types", "patch_size", "resolution", "spawn_margin",
-            "seed", "difficulty_levels", "spawn_size",
+            "patch_size", "resolution", "spawn_margin",
+            "seed", "spawn_size", "category", "difficulty",
+            "resample_patch", "resample_spawn",
         }
         if unknown:
             raise ValueError(f"Unknown terrain field(s): {sorted(unknown)}.")
@@ -137,46 +131,11 @@ class TerrainConfig:
                 raise TypeError(f"terrain.{name} must be a sequence.")
             return item
 
-        raw_types = value.get("types", {"plane": {}})
-        if not isinstance(raw_types, Mapping):
-            raise TypeError(
-                "terrain.types must be a mapping keyed by terrain type names."
-            )
-        if not raw_types:
-            raise ValueError("terrain.types must contain at least one terrain type.")
-
-        types: dict[str, TerrainTypeConfig] = {}
-        for name, params in raw_types.items():
-            if not isinstance(params, Mapping):
-                raise TypeError(f"terrain.types.{name} must be a mapping.")
-
-            weight = cls._finite_number(params.get("weight", 1.0), f"types.{name}.weight")
-            if weight <= 0:
-                raise ValueError(f"terrain.types.{name}.weight must be positive.")
-            allowed = {"weight"}
-            if name == "slope":
-                allowed.add("max_slope")
-            elif name == "rough":
-                allowed.add("max_height")
-            if set(params) - allowed:
-                raise ValueError(
-                    f"Unknown terrain.types.{name} field(s): {sorted(set(params) - allowed)}."
-                )
-
-            if name == "slope":
-                max_slope = cls._finite_number(params.get("max_slope", 0.0), "types.slope.max_slope")
-                if max_slope <= 0:
-                    raise ValueError("terrain.types.slope.max_slope must be positive.")
-                types[name] = SlopeTerrainConfig(max_slope=max_slope, weight=weight)
-            elif name == "rough":
-                max_height = cls._finite_number(params.get("max_height", 0.0), "types.rough.max_height")
-                if max_height <= 0:
-                    raise ValueError("terrain.types.rough.max_height must be positive.")
-                types[name] = RoughTerrainConfig(max_height=max_height, weight=weight)
-            elif name == "plane":
-                types[name] = PlaneTerrainConfig(weight=weight)
-            else:
-                raise ValueError(f"Unsupported terrain type: {name}.")
+        category = TerrainCategoryConfig.from_mapping(value.get("category"))
+        difficulty = TerrainDifficultyConfig.from_mapping(value.get("difficulty"))
+        flags = {name: value.get(name, False) for name in ("resample_patch", "resample_spawn")}
+        if any(type(flag) is not bool for flag in flags.values()):
+            raise TypeError("resample_patch and resample_spawn must be booleans.")
 
         raw_size = sequence("patch_size", (4.0, 4.0))
         if len(raw_size) != 2:
@@ -199,10 +158,6 @@ class TerrainConfig:
         seed = value.get("seed")
         if seed is not None and (isinstance(seed, bool) or not isinstance(seed, int) or seed < 0):
             raise ValueError("terrain.seed must be a non-negative integer or null.")
-        levels = tuple(cls._finite_number(item, "difficulty_levels")
-                       for item in sequence("difficulty_levels", (1.0,)))
-        if not levels or any(not 0 <= level <= 1 for level in levels) or len(set(levels)) != len(levels):
-            raise ValueError("terrain.difficulty_levels must be unique values in [0, 1].")
         raw_spawn = sequence("spawn_size", (0.5, 0.5))
         if len(raw_spawn) != 2:
             raise ValueError("terrain.spawn_size must contain two lengths.")
@@ -211,23 +166,21 @@ class TerrainConfig:
                for size, length in zip(spawn_size, patch_size)):
             raise ValueError("terrain.spawn_size must fit inside the spawn margin.")
         return cls(
-            types=types,
+            category=category,
+            difficulty=difficulty,
+            **flags,
             patch_size=patch_size,
             resolution=resolution,
             spawn_margin=spawn_margin,
             seed=seed,
-            difficulty_levels=levels,
             spawn_size=(spawn_size[0], spawn_size[1]),
         )
 
 
-    @staticmethod
-    def _finite_number(value: Any, name: str) -> float:
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise TypeError(f"terrain.{name} must contain finite numbers.")
-        result = float(value)
-        if not math.isfinite(result):
-            raise ValueError(f"terrain.{name} must contain finite numbers.")
+    def to_mapping(self) -> dict[str, Any]:
+        result = asdict(self)
+        result["category"] = self.category.to_mapping()
+        result["difficulty"] = self.difficulty.to_mapping()
         return result
 
 
@@ -244,7 +197,8 @@ def generate_terrain_patch(
     config: TerrainConfig,
     runtime_seed: int,
     patch_id: int,
-    difficulty_index: int = 0,
+    terrain_type: str,
+    difficulty: float = 1.0,
 ) -> TerrainAssignment:
     """Deterministic reference geometry shared by future backend adapters.
 
@@ -258,25 +212,9 @@ def generate_terrain_patch(
     flat ground. max_slope bounds the sampled coefficient, not the total gradient
     magnitude of collision triangles, which can combine x and y gradients.
     """
-    if (
-        isinstance(difficulty_index, bool)
-        or not isinstance(difficulty_index, int)
-        or not 0 <= difficulty_index < len(config.difficulty_levels)
-    ):
-        raise ValueError("Invalid terrain difficulty index.")
+    difficulty = difficulty_value(difficulty)
     seed = terrain_patch_seed(config.effective_seed(runtime_seed), patch_id)
 
-    # Normalize before summation to avoid overflowing otherwise valid weights.
-    max_weight = max(params.weight for params in config.types.values())
-    weights = [params.weight / max_weight for params in config.types.values()]
-    draw = _uniform(seed, "type") * sum(weights)
-    terrain_type = next(reversed(config.types))
-    for name, weight in zip(config.types, weights):
-        draw -= weight
-        if draw < 0:
-            terrain_type = name
-            break
-    difficulty = config.difficulty_levels[difficulty_index]
     nx, ny = (math.ceil(size / config.resolution) for size in config.patch_size)
     dx, dy = config.patch_size[0] / nx, config.patch_size[1] / ny
     x = tuple(-config.patch_size[0] / 2 + i * dx for i in range(nx + 1))
@@ -284,7 +222,7 @@ def generate_terrain_patch(
     safe_x, safe_y = config.spawn_size[0] / 2 + dx, config.spawn_size[1] / 2 + dy
 
     rows: list[tuple[float, ...]] = []
-    type_config = config.types[terrain_type]
+    type_config = config.category.parameters_for(terrain_type)
 
     if isinstance(type_config, SlopeTerrainConfig):
         slope = (2 * _uniform(seed, "slope") - 1) * type_config.max_slope * difficulty
@@ -363,7 +301,10 @@ class TerrainAssignments:
         self.seed = config.effective_seed(runtime_seed)
         self.num_envs = num_envs
         self.generations = [0] * num_envs
-        self.difficulty_indices = [0] * num_envs
+        self.difficulties = [config.difficulty.initial_value] * num_envs
+        self.categories = [config.category.initial_value] * num_envs
+        self.allocation_ids = list(range(num_envs))
+        self.allocation_stride = num_envs
 
 
     def patch(
@@ -381,10 +322,27 @@ class TerrainAssignments:
     ) -> TerrainAssignment:
         """Generate a patch for an already validated environment ID."""
 
-        return generate_terrain_patch(self.config,
-                                      self.seed,
-                                      self.generations[env_id] * self.num_envs + env_id,
-                                      self.difficulty_indices[env_id])
+        return generate_terrain_patch(
+            self.config,
+            self.seed,
+            self.generations[env_id] * self.allocation_stride + self.allocation_ids[env_id],
+            terrain_type=self.categories[env_id],
+            difficulty=self.difficulties[env_id],
+        )
+
+
+    def playback_state_dict(
+        self,
+        env_index: int,
+    ) -> dict[str, Any]:
+        """Retain original patch identities when projecting allocation state."""
+
+        self._validate_ids([env_index])
+        state = self.state_dict()
+        state["num_envs"] = 1
+        for name in ("generations", "difficulties", "categories", "allocation_ids"):
+            state[name] = [state[name][env_index]]
+        return state
 
 
     def _validate_ids(
@@ -406,47 +364,66 @@ class TerrainAssignments:
     def reset(
         self,
         env_ids_list: Sequence[int],
-        difficulty_indices: Sequence[int] | None = None,
+        difficulties: Sequence[float] | None = None,
+        categories: Sequence[str] | None = None,
     ) -> None:
 
         self._validate_ids(env_ids_list)
-        self._reset(env_ids_list, difficulty_indices)
+        self._reset(env_ids_list, difficulties, categories)
 
 
     def _reset(
         self,
         env_ids_list: Sequence[int],
-        difficulty_indices: Sequence[int] | None,
+        difficulties: Sequence[float] | None,
+        categories: Sequence[str] | None = None,
     ) -> None:
-        """Advance validated environment IDs, validating only the new difficulties."""
+        """Advance validated environment IDs with resolved domain values."""
 
-        levels = (
-            list(difficulty_indices)
-            if difficulty_indices is not None
-            else [self.difficulty_indices[env_id] for env_id in env_ids_list]
+        selected_difficulties = (
+            [self.difficulties[env_id] for env_id in env_ids_list]
+            if difficulties is None else list(difficulties)
+        )
+        selected_categories = (
+            [self.categories[env_id] for env_id in env_ids_list]
+            if categories is None else list(categories)
         )
         if (
-            len(levels) != len(env_ids_list)
-            or any(
-                isinstance(env_id, bool)
-                or not isinstance(env_id, int)
-                or not 0 <= env_id < len(self.config.difficulty_levels)
-                for env_id in levels
-            )
+            len(selected_difficulties) != len(env_ids_list)
+            or len(selected_categories) != len(env_ids_list)
         ):
-            raise ValueError("Invalid terrain difficulty indices.")
-        for env_id, level in zip(env_ids_list, levels):
+            raise ValueError(
+                "Terrain selections must match selected environments."
+            )
+
+        selected_difficulties = [
+            self.config.difficulty.validate_selection(value)
+            for value in selected_difficulties
+        ]
+        selected_categories = [
+            self.config.category.validate_selection(value)
+            for value in selected_categories
+        ]
+        for env_id, difficulty, category in (
+            zip(env_ids_list, selected_difficulties, selected_categories)
+        ):
             self.generations[env_id] += 1
-            self.difficulty_indices[env_id] = level
+            self.difficulties[env_id] = difficulty
+            self.categories[env_id] = category
 
 
     def state_dict(self) -> dict[str, Any]:
-        return dict(version=5,
-                    config=asdict(self.config),
-                    seed=self.seed,
-                    num_envs=self.num_envs,
-                    generations=self.generations.copy(),
-                    difficulty_indices=self.difficulty_indices.copy())
+        return dict(
+            version=8,
+            config=self.config.to_mapping(),
+            seed=self.seed,
+            num_envs=self.num_envs,
+            generations=self.generations.copy(),
+            difficulties=self.difficulties.copy(),
+            categories=self.categories.copy(),
+            allocation_ids=self.allocation_ids.copy(),
+            allocation_stride=self.allocation_stride,
+        )
 
 
     def load_state_dict(
@@ -457,7 +434,8 @@ class TerrainAssignments:
 
         state_set = {
             "version", "config", "seed", "num_envs",
-            "generations", "difficulty_indices",
+            "generations", "difficulties", "categories",
+            "allocation_ids", "allocation_stride",
         }
         if (
             not isinstance(state, Mapping)
@@ -466,17 +444,17 @@ class TerrainAssignments:
         ):
             raise ValueError("Invalid terrain allocation checkpoint schema.")
         if (
-            state.get("version") != 5
+            state.get("version") != 8
             or state.get("num_envs") != self.num_envs
             or state.get("seed") != self.seed
         ):
             raise ValueError("Incompatible terrain allocation checkpoint.")
         if TerrainConfig.from_mapping(state.get("config")) != self.config:
             raise ValueError("Terrain checkpoint configuration differs.")
-        generations = list(state["generations"])
-        levels = list(state["difficulty_indices"])
+        generations = state["generations"]
         if (
-            len(generations) != self.num_envs
+            not isinstance(generations, list)
+            or len(generations) != self.num_envs
             or any(
                 isinstance(i, bool)
                 or not isinstance(i, int)
@@ -485,19 +463,42 @@ class TerrainAssignments:
             )
         ):
             raise ValueError("Invalid terrain generations.")
-        if (
-            len(levels) != self.num_envs
-            or any(
-                isinstance(i, bool)
-                or not isinstance(i, int)
-                or not 0 <= i < len(self.config.difficulty_levels)
-                for i in levels  
-            )
-        ):
-            raise ValueError("Invalid terrain difficulty indices.")
 
-        self.generations = generations
-        self.difficulty_indices = levels
+        difficulties = state["difficulties"]
+        categories = state["categories"]
+        if (
+            not isinstance(difficulties, list)
+            or len(difficulties) != self.num_envs
+            or not isinstance(categories, list)
+            or len(categories) != self.num_envs
+        ):
+            raise ValueError("Invalid terrain allocation selections.")
+        difficulties = [
+            self.config.difficulty.validate_selection(value)
+            for value in difficulties
+        ]
+        categories = [
+            self.config.category.validate_selection(value)
+            for value in categories
+        ]
+
+        allocation_ids = state["allocation_ids"]
+        stride = state["allocation_stride"]
+        if (
+            type(stride) is not int
+            or stride <= 0
+            or not isinstance(allocation_ids, list)
+            or len(allocation_ids) != self.num_envs
+            or any(type(i) is not int or not 0 <= i < stride for i in allocation_ids)
+            or len(set(allocation_ids)) != self.num_envs
+        ):
+            raise ValueError("Invalid terrain allocation identity mapping.")
+
+        self.allocation_ids = allocation_ids.copy()
+        self.allocation_stride = stride
+        self.generations = generations.copy()
+        self.difficulties = difficulties
+        self.categories = categories
 
 
 @dataclass
@@ -506,6 +507,8 @@ class _PendingTerrainReset:
     candidate: TerrainAssignments
     patches: tuple[TerrainAssignment, ...]
     physical_state: object
+    spawn_generations: list[int]
+    restored_envs: frozenset[int]
 
 
 @register_randomization
@@ -516,22 +519,61 @@ class TerrainRandomizationTerm(BaseRandomizationTerm):
     supplies geometry; the environment resets physics; after_simulator_reset supplies the
     spawn pose. The term never owns the physical reset operation.
     """
+
+    RESET_STATE_CHILDREN = ("category", "difficulty")
+
+    CHECKPOINT_STATE_FIELDS = {
+        "spawn_generations": "_spawn_generations",
+        "requested_reallocations": "_requested_reallocations",
+        "requested_spawns": "_requested_spawns",
+    }
+
     def __init__(
         self,
+        name: str,
         num_envs: int,
         context: RuntimeContext,
+        curriculum_manager: CurriculumTermProvider | None = None,
         **params,
     ):
 
-        super().__init__(num_envs, context, **params)
+        super().__init__(name=name, num_envs=num_envs, context=context, **params)
 
-        self.config: TerrainConfig
-        self.assignments = None if self.config.is_plane else TerrainAssignments(self.config, context.seed, num_envs)
+        self.config = self.normalize_config(params)
+        self.category = TerrainCategoryTerm(
+            name=f"{name}_category", config=self.config.category, context=context,
+            curriculum_manager=curriculum_manager, num_envs=num_envs,
+        )
+        self.difficulty = TerrainDifficultyTerm(
+            name=f"{name}_difficulty", config=self.config.difficulty, context=context,
+            curriculum_manager=curriculum_manager, num_envs=num_envs,
+        )
+        self.training = True
+        self._spawn_generations = [0] * num_envs
+        self._requested_reallocations: set[int] = set()
+        self._requested_spawns: set[int] = set()
+        self._restored_envs: set[int] = set()
+
+        is_fixed_plane = (
+            self.config.is_plane
+            and self.config.category.is_fixed
+            and self.config.difficulty.is_fixed
+        )
+        self.assignments = (
+            None if is_fixed_plane else TerrainAssignments(self.config, context.seed, num_envs)
+        )
+
         self.geometry = self.geometry_from_config(self.config)
         self.simulator: TerrainBackend
-        self._patches: list[TerrainAssignment | None] = [None] * num_envs if self.assignments is not None else []
+        self._patches: list[TerrainAssignment | None] = (
+            [None] * num_envs if self.assignments is not None else []
+        )
         self._pending: _PendingTerrainReset | None = None
-        self._requested_difficulties: dict[int, int] = {}
+
+
+    def _ensure_no_pending_reset(self) -> None:
+        if self._pending is not None:
+            raise RuntimeError("Finish or abort the pending terrain reset first.")
 
 
     @classmethod
@@ -557,7 +599,7 @@ class TerrainRandomizationTerm(BaseRandomizationTerm):
         if config.is_plane:
             return None
         height_bound = 0.0
-        for params in config.types.values():
+        for params in config.category.values.values():
             if isinstance(params, RoughTerrainConfig):
                 height_bound = max(height_bound, params.max_height)
             elif isinstance(params, SlopeTerrainConfig):
@@ -571,9 +613,233 @@ class TerrainRandomizationTerm(BaseRandomizationTerm):
             height_bound,
         )
 
+
     @property
     def patches(self) -> tuple[TerrainAssignment | None, ...]:
         return tuple(self._patches)
+
+
+    @classmethod
+    def get_curriculum_space_config(
+        cls,
+        name: str,
+        params: Mapping[str, Any],
+    ) -> CurriculumSpaceConfigs:
+
+        result: CurriculumSpaceConfigs = {}
+        for term_cls, axis in (
+            (TerrainCategoryTerm, "category"), (TerrainDifficultyTerm, "difficulty")
+        ):
+            descriptions = term_cls.get_curriculum_space_config(
+                f"{name}_{axis}", params.get(axis)
+            )
+            for reference, space in descriptions.items():
+                previous = result.get(reference, CurriculumSpaceConfig({}))
+                result[reference] = CurriculumSpaceConfig(
+                    dimensions=previous.dimensions | space.dimensions,
+                    persistent_assignments=True,
+                )
+        return result
+
+
+    def matches_config(
+        self,
+        params: Mapping[str, Any],
+    ) -> bool:
+        return self.config == self.normalize_config(params)
+
+
+    @classmethod
+    def get_curriculum_references(
+        cls,
+        params: Mapping[str, Any],
+    ) -> set[str]:
+        return (
+            TerrainCategoryTerm.get_curriculum_references(params.get("category"))
+            | TerrainDifficultyTerm.get_curriculum_references(params.get("difficulty"))
+        )
+
+
+    def config_update(
+        self,
+        curriculum_manager: CurriculumTermProvider | None,
+        *args, **kwargs
+    ) -> None:
+        self._ensure_no_pending_reset()
+        snapshot = self.category.capture_reset_state()
+        snapshot.extend(self.difficulty.capture_reset_state())
+        try:
+            self.category.config_update(curriculum_manager=curriculum_manager)
+            self.difficulty.config_update(curriculum_manager=curriculum_manager)
+        except Exception:
+            snapshot.restore()
+            raise
+
+
+    def set_training_mode(self, training: bool) -> None:
+        self.training = training
+
+
+    def request_reallocation(
+        self,
+        env_ids: torch.Tensor | None = None,
+    ) -> None:
+        self._ensure_no_pending_reset()
+        self._requested_reallocations.update(self._selected_ids(env_ids))
+
+
+    def request_spawn(
+        self,
+        env_ids: torch.Tensor | None = None,
+    ) -> None:
+        self._ensure_no_pending_reset()
+        self._requested_spawns.update(self._selected_ids(env_ids))
+
+
+    def _sample_conditions(
+        self,
+        env_id: int,
+    ) -> tuple[str, float]:
+
+        assert self.assignments is not None
+        seed = terrain_patch_seed(
+            self.assignments.seed, self.assignments.allocation_ids[env_id]
+        )
+        current = self._patches[env_id]
+        category = self.category.sample(
+            env_id, seed, None if current is None else current.terrain_type
+        )
+        difficulty = self.difficulty.sample(
+            env_id, seed, None if current is None else current.difficulty
+        )
+        return category, difficulty
+
+
+    def _checkpoint_metadata(self) -> dict[str, Any]:
+        if self._pending is not None:
+            raise RuntimeError("Cannot checkpoint an unfinished terrain reset.")
+        return {
+            "type": type(self).__name__,
+            "version": 4,
+            "config": self.config.to_mapping(),
+            "axes": {
+                "category": self.category.checkpoint_state_dict(),
+                "difficulty": self.difficulty.checkpoint_state_dict(),
+            },
+            "num_envs": self.num_envs,
+            "seed": self.config.effective_seed(self.context.seed),
+            "allocations": None if self.assignments is None else self.assignments.state_dict(),
+            "initialized": [patch is not None for patch in self._patches],
+        }
+
+
+    def validate_checkpoint_state_dict(
+        self,
+        state: Mapping[str, Any],
+    ) -> None:
+
+        if not isinstance(state, Mapping) or state.get("type") != type(self).__name__:
+            raise ValueError(
+                "Randomization checkpoint term type does not match configuration."
+            )
+        if (
+            state.get("version") != 4
+            or state.get("num_envs") != self.num_envs
+            or state.get("seed") != self.config.effective_seed(self.context.seed)
+            or not isinstance(state.get("config"), Mapping)
+            or TerrainConfig.from_mapping(state.get("config")) != self.config
+        ):
+            raise ValueError(
+                "Incompatible terrain checkpoint configuration, "
+                "seed, version or environment count."
+            )
+
+        spawn_generations = state.get("spawn_generations")
+        if (
+            not isinstance(spawn_generations, list)
+            or len(spawn_generations) != self.num_envs
+            or any(type(value) is not int or value < 0 for value in spawn_generations)
+        ):
+            raise ValueError("Invalid terrain checkpoint spawn_generations.")
+
+        initialized = state.get("initialized")
+        count = 0 if self.assignments is None else self.num_envs
+        if (
+            not isinstance(initialized, list)
+            or len(initialized) != count
+            or any(type(value) is not bool for value in initialized)
+        ):
+            raise ValueError("Invalid terrain initialized flags.")
+
+        if self.assignments is None:
+            if state.get("allocations") is not None:
+                raise ValueError("Plane terrain must not contain geometric allocations.")
+        else:
+            candidate = deepcopy(self.assignments)
+            allocations = state.get("allocations")
+            if not isinstance(allocations, Mapping):
+                raise ValueError("Terrain checkpoint requires allocation state.")
+            candidate.load_state_dict(allocations)
+
+        for name in ("requested_reallocations", "requested_spawns"):
+            values = state.get(name)
+            if not isinstance(values, list):
+                raise ValueError(f"Invalid terrain checkpoint {name}.")
+            if (
+                any(type(i) is not int or not 0 <= i < self.num_envs for i in values)
+                or len(set(values)) != len(values)
+            ):
+                raise ValueError(f"Invalid terrain checkpoint {name}.")
+
+        axes = state.get("axes")
+        if not isinstance(axes, Mapping) or set(axes) != {"category", "difficulty"}:
+            raise ValueError("Invalid terrain axis checkpoint state.")
+
+        self.category.validate_checkpoint_state_dict(axes["category"])
+        self.difficulty.validate_checkpoint_state_dict(axes["difficulty"])
+
+
+    def playback_state_dict(
+        self,
+        env_index: int,
+    ) -> dict[str, Any]:
+
+        state = self.checkpoint_state_dict()
+        state["num_envs"] = 1
+        state["spawn_generations"] = [state["spawn_generations"][env_index]]
+        if self.assignments is not None:
+            state["initialized"] = [state["initialized"][env_index]]
+            state["allocations"] = self.assignments.playback_state_dict(env_index)
+        state["axes"] = {
+            "category": self.category.playback_state_dict(env_index),
+            "difficulty": self.difficulty.playback_state_dict(env_index),
+        }
+        for name in ("requested_reallocations", "requested_spawns"):
+            state[name] = [0] if env_index in state[name] else []
+        return state
+
+
+
+    def _before_checkpoint_load(self) -> None:
+        self._ensure_no_pending_reset()
+
+
+    def _after_checkpoint_load(
+        self,
+        state: Mapping[str, Any],
+    ) -> None:
+
+        self.category.load_checkpoint_state_dict(state["axes"]["category"])
+        self.difficulty.load_checkpoint_state_dict(state["axes"]["difficulty"])
+        if self.assignments is not None:
+            self.assignments.load_state_dict(state["allocations"])
+            self._patches = [
+                self.assignments._patch(i)
+                if initialized else None
+                for i, initialized in enumerate(state["initialized"])
+            ]
+        self._restored_envs = {i for i, initialized in enumerate(state["initialized"]) if initialized}
+        self._unapplied_envs = set(range(self.num_envs))
 
 
     def bind(
@@ -581,11 +847,12 @@ class TerrainRandomizationTerm(BaseRandomizationTerm):
         backend: RandomizationBackend,
     ) -> None:
 
+        self._ensure_no_pending_reset()
         simulator = cast(TerrainBackend, backend)
         if simulator.num_envs != self.num_envs:
             raise ValueError("Terrain term and simulator environment counts differ.")
 
-        if self.assignments is not None:
+        if self.geometry is not None:
             measured = simulator.get_terrain_spawn_geometry()
             half = [size / 2 for size in self.config.spawn_size]
             lower = [-half[i] - measured.collision_lower[i] for i in range(2)]
@@ -615,7 +882,10 @@ class TerrainRandomizationTerm(BaseRandomizationTerm):
         if env_ids.ndim != 1 or env_ids.dtype != torch.long:
             raise ValueError("Environment IDs must be a one-dimensional long tensor.")
         env_ids_list = env_ids.tolist()
-        if len(set(env_ids_list)) != len(env_ids_list) or any(env_id < 0 or env_id >= self.num_envs for env_id in env_ids_list):
+        if (
+            len(set(env_ids_list)) != len(env_ids_list)
+            or any(env_id < 0 or env_id >= self.num_envs for env_id in env_ids_list)
+        ):
             raise ValueError("Environment IDs must be unique and in range.")
         return env_ids_list
 
@@ -623,51 +893,73 @@ class TerrainRandomizationTerm(BaseRandomizationTerm):
     def before_simulator_reset(
         self,
         env_ids: torch.Tensor | None = None,
-        difficulty_indices: torch.Tensor | None = None,
     ) -> None:
-        """Reuse terrain unless uninitialized or its requested difficulty changes."""
+        """Compose resolved selections and stage their physical terrain update."""
 
+        self._ensure_no_pending_reset()
         env_ids_list = self._selected_ids(env_ids)
-        if (
-            difficulty_indices is not None
-            and (difficulty_indices.ndim != 1 or difficulty_indices.dtype != torch.long)
-        ):
-            raise ValueError(
-                "Terrain difficulty indices must be a one-dimensional long tensor."
-            )
-        if self.assignments is None:
-            if difficulty_indices is not None:
-                raise ValueError("Difficulty updates require geometric terrain.")
+        if self.assignments is None or not env_ids_list:
             return
-        if not env_ids_list:
-            return
-        if self._pending is not None:
-            raise RuntimeError("Finish or abort the previous terrain reset first.")
 
         candidate = deepcopy(self.assignments)
-        levels = (
-            difficulty_indices.tolist()
-            if difficulty_indices is not None
-            else [self._requested_difficulties.get(env_id, candidate.difficulty_indices[env_id]) for env_id in env_ids_list])
-        if len(levels) != len(env_ids_list):
-            raise ValueError("Terrain difficulty indices must match selected environments.")
+        spawn_generations = self._spawn_generations.copy()
+        changed_env_ids_list = []
+        selected_categories = []
+        selected_difficulties = []
+        for env_id in env_ids_list:
+            restored = env_id in self._restored_envs
+            initialized = self._patches[env_id] is not None
+            if restored or (not self.training and initialized):
+                category = candidate.categories[env_id]
+                difficulty = candidate.difficulties[env_id]
+            else:
+                category, difficulty = self._sample_conditions(env_id)
+                if self.training and (self.config.resample_spawn or env_id in self._requested_spawns):
+                    spawn_generations[env_id] += 1
 
-        changed = {env_id for env_id, level in zip(env_ids_list, levels)
-                   if self._patches[env_id] is None or level != candidate.difficulty_indices[env_id]}
-        candidate._reset([env_id for env_id in env_ids_list if env_id in changed],
-                        [level for env_id, level in zip(env_ids_list, levels) if env_id in changed])
-        patches = tuple(candidate._patch(env_id) if env_id in changed else cast(TerrainAssignment, self._patches[env_id])
-                        for env_id in env_ids_list)
+            selection_changed = (
+                not initialized
+                or category != candidate.categories[env_id]
+                or difficulty != candidate.difficulties[env_id]
+            )
+            regenerate_requested = (
+                self.training and not restored
+                and (self.config.resample_patch or env_id in self._requested_reallocations)
+            )
+            if selection_changed or regenerate_requested:
+                changed_env_ids_list.append(env_id)
+                selected_categories.append(category)
+                selected_difficulties.append(difficulty)
+
+        candidate._reset(changed_env_ids_list, selected_difficulties, selected_categories)
+        changed = set(changed_env_ids_list)
+        patches = tuple(
+            candidate._patch(env_id)
+            if env_id in changed else cast(TerrainAssignment, self._patches[env_id])
+            for env_id in env_ids_list
+        )
         env_ids_tensor = torch.tensor(env_ids_list, dtype=torch.long, device=self.simulator.context.device)
-        snapshot = self.simulator.capture_reset_state(env_ids_tensor)
-        self._pending = _PendingTerrainReset(tuple(env_ids_list), candidate, patches, snapshot)
+        snapshot = (
+            self.simulator.capture_reset_state(env_ids_tensor)
+            if self.geometry is not None else None
+        )
+        self._pending = _PendingTerrainReset(
+            env_ids_tuple=tuple(env_ids_list),
+            candidate=candidate,
+            patches=patches,
+            physical_state=snapshot,
+            spawn_generations=spawn_generations,
+            restored_envs=frozenset(self._restored_envs & set(env_ids_list)),
+        )
 
         try:
             updates = [(env_id, patch.geometry) for env_id, patch in zip(env_ids_list, patches)
                        if env_id in changed or env_id in self._unapplied_envs]
-            if updates:
+            if updates and self.geometry is not None:
                 self.simulator.apply_terrain(
-                    torch.tensor([env_id for env_id, _ in updates], dtype=torch.long, device=env_ids_tensor.device),
+                    torch.tensor(
+                        [env_id for env_id, _ in updates], dtype=torch.long, device=env_ids_tensor.device
+                    ),
                     [geometry for _, geometry in updates],
                 )
         except Exception as error:
@@ -688,10 +980,12 @@ class TerrainRandomizationTerm(BaseRandomizationTerm):
         """Apply spawn positions after the environment has reset physics."""
 
         env_ids_list = self._selected_ids(env_ids)
-        if self.assignments is None or not env_ids_list:
+        if self.assignments is None or (self._pending is None and not env_ids_list):
             return
         if self._pending is None or self._pending.env_ids_tuple != tuple(env_ids_list):
             raise RuntimeError("Terrain post-reset must match a pending pre-reset.")
+        if self.geometry is None:
+            return
         env_ids_tensor = torch.tensor(env_ids_list, dtype=torch.long, device=self.simulator.context.device)
         try:
             positions = self._spawn_positions(env_ids_tensor, self._pending.patches)
@@ -719,8 +1013,14 @@ class TerrainRandomizationTerm(BaseRandomizationTerm):
         self.assignments.load_state_dict(pending.candidate.state_dict())
         for env_id, patch in zip(pending.env_ids_tuple, pending.patches):
             self._patches[env_id] = patch
-            self._requested_difficulties.pop(env_id, None)
+            if self.training and env_id not in pending.restored_envs:
+                self.category.commit_sample(env_id)
+                self.difficulty.commit_sample(env_id)
+                self._requested_reallocations.discard(env_id)
+                self._requested_spawns.discard(env_id)
             self._unapplied_envs.discard(env_id)
+            self._restored_envs.discard(env_id)
+        self._spawn_generations = pending.spawn_generations
         self._pending = None
 
 
@@ -732,27 +1032,22 @@ class TerrainRandomizationTerm(BaseRandomizationTerm):
         if self._pending is None:
             return
         pending = self._pending
+        if pending.physical_state is not None:
+            self.simulator.restore_reset_state(pending.physical_state)
         self._pending = None
-        self.simulator.restore_reset_state(pending.physical_state)
 
 
     def set_difficulty(
         self,
         env_ids_tensor: torch.Tensor,
-        difficulty_indices: torch.Tensor,
+        difficulties: torch.Tensor,
     ) -> None:
+        """Request configured difficulty values for the next reset."""
 
+        self._ensure_no_pending_reset()
         if self.assignments is None:
             raise ValueError("Difficulty updates require geometric terrain.")
-        env_ids_list = self._selected_ids(env_ids_tensor)
-        if (
-            difficulty_indices.ndim != 1
-            or difficulty_indices.dtype != torch.long
-            or len(env_ids_list) != difficulty_indices.numel()
-            or any(not 0 <= i < len(self.config.difficulty_levels) for i in difficulty_indices.tolist())
-        ):
-            raise ValueError("Invalid terrain difficulty indices.")
-        self._requested_difficulties.update(zip(env_ids_list, difficulty_indices.tolist()))
+        self.difficulty.request(self._selected_ids(env_ids_tensor), difficulties)
 
 
     def _spawn_positions(
@@ -763,11 +1058,20 @@ class TerrainRandomizationTerm(BaseRandomizationTerm):
 
         measured = self._spawn_geometry
         xmin, xmax, ymin, ymax = self._spawn_bounds
+        generations = (
+            self._spawn_generations if self._pending is None
+            else self._pending.spawn_generations
+        )
+        seeds = [
+            p.seed if generations[env_id] == 0
+            else terrain_patch_seed(p.seed, generations[env_id])
+            for env_id, p in zip(env_ids_tensor.tolist(), patches)
+        ]
         positions = torch.tensor([
-            [measured.origin[0] + xmin + (xmax - xmin) * _uniform(p.seed, "spawn:x"),
-             measured.origin[1] + ymin + (ymax - ymin) * _uniform(p.seed, "spawn:y"),
+            [measured.origin[0] + xmin + (xmax - xmin) * _uniform(seed, "spawn:x"),
+             measured.origin[1] + ymin + (ymax - ymin) * _uniform(seed, "spawn:y"),
              measured.root_position[2] + self._spawn_lift - measured.origin[2]]
-            for p in patches
+            for seed in seeds
         ], dtype=torch.float64, device=self.simulator.context.device)
         positions[:, 2] += self.simulator.get_ground_heights(positions[:, None, :2], env_ids_tensor)[:, 0]
         return positions

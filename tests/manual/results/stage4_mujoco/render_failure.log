@@ -1,0 +1,21 @@
+C:\Users\Guo Hancheng\miniconda3\envs\quadruped_rl\Lib\site-packages\glfw\__init__.py:917: GLFWError: (65542) b'WGL: The driver does not appear to support OpenGL'
+  warnings.warn(message, GLFWError)
+Traceback (most recent call last):
+  File "D:\GHC\LeggedRobot_RL_Framework\tests\manual\verify_terrain_curriculum.py", line 175, in <module>
+    main()
+  File "D:\GHC\LeggedRobot_RL_Framework\tests\manual\verify_terrain_curriculum.py", line 168, in main
+    report = {mode: verify_mode(args.output_dir.resolve() / mode, mode, args.render)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\GHC\LeggedRobot_RL_Framework\tests\manual\verify_terrain_curriculum.py", line 133, in verify_mode
+    image = playback.simulator.render()
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\GHC\LeggedRobot_RL_Framework\envs\simulators\mujoco.py", line 720, in render
+    return self._rgb_array_render()
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\GHC\LeggedRobot_RL_Framework\envs\simulators\mujoco.py", line 766, in _rgb_array_render
+    self.renderer = mujoco.Renderer(
+                    ^^^^^^^^^^^^^^^^
+  File "C:\Users\Guo Hancheng\miniconda3\envs\quadruped_rl\Lib\site-packages\mujoco\rendering\classic\renderer.py", line 92, in __init__
+    self._mjr_context = mujoco.MjrContext(model, font_scale.value)
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+mujoco.FatalError: gladLoadGL error

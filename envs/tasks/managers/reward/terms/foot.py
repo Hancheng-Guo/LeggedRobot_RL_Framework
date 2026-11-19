@@ -12,6 +12,8 @@ from envs.tasks.utils import TaskContext, validate_height_reference, foot_height
 @register_reward
 class FootStateDurationCommandWeightedExp(BaseRewardTerm):
 
+    RESET_STATE_FIELDS = ('duration', 'last_foot_state')
+
     def __init__(
         self,
         num_envs: int,
@@ -77,6 +79,8 @@ class FootStateDurationCommandWeightedExp(BaseRewardTerm):
 
 @register_reward
 class FootStateDurationCubicCommandWeightedExp(BaseRewardTerm):
+
+    RESET_STATE_FIELDS = ('duration', 'last_foot_state')
 
     def __init__(
         self,
@@ -145,6 +149,8 @@ class FootStateDurationCubicCommandWeightedExp(BaseRewardTerm):
 @register_reward
 class FootStateDurationCubicCommandTanhWeightedExp(BaseRewardTerm):
 
+    RESET_STATE_FIELDS = ('duration', 'last_foot_state')
+
     def __init__(
         self,
         num_envs: int,
@@ -212,6 +218,8 @@ class FootStateDurationCubicCommandTanhWeightedExp(BaseRewardTerm):
 @register_reward
 class FootDurationCubicCommandTanhWeightedExp(BaseRewardTerm):
 
+    RESET_STATE_FIELDS = ('duration', 'last_foot_state')
+
     def __init__(
         self,
         num_envs: int,
@@ -278,6 +286,8 @@ class FootDurationCubicCommandTanhWeightedExp(BaseRewardTerm):
 
 @register_reward
 class FootStateSwitch(BaseRewardTerm):
+
+    RESET_STATE_FIELDS = ('duration', 'initialized', 'last_foot_state')
 
     def __init__(
         self,

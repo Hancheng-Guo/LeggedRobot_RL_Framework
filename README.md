@@ -2,32 +2,39 @@
 
 一个面向四足机器人运动控制的模块化强化学习框架。项目当前提供 PPO、可配置 Actor-Critic、向量化环境、MuJoCo/Isaac Sim 后端、多阶段训练、课程学习、检查点、TensorBoard 日志及视频导出。
 
-本文档以当前代码为准，说明运行方式、配置组织及常用字段。
+本文档提供项目结构、安装运行、实验示例与常见问题。组件参数和任务配置见[开发者查阅手册](docs/guide.md)。
+
+## 文档导航
+
+- [项目结构](#1-项目结构) · [安装与运行](#2-安装与运行)
+- [完整组合示例](#3-完整组合示例) · [校验与常见问题](#4-校验与常见问题) · [8. 扩展注册表](docs/8_extensions_zh.md)
+- [开发者查阅手册](docs/guide.md)：实验配置、Runner、PPO、策略网络、环境、仿真器和任务 manager。
 
 ## 1. 项目结构
 
 ```text
 .
-├─ main.py                 # 当前运行入口
-├─ tools/                  # 运行实验、播放检查点和检查工具
-├─ app/                    # 应用生命周期、运行时上下文、多阶段训练
+├─ main.py                      # 当前运行入口
+├─ tools/                       # 运行实验、播放检查点和检查工具
+├─ app/                         # 应用生命周期、运行时上下文、多阶段训练
+├─ docs/                        # 按章节拆分的开发者查阅手册
 ├─ configs/
-│  ├─ *.yaml               # 顶层实验配置
-│  ├─ runners/             # Runner 配置
-│  ├─ algorithms/          # 算法配置
-│  ├─ policies/            # 策略网络配置
-│  ├─ environments/        # 向量环境配置
-│  ├─ simulators/          # 仿真器配置
-│  └─ tasks/               # 任务及各 Manager 配置
-├─ envs/                   # 环境、任务、仿真器和各类 term
-├─ rl/                     # 算法、策略、网络模块、经验存储
-├─ runners/                # 训练循环和回调
-├─ assets/                 # 机器人 MJCF、URDF、USD 资源
-├─ checkpoints/            # 训练输出（运行时自动创建）
-├─ requirements-mujoco.txt # MuJoCo 环境依赖入口
-├─ requirements-isaacsim.txt # Isaac Sim 环境依赖入口
-├─ requirements/           # 分环境依赖及约束文件
-└─ tests/                  # 自动化测试
+│  ├─ *.yaml                    # 顶层实验配置
+│  ├─ runners/                  # Runner 配置
+│  ├─ algorithms/               # 算法配置
+│  ├─ policies/                 # 策略网络配置
+│  ├─ environments/             # 向量环境配置
+│  ├─ simulators/               # 仿真器配置
+│  └─ tasks/                    # 任务及各 Manager 配置
+├─ envs/                        # 环境、任务、仿真器和各类 term
+├─ rl/                          # 算法、策略、网络模块、经验存储
+├─ runners/                     # 训练循环和回调
+├─ assets/                      # 机器人 MJCF、URDF、USD 资源
+├─ checkpoints/                 # 训练输出（运行时自动创建）
+├─ requirements-mujoco.txt      # MuJoCo 环境依赖入口
+├─ requirements-isaacsim.txt    # Isaac Sim 环境依赖入口
+├─ requirements/                # 分环境依赖及约束文件
+└─ tests/                       # 自动化测试
 ```
 
 配置采用“两层结构”：顶层实验文件负责组合组件和阶段；组件的具体参数分别存放在 `configs/<component>/` 中。
@@ -47,13 +54,27 @@ python -m pip install -r requirements-isaacsim.txt
 python -m pip install -r requirements/dev.txt -c requirements/constraints/dev.txt
 ```
 
-`main.py` 当前使用 `unitree_go1_mujoco_cpu_velocity_only`。按所用仿真环境，将 `app_name` 改为 `configs/` 下的顶层 YAML 文件名（不带 `.yaml`），然后运行：
+### 首次试跑
+
+在已激活的 Python 3.12 环境中按上文安装 MuJoCo 依赖，然后在项目根目录运行仓库自带的 [Go1 CPU 试跑配置](configs/go1_trial.yaml)。
 
 ```powershell
-python main.py
+python -m tools.run_app go1_trial
 ```
 
-例如：
+脚本依次训练、保存和录制 GIF。这次试跑使用一个环境采集 256 步，再执行一次 PPO 更新。打开 `checkpoints/go1_trial_<时间>/`，检查 `logs/training.log`、`configs/` 配置快照、`checkpoints/stage_000/latest.pt` 和 `videos/` 中的 GIF。原配置的阶段条件要求多次更新，因此日志中的 `Stage 0 timeout.` 符合这次试跑的预期。一次更新只用于验证流程，评估行走效果请使用正式训练的检查点。
+
+### 运行已有实验
+
+在项目根目录执行下列命令。将参数换成 `configs/` 下的顶层 YAML 文件名，省略 `.yaml` 后缀。脚本会依次训练、保存检查点和播放。
+
+```powershell
+python -m tools.run_app unitree_go1_mujoco_cpu_velocity_only
+```
+
+也可以执行 `python main.py`。该文件当前选择同一个实验，可修改其中的 `app_name` 切换实验。
+
+可以通过 Python 单独训练和保存检查点。
 
 ```python
 from app.application_entry import ApplicationEntry
@@ -61,7 +82,6 @@ from app.application_entry import ApplicationEntry
 with ApplicationEntry("unitree_go1_mujoco_cuda_velocity") as application:
     application.train()
     application.save()
-    application.play(num_steps=500, formats="gif")
 ```
 
 现有示例包括 `unitree_go1_mujoco_cpu_velocity_only`、`unitree_go1_mujoco_cpu_velocity`、`unitree_go1_mujoco_cuda_velocity`、`unitree_go1_isaac_cuda_velocity` 和 `unitree_go1_isaac_cuda_test`。`ApplicationEntry` 未传 `train_time` 时创建新运行；传入历史运行目录名末尾的时间时读取该运行的配置和检查点。
@@ -84,6 +104,23 @@ python -m tools.play_checkpoint unitree_go1_mujoco_cpu_velocity_only_2026-10-04_
 ```
 
 将示例中的目录名替换为实际存在的运行目录。省略运行目录时选择最新的带时间戳运行；`--num-plays` 默认 `3`，`--format` 默认 `gif`，也可选 `mp4`。VS Code 的 `Tool: Play Checkpoint (Video)` 任务只提供运行目录选择；需要指定这两个参数时使用终端。`Run: Select App` 任务可通过顶层配置名启动新的训练。
+
+### 查看指标与评估检查点
+
+实验启用了 TensorBoard 回调时，可在项目根目录运行下列命令。用实际运行目录名替换示例中的名称。TensorBoard 会占用当前终端，按 Ctrl+C 退出。
+
+```powershell
+python -m tools.launch_tensorboard go1_trial_2026-11-19_10-20-30
+```
+
+要评估某次训练，按运行目录拆出实验名和时间。例如目录名为 go1_trial_2026-11-19_10-20-30 时，使用下面的写法；实际运行时替换为自己的名称和时间。
+
+```python
+from app import ApplicationEntry
+
+with ApplicationEntry("go1_trial", train_time="2026-11-19_10-20-30") as app:
+    app.test(num_episodes=10)
+```
 
 ### 通过键盘控制历史检查点
 
@@ -162,881 +199,7 @@ checkpoints/<app_name>_<time>/
       └─ checkpoint_00000100.pt  # 达到定期保存条件时
 ```
 
-## 3. 顶层实验配置
-
-顶层配置必须包含 `runtime`、`stage`、`component`；`logging` 可省略。
-
-```yaml
-runtime:
-  device: cuda             # torch 设备：cpu、cuda、cuda:0 等
-  dtype: float32           # float32 | float64
-  num_threads: 4           # >0 时设置 torch CPU 线程数；0 表示不设置
-  seed: null               # 非负整数；null 或字符串 "none" 表示随机种子
-  deterministic_ops: false # 是否启用 torch 确定性算法
-
-logging:
-  file_name: training.log  # 默认 training.log，必须是非空字符串
-  console: true            # 是否同时输出到控制台
-
-stage:
-  - standing:
-      max_iterations: 500
-      transition:
-        - metric: rollout/mean_len
-          method: mean
-          operator: ">="
-          threshold: 900.0
-          window: 20
-
-component:
-  runner:
-    - {type: on_policy, config: mujoco_rollout_256}
-  algorithm:
-    - {type: ppo, config: ppo_num_batch_8}
-  policy:
-    - {type: actor_critic, config: actor_critic_direct_actuation}
-  environment:
-    - {type: vector_env, config: vector_env_64}
-  simulator:
-    - {type: mujoco, config: mujoco_unitree_go1_rgb_array}
-  task:
-    - {type: locomotion, config: locomotion_unitree_go1_standing}
-```
-
-### 3.1 stage 写法
-
-每个 stage 必须是只含一个名称的映射，且内部必须恰好有：
-
-- `max_iterations`：正整数；
-- `transition`：非空条件列表，所有条件同时满足后进入下一阶段。
-
-每条 transition 必须包含 `metric`、`method`、`operator`、`threshold` 和 `window`，还可显式关联更新版本 `revision_metric` 与有效性指标 `validity_metric` ：
-
-| 字段 | 可用值 | 含义 |
-|---|---|---|
-| `metric` | 完整指标名，不支持通配符 | 如 `rollout/mean_len`、`reward/action_diff_l2` |
-| `method` | `mean`、`max`、`min` | 对最近窗口聚合 |
-| `operator` | `>`、`>=`、`<`、`<=`、`==`、`!=` | 与阈值比较 |
-| `threshold` | 有限数值 | 目标阈值 |
-| `window` | 正整数 | 连续记录窗口长度 |
-| `revision_metric`（可选） | 完整指标名，默认 `null` | 只在版本变化时记录一次；版本回退时清空窗口 |
-| `validity_metric`（可选） | 完整指标名，默认 `null` | 值为真或 `1` 时才记录；为假或 `0` 时清空窗口 |
-
-每条条件维护自己的缓存窗口，所有条件同时满足后才切换阶段。目标向量指标在环境维度取平均； `revision_metric` 与 `validity_metric` 对应的两个控制指标必须是标量。未配置控制指标时，每次收到目标指标都记录。
-
-Stage 只读取回调 `info` 中配置指定的字段，不识别课程路径、不推导关联字段，也不访问 task 或 manager。三个指标名均禁止通配符；指标存在性在收到相关数据后检查。所有条件都会在初始化时建立缓存。
-
-课程 cell 评价可按如下方式接入（阈值仅示意，需按奖励来源和 episode 归一化设置校准）：
-
-```yaml
-transition:
-  - metric: curriculum/locomotion/reward_min
-    method: min
-    operator: ">="
-    threshold: 3000.0
-    window: 3
-    revision_metric: curriculum/locomotion/statistics_revision
-    validity_metric: curriculum/locomotion/all_cells_valid
-```
-
-上例要求全体 cell 都有有效评价，且最近三次统计更新中的最弱 cell 分数均不低于 `3000.0`。`reward_min` 取有效 cell 分数的最小值，`method: min` 再取窗口内三次评价的最小值。配置版本指标后，`window` 按不同版本计数；同一份统计不会重复入窗，各 cell 的评价仍可能来自不同时刻。其他来源同样可以显式提供自己的版本与有效性指标，无需采用课程指标的命名。
-
-窗口的保留与清空规则如下：
-
-- 本次回调没有目标及已配置的控制指标时，保持窗口不变，等待后续数据。一旦出现相关字段，缺少任一已配置控制指标会明确报错。
-- 版本必须是有限的非负整数。相同版本不重复入窗，版本回退时清空旧窗口。
-- 有效性必须是布尔值或数值 `0/1`。无效时清空窗口；若同时配置版本指标，该无效版本仍会被记录，从下一次有效的新版本重新积累。
-- 有效性为真但目标指标缺失时明确报错；未配置有效性指标时，允许目标尚未产生，清空窗口后继续等待。目标指标出现 NaN/Inf 时清空窗口。
-- 检查点保存目标及控制指标引用、窗口和最后版本。恢复时核对三者引用；未恢复环境状态时，依赖控制指标的窗口重新积累。旧开关与缺少指标引用元数据的旧检查点不做兼容。
-
-### 3.2 component 写法与多阶段继承
-
-当前可用类型：
-
-| 组件 | `type` 可用值 | 默认配置目录 |
-|---|---|---|
-| runner | `on_policy` | `configs/runners/` |
-| algorithm | `ppo` | `configs/algorithms/` |
-| policy | `actor_critic` | `configs/policies/` |
-| environment | `vector_env` | `configs/environments/` |
-| simulator | `mujoco`、`isaac_sim` | `configs/simulators/` |
-| task | `base`、`locomotion` | `configs/tasks/` |
-
-组件条目支持三种定位方式：
-
-```yaml
-# 1. 默认目录 + 文件名（推荐，可省略 .yaml）
-- type: ppo
-  config: ppo_num_batch_8
-
-# 2. 自定义目录 + 文件名
-- type: ppo
-  config_dir: ./my_configs/algorithms
-  config: ppo_custom.yaml
-
-# 3. 完整路径；设置后 config/config_dir 被忽略
-- type: ppo
-  config_path: ./my_configs/algorithms/ppo_custom.yaml
-```
-
-每类组件使用列表是为了对应多个 stage：
-
-- 列表只有一项时，后续 stage 继承该项；
-- 第 `N` 项从第 `N` 个 stage 开始生效；
-- 相邻项完全相同时不会重建该组件；
-- 组件条目数可以少于或等于 stage 数，不能多于 stage 数；
-- 第一阶段必须能组合出完整的 runner、algorithm、policy、environment、simulator、task。
-
-## 4. Runner 配置
-
-`configs/runners/*.yaml`：
-
-```yaml
-rollout_length: 256                # 必填，单次更新前每个环境采样步数
-rollout_length_history_size: 50    # 默认 50，统计平均 episode 长度的历史数量
-callbacks:
-  - progress_bar                   # 无参数写法
-  - keyboard_interrupt
-  - logging:
-      log_interval: 1
-  - checkpoint:
-      save_iter_interval: 100
-      directory_name: checkpoints
-      save_on_train_end: false
-```
-
-回调可写成字符串（使用默认参数），也可写成仅含一个回调名的映射。
-
-### 4.1 全部回调
-
-| 回调 | 参数 |
-|---|---|
-| `progress_bar` | `width=30`，`refresh_interval=0.2` 秒 |
-| `keyboard_interrupt` | 无参数；在交互终端按 Ctrl+X，请求在本次更新结束后停止训练 |
-| `logging` | `log_interval=1` |
-| `checkpoint` | `save_iter_interval=100`，`directory_name="checkpoints"`，`save_on_train_end=false` |
-| `adaptive_learning_rate` | 必填 `monitor`、`allowed_range: [lower, upper]`、`factor`；可选 `min_learning_rate=null`、`max_learning_rate=null`、`buffer_len=10` |
-| `early_stopping` | 必填 `monitor`、`max_no_improve_iters`、`mode: min\|max`、`min_delta`；可选 `warmup_iters=0` |
-| `tensorboard` | 见下例 |
-
-```yaml
-- tensorboard:
-    log_dir: tensorboard
-    step_log_interval: 10
-    histogram_step_interval: 10000
-    flush_secs: 10
-    initial_load_timeout: 600.0
-    max_reload_threads: 4
-    step_metrics:
-      "reward": [value]
-      "reward/*": [mean]
-      "termination/*": [mean]
-      "command/*": [histogram]
-```
-
-`step_metrics` 的键是指标名/通配模式；值支持 `value`、`mean`、`histogram`（具体是否适用取决于指标形状）。
-
-### 4.2 播放时的速度追踪图
-
-Runner 配置中的可选 `playback` 列表定义视频右侧的追踪图，每项把 `info` 中的一个目标指令与一个状态分量对应起来：
-
-```yaml
-playback:
-  - target: "command/lin_vel_x"
-    measured: "state/base_lin_vel_body[0]"
-    label: "X linear velocity (m/s)"
-    limits: [-2.8, 2.8]
-  - target: "command/lin_vel_y"
-    measured: "state/base_lin_vel_body[1]"
-    label: "Y linear velocity (m/s)"
-    limits: [-0.8, 0.8]
-  - target: "command/ang_vel_z"
-    measured: "state/base_ang_vel_body[2]"
-    label: "Z angular velocity (rad/s)"
-    limits: [-2.0, 2.0]
-```
-
-`target` 必须是 `command/` 开头的 `info` 键；`measured` 使用 `state/<name>[index]` 形式。`label` 是图标题，`limits` 是纵轴下限和上限。各图按列表顺序横向排列。曲线分别表示目标值、原始实测值和实测值的滑动平均；图例右侧的 `T +00.00` 显示从视频开始经过的秒数。平滑窗口目前在 `runners/utils/tracking_overlay.py` 的 `SMOOTH_WINDOW` 常量中设置，单位为帧；窗口对应的时间为 `SMOOTH_WINDOW / 视频帧率`。当前窗口为 25 帧，在 50 FPS 下约为 0.5 秒。
-
-## 5. PPO 算法配置
-
-`configs/algorithms/*.yaml`：
-
-```yaml
-init_learning_rate: 5.0e-4 # > 0
-gamma: 0.99                # [0, 1]
-gae_lambda: 0.95           # [0, 1]
-clip_range: 0.2            # > 0
-entropy_coef: 1.0e-3       # >= 0
-value_coef: 0.5            # >= 0
-max_grad_norm: 0.5         # > 0
-num_epochs: 3              # 正整数
-num_mini_batches: 8        # 正整数
-advantage_norm: true       # 是否标准化 advantage，未写时沿用类默认值
-```
-
-`num_envs × rollout_length` 应能合理划分为 `num_mini_batches`；批数越多，单个 mini-batch 越小。
-
-## 6. Actor-Critic 策略配置
-
-`configs/policies/*.yaml`：
-
-```yaml
-distribution:
-  type: diagonal_gaussian
-  initial_std: 0.5
-  min_std: 0.1
-  max_std: 1.0
-
-actor:
-  - {type: linear, in_features: obs.shape, out_features: 256}
-  - {type: elu}
-  - {type: linear, in_features: 256, out_features: action.shape}
-
-critic:
-  - {type: linear, in_features: obs.shape, out_features: 256}
-  - {type: elu}
-  - {type: linear, in_features: 256, out_features: 1}
-```
-
-`actor`、`critic`、`distribution` 均必填。维度变量支持：
-
-- `obs.shape`、`obs.shape[-1]`：完整 observation 维度；
-- `action.shape`、`action.shape[-1]`：动作维度；
-- `obs.<term>.shape`、`obs.<term>.shape[-1]`：某 observation term 的维度。
-
-模块通用写法：
-
-```yaml
-- type: linear
-  name: encoder                 # 可选；默认使用列表索引
-  inputs: [obs]                 # 可选；默认取前一模块，首层默认 obs
-  inherit: false                # 是否从同 type 的保存工件继承配置/权重
-  trainable: true               # false 时冻结参数
-  params:                       # 可选；也可把参数直接平铺在同一级
-    in_features: obs.shape
-    out_features: 128
-```
-
-同一参数不能同时出现在顶层和 `params`。`name` 只能包含字母、数字、`_`、`-`，且不能重名。`inputs` 可引用：
-
-- `obs`：全部 observation；
-- `obs[0:12]`：按索引切片；
-- `obs.<term>` 或 `obs.<term>[start:stop]`：按 observation term 取值；
-- 已命名的前序模块，或其 `[start:stop]` 切片；
-- 多个输入会在最后一维拼接。
-
-已注册模块：
-
-| `type` | 常用参数 |
-|---|---|
-| `linear` | `in_features`、`out_features`、`bias=true` |
-| `relu` | `inplace=false` |
-| `tanh` | 无 |
-| `elu` | `alpha=1.0`、`inplace=false` |
-| `gelu` | `approximate="none"` |
-| `silu` | `inplace=false` |
-| `layer_norm` | `normalized_shape`、`eps=1e-5`、`elementwise_affine=true`、`bias=true` |
-| `dropout` | `p=0.5`、`inplace=false` |
-| `identity` | 无 |
-| `gru` | `input_size`、`hidden_size`、`num_layers=1`、`bias=true`、`dropout=0.0`、`bidirectional=false`；当前只允许 actor 使用且必须单向 |
-| `add` | 无参数；用 `inputs` 指定至少两个同形状来源 |
-| `sequential` | `modules`：把一组子模块封装成一个具名复合模块 |
-
-### 6.1 将多个模块封装为一个新模块
-
-可以使用 `type: sequential` 和 `modules` 把多层网络统一命名为一个复合模块：
-
-```yaml
-actor:
-  - name: velocity_encoder
-    type: sequential
-    inputs: obs
-    modules:
-      - {type: linear, in_features: obs.shape, out_features: 256}
-      - {type: elu}
-      - {type: linear, in_features: 256, out_features: 128}
-      - {type: elu}
-
-  - type: linear
-    in_features: velocity_encoder.shape
-    out_features: action.shape
-```
-
-这里的 `velocity_encoder` 同时具有三种用途：
-
-- 它是当前网络中的模块名，可由后续层通过 `inputs: velocity_encoder` 引用；
-- 它会产生维度变量 `velocity_encoder.shape`、`velocity_encoder.shape[-1]` 和 `velocity_encoder.out_features`；
-- 保存策略时，它会作为一个完整模块导出，可在后续 stage 中把该名称直接当作 `type` 使用。
-
-多分支组合也可以引用具名模块：
-
-```yaml
-actor:
-  - name: motor_action
-    inputs: obs
-    type: linear
-    in_features: obs.shape
-    out_features: action.shape
-
-  - name: actuator_shift
-    inputs: obs
-    type: linear
-    in_features: obs.shape
-    out_features: action.shape
-
-  - name: final_action
-    inputs: [motor_action, actuator_shift]
-    type: add
-```
-
-普通模块收到多个 `inputs` 时会把它们沿最后一维拼接；只有 `add` 会逐元素相加，因此参与 `add` 的输入维度必须完全相同。
-
-### 6.2 跨 stage 复用复合模块
-
-第一阶段先定义一个具名复合模块：
-
-```yaml
-actor:
-  - name: custom1
-    type: sequential
-    modules:
-      - {type: linear, in_features: obs.shape, out_features: 128}
-      - {type: elu}
-  - {type: linear, in_features: 128, out_features: action.shape}
-```
-
-后续 stage 的策略配置可以直接把 `custom1` 当成模块类型。框架会从上一阶段导出的模块工件中恢复其内部结构和参数：
-
-```yaml
-actor:
-  - type: custom1
-    # 可选的接口断言；不写则使用保存的结构
-    in_features: obs.shape
-    out_features: 128
-  - {type: linear, in_features: 128, out_features: action.shape}
-```
-
-也可以不封装结构，只让同名模块继承上一阶段参数：
-
-```yaml
-- name: encoder
-  type: linear
-  in_features: obs.shape
-  out_features: 128
-  inherit: true
-  trainable: false
-```
-
-`inherit: true` 要求上一阶段存在同名、同类型且参数形状一致的模块；`trainable: false` 会冻结该模块。Actor 和 Critic 的命名空间相互独立。复合模块内部仍可使用 `name`、`inputs`、`gru` 等全部网络写法。
-
-分布当前仅有：
-
-```yaml
-distribution:
-  type: diagonal_gaussian
-  initial_std: 0.5    # > 0
-  min_std: 0.1
-  max_std: 1.0
-```
-
-`action_dim` 由环境自动注入，不应写入 distribution。高级的 `module_artifacts` 用于为 `actor.<name>`/`critic.<name>` 提供已保存模块工件，常规训练无需手写。
-
-## 7. 环境配置
-
-`configs/environments/*.yaml`：
-
-```yaml
-num_envs: 64             # 必填，正整数
-max_episode_steps: 1000  # 必填，正整数；达到后 truncated
-```
-
-MuJoCo 会为每个环境建立实例，数量过大会明显增加 CPU/内存开销；Isaac Sim 适合大规模 GPU 并行环境。
-
-## 8. 仿真器配置
-
-### 8.1 MuJoCo 基础配置
-
-```yaml
-model_path: ./assets/unitree_go1/MJCF/scene.xml # 必填
-sim_dt: 0.002                                  # 必填，> 0
-frame_skip: 10                                 # 必填，正整数
-step_workers: 8                                # 可选，并行推进环境的线程数；默认 1
-render_mode: rgb_array                         # null | human | rgb_array
-foot_geom_names: [FR, FL, RR, RL]              # 足端 geom 名称
-leg_joint_names: [FR_thigh_joint, FR_calf_joint, FL_thigh_joint, FL_calf_joint, RR_thigh_joint, RR_calf_joint, RL_thigh_joint, RL_calf_joint] # 大腿与小腿关节名
-floor_geom_names: [floor]                      # 地面 geom 名称
-foot_contact_force_threshold: 15.0             # >= 0
-reset_keyframe: home                           # 可选，MJCF keyframe 名
-```
-
-控制周期为 `sim_dt × frame_skip`。`rgb_array` 用于无窗口录制，`human` 用于交互显示。
-
-### 8.2 Isaac Sim 基础配置
-
-```yaml
-model_path: ./assets/unitree_go1/USD/go1/go1.usda
-ros_package_paths:                             # 导入 URDF/MJCF 时可选
-  - {go1_description: ./assets/unitree_go1/URDF}
-sim_dt: 0.002
-frame_skip: 10
-render_mode: rgb_array                         # null | human | rgb_array
-train_render_mode: null                        # 可选，训练期间的渲染模式
-env_spacing: 2.0                               # > 0
-robot_prim_path: /Robot
-base_body_prim_path: /Geometry/base/trunk
-leg_joint_names: [FR_thigh_joint, FR_calf_joint, FL_thigh_joint, FL_calf_joint, RR_thigh_joint, RR_calf_joint, RL_thigh_joint, RL_calf_joint] # DOF 名称，不是 Prim path
-foot_body_prim_paths:
-  - /Geometry/base/trunk/FR_hip/FR_thigh/FR_calf/FR_foot
-  - /Geometry/base/trunk/FL_hip/FL_thigh/FL_calf/FL_foot
-floor_prim_paths: []                           # 必须为绝对 Prim path
-foot_contact_force_threshold: 15.0             # >= 0
-camera_prim_path: null                         # 可选相机 Prim
-camera_resolution: [640, 480]                  # 两个正整数
-merge_fixed_joints: false
-allow_self_collision: false
-joint_stiffness: 100.0                         # 标量或 {joint_name: value}
-joint_damping: 2.0                             # 标量或 {joint_name: value}
-reset_state:
-  base_position: [0.0, 0.0, 0.27]             # 长度 3
-  base_orientation: [1.0, 0.0, 0.0, 0.0]      # 长度 4，非全零四元数
-  joint_positions:                             # joint 名 -> 初始位置
-    FR_hip_joint: 0.0
-```
-
-`model_path` 支持 `.usd`、`.usda`、`.usdc`、`.urdf`、MJCF `.xml`。`robot_prim_path`、body path 会被规范为以 `/` 开头的相对机器人路径；`floor_prim_paths` 则必须是完整绝对路径。
-
-两种仿真器的 `leg_joint_names` 均可省略（默认为空）；启用 `leg_joint_position_diff_l2` 时，至少须配置一个模型中已受控的腿关节名称。构建 `ModelContext` 时会解析成 `leg_joint_qpos_ids`，名称不存在时会报错。`base_joint_position_diff_l2` 中的 `base` 指未列入名单的受控关节，在当前 Go1 配置中为四个髋关节，不是浮动基座的位置或姿态。
-
-#### Isaac Sim 退出异常与训练产物
-
-在 Windows、Isaac Sim 6.1.0.0 的当前测试环境中，`SimulationApp.close()` 返回后，Python 进程仍可能在原生插件的退出清理阶段以 `0xC0000005`（PowerShell 中通常显示为 `-1073741819`）结束。最小化的 `SimulationApp` 脚本也能复现；原生转储将故障定位到 `isaacsim.core.simulation_manager.plugin.dll + 0x1c5fe`。这属于尚未解决的退出异常，**不能将非零退出码当作正常成功**，也不能仅凭退出码断定训练阶段没有完成。诊断过程见 [手动测试说明](tests/manual/README.md#isaac-sim-关闭诊断)。
-
-判断一次训练是否已经留下可用产物，应检查同一次运行的 `checkpoints/<app_name>_<time>/`：`logs/<file_name>` 中出现 `All training stages completed.`，对应 `checkpoints/stage_XXX/latest.pt` 中的阶段回调状态记录完成，且 `configs/` 有本次配置快照。阶段完成时项目会保存包含回调状态的检查点；目录中的 `stage_completed` 标记不参与恢复判断。若只是达到最大迭代数或被回调停止，不能把日志中已运行的迭代数当作阶段完成；若需要确认检查点可用于继续训练，应在受信任的本地产物上实际执行一次续训加载。播放结果另看 `videos/` 下生成的文件和播放脚本的完成标记。即使这些检查都通过，退出码异常仍须单独记录，自动化任务也应将该进程视为退出失败。
-
-### 8.3 地形配置
-
-地形随机化由 task 的 Randomization Manager 控制，配置见 [9.8.1 Terrain](#981-terrain)。
-
-## 9. locomotion 任务配置
-
-以下六项 manager 配置必填，`task_state_manager_config` 未启用时填写 `{}`：
-
-```yaml
-task_state_manager_config: {}
-action_manager_config: {terms: {}}
-command_manager_config: {terms: {}}
-observation_manager_config: {terms: {}}
-reward_manager_config: {terms: {}}
-termination_manager_config: {terms: {}}
-```
-
-`curriculum_manager_config`、`event_manager_config` 和 `randomization_manager_config` 可省略或写 `null`，分别表示不启用课程、事件和随机化，也可显式写 `{}`。event manager 当前仍为预留项，不接受非空配置。未启用随机化时使用 simulator 原有地面。命令若引用了未配置的课程，仍会明确报错，不自动退回独立采样。
-
-可用 YAML anchor 复用常量：
-
-```yaml
-constants:
-  base_target_height: &base_target_height 0.27
-reward_manager_config:
-  terms:
-    base_height_l2:
-      weight: -0.2
-      params: {target_height: *base_target_height}
-```
-
-`constants` 仅由 YAML 自身解析，框架不会读取它，因此可安全用作 anchor 容器。
-
-### 9.1 Task State Manager
-
-`task_state_manager_config` 必须显式提供，未启用时填写 `{}`；配置的 task state term 在每个仿真步更新一次，局部 reset 时只清理对应环境。reward 和 observation 可通过 `TaskContext` 读取同一份状态。
-
-```yaml
-task_state_manager_config:
-  terms:
-    quadrupedal_gait_phase: {omega_min: 4.0, omega_max: 10.0, command_gain: 1.0}
-```
-
-已注册 task state term：
-
-| 名称 | 参数 | 状态与行为 |
-|---|---|---|
-| `quadrupedal_gait_phase` | `command_names=[lin_vel_x, lin_vel_y, ang_vel_z]`、`omega_min=4.0`、`omega_max=10.0`、`command_gain=1.0` | 维护 `[num_envs, 2]` 的两组对角足相位；命令范数低于 `0.1` 时分别推进到下一次触地位置后停止。相位观测项和高度奖励项可以单独启用，但都依赖此 term。 |
-
-### 9.2 Action Manager
-
-Action term 会按 YAML 从上到下执行：第一项最靠近策略原始动作，最后一项的输出直接发送给仿真器。框架会在初始化时反向推导各层维度，因此不要随意交换有维度映射作用的 term：
-
-```yaml
-action_manager_config:
-  terms:
-    hard_clamp: {min_value: -1.0, max_value: 1.0}
-    tanh_map: {}
-    keyframe_centered_linear_map: {}
-```
-
-已注册 term：
-
-| 名称 | 参数/作用 |
-|---|---|
-| `linear_map` | 无手写参数；将归一化动作线性映射到 actuator 控制范围 |
-| `tanh_map` | 无；对输入应用 `tanh` |
-| `keyframe_centered_linear_map` | 无；以默认/keyframe 控制为中心线性映射 |
-| `hard_clamp` | 必填 `min_value`、`max_value` |
-
-### 9.3 Command Manager
-
-```yaml
-command_manager_config:
-  terms:
-    lin_vel_x:
-      type: Uniform
-      params: {min_value: -1.0, max_value: 1.0}
-  constraints:
-    lin_vel_x:
-      operator: ">="
-      expression: "-{lin_vel_y}.abs()"
-```
-
-term 的键是命令维度名称；`type` 使用类名（区分大小写）：
-
-| `type` | `params` |
-|---|---|
-| `Uniform` | 必填 `min_value`、`max_value` |
-| `Curriculum` | 必填 `curriculum`（课程实例名）、`min_value`、`max_value`、`num_cell` |
-| `SymmetricCurriculum` | 同上，但 min/max 必须非负，采样后随机取正负 |
-
-课程命令必须显式通过 `curriculum` 指定课程实例，缺失、`null` 或空字符串会报错。引用同一实例的命令组成一个联合空间；引用不同实例时独立采样。`num_cell` 为该维度划分格数，空间过大时会触发内部资源保护上限，可减少各维度的格数。命令采样类型与课程算法解耦，使用普通或对称的通用课程采样类型。
-
-约束的 `operator` 支持 `<=`、`>=`、`<`、`>`、`!=`；表达式用 `{命令名}` 引用其他维度，可使用 `torch` 和 `abs`。`!=` 还支持 `direction: positive|negative`（默认 `positive`）决定相等时向哪一侧偏移。课程空间内的约束不能跨课程实例。
-
-### 9.4 Observation Manager
-
-```yaml
-observation_manager_config:
-  clip: 3.0                   # 可选，>0；最终拼接后裁剪到 [-clip, clip]
-  terms:
-    base_linear_velocity: {scale: 0.5}
-    command: {scale: 0.5}
-```
-
-term 顺序决定最终 observation 的拼接顺序。所有 observation term 都支持 `scale`（默认 `1.0`）。已注册名称：
-
-| 名称 | 输出 |
-|---|---|
-| `base_linear_velocity` | base 坐标系线速度 |
-| `base_position` | base 世界坐标位置 |
-| `base_height` | base 离地高度；`height_reference=ground`，可设为 `world` |
-| `base_angular_velocity` | base 坐标系角速度 |
-| `projected_gravity` | 重力在 base 坐标系中的投影 |
-| `joint_position` | 关节位置 |
-| `joint_velocity` | 关节速度 |
-| `joint_position_diff` | 关节位置相对默认位置的偏差 |
-| `actuator_force` | 执行器力 |
-| `foot_height` | 各足 geom 中心离地高度；`height_reference=ground`，可设为 `world` |
-| `foot_contact_normal_force` | 足端法向接触力 |
-| `foot_contact_state` | 足端接触状态 |
-| `foot_duration_tanh` | 每只足的触地状态保持时间经 `tanh(alpha × 时间)` 压缩；触地为正、离地为负，默认 `alpha=1.0` |
-| `quadrupedal_gait_phase` | 读取任务状态中的两组对角足相位，输出 `[sin(phase_0), sin(phase_1), cos(phase_0), cos(phase_1)]` |
-| `command` | 所有命令拼接结果 |
-| `track_linear_velocity_x_error_integral` | 最近 `integral_length` 步的有符号 X 速度误差积分 |
-| `track_linear_velocity_y_error_integral` | 最近 `integral_length` 步的有符号 Y 速度误差积分 |
-| `track_angular_velocity_z_error_integral` | 最近 `integral_length` 步的有符号 Z 角速度误差积分 |
-| `track_linear_velocity_x_error_integral_tanh` | 对 X 误差积分计算 `tanh(alpha * integral)`；默认 `alpha=1.0` |
-| `track_linear_velocity_y_error_integral_tanh` | 对 Y 误差积分计算 `tanh(alpha * integral)`；默认 `alpha=1.0` |
-| `track_angular_velocity_z_error_integral_tanh` | 对 Z 误差积分计算 `tanh(alpha * integral)`；默认 `alpha=1.0` |
-| `last_action` | 最近 `lags` 步策略动作，按从新到旧排列（默认 `lags: 1`） |
-
-### 9.5 Reward Manager
-
-统一写法：
-
-```yaml
-reward_manager_config:
-  terms:
-    <reward_name>:
-      weight: 1.0             # 可省略，默认 1.0
-      params: {}              # 可省略
-```
-
-已注册 reward 及其可写 `params`：
-
-| 名称 | 参数（未注明即无参数） |
-|---|---|
-| `action_diff_l2` | `max_lag=1`、`decay=0.5`。在最大 lag 范围内惩罚当前动作与历史动作的均方差，权重按 `decay**(lag-1)` 衰减；历史按环境独立维护，并在 reset 时清空。 |
-| `illegal_contact_l1` | `geom_legal_names=null` |
-| `joint_velocity_l2` | — |
-| `joint_position_diff_l2` | `std=1.0` |
-| `base_joint_position_diff_l2` | `std=1.0`；仅对未列入 `leg_joint_names` 的受控关节取均方偏差，应使用负权重。 |
-| `leg_joint_position_diff_l2` | `std=1.0`；仅对列入 `leg_joint_names` 的受控关节取均方偏差，应使用负权重。与`base_joint_position_diff_l2`均为分别取均值，直接沿用原 `joint_position_diff_l2` 的权重通常不会得到相同的合计惩罚。 |
-| `joint_limit_violation_l1` | `lower_limits=null`、`upper_limits=null` |
-| `joint_power_l1` | — |
-| `base_linear_velocity_z_l2` | — |
-| `base_linear_velocity_z_l2_xy_speed_weighted` | `min_speed=0.5` |
-| `base_height_l2` | 必填 `target_height`；`std=1.0`、`max_normalized_error=null`、`height_reference=ground`（可选 `world`） |
-| `base_height_l2_xy_speed_weighted` | 必填 `target_height`；`min_speed=0.5`、`height_reference=ground`（可选 `world`） |
-| `base_angular_velocity_xy_l2` | — |
-| `projected_gravity_xy_l2` | — |
-| `track_linear_velocity_xy_l2_exp` | `x_std=1.0`、`y_std=1.0`、`command_names=[lin_vel_x, lin_vel_y]` |
-| `track_linear_velocity_xy_l2_exp_and_logcosh` | 上述参数 + `logcosh_weight=0.5` |
-| `track_linear_velocity_x_l2_exp` | `std=1.0`、`command_names=[lin_vel_x]` |
-| `track_linear_velocity_y_l2_exp` | `std=1.0`、`command_names=[lin_vel_y]` |
-| `track_linear_velocity_x_l2_exp_and_logcosh` | `std=1.0`、`command_names=[lin_vel_x]`、`logcosh_weight=0.5` |
-| `track_linear_velocity_y_l2_exp_and_logcosh` | `std=1.0`、`command_names=[lin_vel_y]`、`logcosh_weight=0.5` |
-| `track_linear_velocity_x_error_integral_l2` | 最近 `integral_length` 步的 X 有符号速度误差取平均后平方；窗口未满时只除以有效步数，reset 后重新累计；默认 `integral_length=100` |
-| `track_linear_velocity_y_error_integral_l2` | 最近 `integral_length` 步的 Y 有符号速度误差取平均后平方；窗口未满时只除以有效步数，reset 后重新累计；默认 `integral_length=100` |
-| `track_angular_velocity_z_l2_exp` | `std=1.0`、`command_names=[ang_vel_z]` |
-| `track_angular_velocity_z_l2_exp_and_logcosh` | `std=1.0`、`command_names=[ang_vel_z]`、`logcosh_weight=0.5` |
-| `track_angular_velocity_z_error_integral_l2` | 最近 `integral_length` 步的 Z 有符号角速度误差取平均后平方；窗口未满时只除以有效步数，reset 后重新累计；默认 `integral_length=100`、`command_names=[ang_vel_z]` |
-| `trot_loop_duration_tanh` | `command_names=[lin_vel_x, lin_vel_y, ang_vel_z]`、`growth_rate=1.0`；指令范数低于 `0.1` 时要求四足着地 |
-| `quadrupedal_command_adaptive_gait_phase_height_l2` | 必填 `landing_distance`（落地时足端到 base 平面的距离幅值，必须为正数）；`lift_height=0.08`（相对落地位置的非负举升高度）、`std=0.08`。读取 `quadrupedal_gait_phase` task state term 的相位，并根据 `foot_phase_real/imag` 命令的四足分量（每个 `[num_envs, 4]`）逐足添加 `atan2(imag, real)` 相位偏移；相对 base 平面的有符号落地目标为 `-landing_distance`，摆动最高点为 `-landing_distance + lift_height`；返回四足归一化高度误差的平方均值，应使用负权重。 |
-| `quadrupedal_command_adaptive_gait_phase_height_l2_exp` | 必填 `landing_distance`；`lift_height=0.08`、`std=0.08`。目标高度与相位偏移同上；逐足计算 `exp(-((目标高度 - 实际高度) / std)^2)` 后取四足均值，应使用正权重。 |
-| `foot_state_duration_command_weighted_exp` | 整组足端触地状态保持时间；`command_names=[lin_vel_x, lin_vel_y, ang_vel_z]`、`sigma=1.0` |
-| `foot_state_duration_cubic_command_weighted_exp` | 整组足端触地状态保持时间的三次方版本；参数同上 |
-| `foot_state_duration_cubic_command_tanh_weighted_exp` | 整组足端触地状态保持时间的三次方版本，指令范数先取 `tanh`；参数同上 |
-| `foot_duration_cubic_command_tanh_weighted_exp` | 分别统计每只足的触地状态保持时间，取三次方并按 `tanh` 指令范数加权后求平均；参数同上 |
-| `foot_state_switch` | `hold_time=0.2`；触地状态在保持时间内切换时返回惩罚值 |
-| `foot_sliding_velocity_l2` | 触地足端 geom 中心世界 xyz 速度平方，按全部足及三个速度分量取均值，非触地足贡献为零；包含法向运动，不是严格的接触切向滑移 |
-| `foot_lift_height_diff_command_weighted_exp` | 必填 `target_height`；`height_std=0.03`、`command_std=0.5`、`command_names=[lin_vel_x, lin_vel_y, ang_vel_z]`、`height_reference=ground`（可选 `world`）；仅对摆动脚计算高度奖励，零指令时为零 |
-| `foot_lift_height_diff_command_gated_l2` | 必填 `target_height`；`height_std=null`（默认使用 `target_height`）、`height_reference=ground`（可选 `world`）；命令范数 `<=0.1` 或支撑脚时贡献为零，仅对运动中的摆动脚计算相对 `target_height` 的误差；使用负权重作为惩罚 |
-| `quadrupedal_foot_velocity_diff_l2` | — |
-| `foot_contact_without_command` | `command_names=[lin_vel_x, lin_vel_y, ang_vel_z]` |
-
-名称由注册类名自动转为 snake_case；大小写缩写会被正确拆分，例如 `TrackAngularVelocityZL2Exp` → `track_angular_velocity_z_l2_exp`。
-
-### 9.6 Termination Manager
-
-```yaml
-termination_manager_config:
-  terms:
-    body_contact:
-      body_names: [trunk, FR_thigh, FL_thigh, RR_thigh, RL_thigh]
-    base_height:
-      min_height: 0.16
-```
-
-| 名称 | 参数 |
-|---|---|
-| `body_contact` | 必填 `body_names`，任一指定 body 发生接触即终止 |
-| `base_height` | 必填 `min_height`；`height_reference=ground`（可选 `world`），低于阈值即终止 |
-| `terrain_bounds` | 无参数；机身或任意足端离开随机地形区域时终止；未配置有限地形时不会触发 |
-
-Episode 达到 `max_episode_steps` 属于 `truncated`，不是 termination term。
-
-### 9.7 Curriculum Manager
-
-```yaml
-curriculum_manager_config:
-  terms:
-    locomotion:
-      type: fast_lpac_reward
-      params:
-        temperature: 0.01
-        exploration: 0.1
-        min_samples_per_cell: 5
-        normalize_by_episode_steps: false
-        min_coverage: 0.8
-        reward_sources:
-          - reward/track_linear_velocity_x_l2_exp_and_logcosh
-          - reward/track_angular_velocity_z_l2_exp_and_logcosh: 0.5
-```
-
-| 名称 | 参数 |
-|---|---|
-| `lpac_reward` | `temperature=0.01`（>0）、`exploration=0.1`（[0,1]）、`min_samples_per_cell=5`（正整数）、`normalize_by_episode_steps=false`（布尔值） |
-| `fast_lpac_reward` | 同上，并增加 `min_coverage=0.8`（(0,1]） |
-
-课程条目必须显式填写 `type`，算法参数放在 `params` 中（无参数时可省略）。一个实例对应一个联合采样空间，独立持有奖励统计与采样概率。同一种算法可以构建多个实例，例如分别学习平移与转向：
-
-```yaml
-curriculum_manager_config:
-  terms:
-    translation: {type: fast_lpac_reward, params: {reward_sources: [reward/track_linear_velocity_x_l2_exp_and_logcosh]}}
-    rotation: {type: fast_lpac_reward, params: {reward_sources: [reward/track_angular_velocity_z_l2_exp_and_logcosh]}}
-
-command_manager_config:
-  terms:
-    lin_vel_x: {type: Curriculum, params: {curriculum: translation, min_value: -1.0, max_value: 1.0, num_cell: 10}}
-    ang_vel_z: {type: Curriculum, params: {curriculum: rotation, min_value: -1.0, max_value: 1.0, num_cell: 5}}
-```
-
-若需要联合规划这两个命令维度，就让它们引用同一个实例，并为该实例配置共同的 `reward_sources` :
-
-```yaml
-curriculum_manager_config:
-  terms:
-    locomotion:
-      type: fast_lpac_reward
-      params:
-        reward_sources:
-          - reward/track_linear_velocity_x_l2_exp_and_logcosh
-          - reward/track_angular_velocity_z_l2_exp_and_logcosh
-
-command_manager_config:
-  terms:
-    lin_vel_x: {type: Curriculum, params: {curriculum: locomotion, min_value: -1.0, max_value: 1.0, num_cell: 10}}
-    ang_vel_z: {type: Curriculum, params: {curriculum: locomotion, min_value: -1.0, max_value: 1.0, num_cell: 5}}
-```
-
-上例将两个命令维度划分为 `10 × 5 = 50` 个联合 cell，并用两项奖励共同评价每个速度组合，学习对应的采样概率。无需课程学习时，可省略 `curriculum_manager_config` 或配置为空，command 使用独立的 `Uniform` 采样。
-
-回合结束后，课程通过 `finalize_episodes()` 结算该回合的奖励，再通过 `resample()` 为新回合分配 cell，command 随后在对应区间内采样。评估与播放时冻结 cell 评价和采样概率，仍允许从冻结分布生成命令。
-
-联合空间过大时会报错，应减少各维度的格数或拆分课程实例。terrain 的 `category`／`difficulty` 轴可通过 `type: Curriculum` 和 `params: {curriculum: locomotion}` 引用同一实例，将地形类型、难度与命令组成联合空间；引用另一实例则分别学习。地形采样方式见 [9.8.1 Terrain](#981-terrain)。
-
-`reward_sources` 为该课程实例的必填非空列表，元素为来源字符串或单项字典：
-
-- `reward/<name>`：使用该项原始奖励 × 训练权重。
-- `reward/<name>: c`：使用该项原始奖励 × 覆盖系数 `c`，替换训练权重，不是额外乘一次。允许有限的负数和零；显式 `null` 不表示省略系数，应改用字符串形式。
-- `reward`：使用逐环境的所有奖励按训练权重加权后的总和。整体奖励不支持覆盖系数，可写作 `reward_sources: [reward]`。
-
-以上来源均不做整体 `dt` 缩放；同一实例的来源直接求和，不自动归一化。仅接受完整名称，同一实例不能重复配置同一来源，不能全部为显式零系数。`reward` 可以和逐项来源混合，选中的逐项会再次计入，不做隐式去重。
-
-**Episode 累计奖励的统计口径与注意事项：**
-
-LPAC/FastLPAC 通过 `normalize_by_episode_steps` 决定 episode 结束时如何向 cell 计分：
-
-- `false`（默认）：直接使用 episode 累计奖励，不除以实际步数，将存活时长和奖励所衡量的表现（例如跟踪质量）共同纳入评价。
-- `true`：累计奖励除以该 episode 的实际步数，使用平均每步奖励，减弱 episode 长度本身的影响。
-
-两种模式下，cell 分数均会再除以采集的 episode 数，分别得到“episode 累计奖励的均值”或“episode 每步平均奖励的均值”。后者是 episode 等权平均，不是所有采样步合在一起求平均；尚未采集步骤的 episode 不计入统计。以下存活时长相关注意事项针对 `false` 的累计模式。
-
-- 当每步奖励主要为正时，相近质量下更长的 episode 通常得到更高累计分数；当每步奖励主要为负时，更早结束可能因少累计负奖励而得到更高分。例如每步均为 `-0.1`，1000 步累计为 `-100`，100 步累计为 `-10`，后者分数更高。应根据所选奖励的组合判断它是否符合预期的存活偏好。
-- learning progress 通常使用当前 cell 分数与历史分数之差，不是 PPO advantage。上述例子会产生 `+90` 的差分；减去历史基线不能消除由 episode 长度变化带来的影响。FastLPAC 首次初始化另有 baseline 填充规则。
-- 累计分数的尺度会受到 episode 长度、最大步数和奖励权重影响；修改这些设置后，应重新检查采样 `temperature` 及使用相关分数的阈值，避免直接沿用每步均值口径下的数值。
-- curriculum 使用未乘 `control_dt` 的课程奖励，累计模式对其逐步求和，归一化模式再除以实际步数；训练传给 PPO 的总奖励仍由环境统一乘 `control_dt`，两条链路的缩放相互独立。切换来源、归一化模式或控制步长后，应重新检查 `temperature` 和相关阈值。
-
-**Cell 评价统计：**
-
-每个课程实例使用独立的 cell 评价缓冲，每个 cell 收集至少 `min_samples_per_cell` 个已结束 episode 后，保存这批 episode 分数的均值，再清空该批累计；下一批未完成时保留上次评价。episode 分数受 `reward_sources` 和 `normalize_by_episode_steps` 控制。FastLPAC 为未采样 cell 填充的 baseline 不计入真实评价，也不会提高覆盖率。
-
-指标前缀为 `curriculum/<instance>/`，例如 `curriculum/locomotion/coverage`：
-
-| 指标 | 含义 |
-|---|---|
-| `coverage` | 各 cell 最后一次完成的批次评价中，有效 cell 数 / 经过 constraints 过滤后的总 cell 数；评价需有足量真实 episode，且均值有限。尚未完成首批评价的 cell 不计入，未完成的新批次不影响已有评价的有效性 |
-| `valid_cell_count` | 有效评价 cell 数 |
-| `num_cells` | 总 cell 数 |
-| `all_cells_valid` | 全部 cell 均有有效评价时为 1，否则为 0 |
-| `statistics_revision` | 本实例每次有一批 cell 评价完成时递增；仅收集指标或无新步骤的 reset 不递增 |
-| `reward_mean` | 有效 cell 最新批次均值的等权平均，不按 cell 的采样次数加权 |
-| `reward_min` | 有效 cell 最新评价的最小值 |
-| `reward_max` | 有效 cell 最新评价的最大值 |
-| `reward_std` | 有效 cell 最新评价的总体标准差；只有一个有效 cell 时为 0 |
-| `learning_progress` | 各 cell 的学习进度向量，沿用现有 TensorBoard 直方图记录 |
-| `probabilities` | 各 cell 当前的采样概率向量，按相同 cell 顺序记录为直方图 |
-
-初始化时覆盖率为 0，尚无有效 cell 时不导出 `reward_*` 指标，避免用零分或估计值冒充真实结果。有限评价不会因采样窗口清空或新批次尚未完成而失效；若新一批评价为 NaN/Inf，则该 cell 标记为无效。各 cell 使用自己最后一次完成的批次评价，可能来自不同时刻。任务指标在本步 done 环境 reset、cell 结算完成后统一收集，返回值均为独立快照；评估时也会导出冻结的学习进度与采样概率。
-
-Stage 可将 `revision_metric` 指向实例的 `statistics_revision`，避免重复计入同一份结果，并将 `validity_metric` 指向 `all_cells_valid`，要求该实例的全体 cell 评价有效；配置方式见 3.1 节。
-
-训练检查点会保存 curriculum 的采样状态、cell 统计，以及 Stage 条件窗口和已采样的统计版本，续训时会校验配置并恢复；配置 `revision_metric` 时，同一统计版本不会重复计入窗口。
-
-未结束 episode 的累计数据不会恢复。涉及 terrain 的课程会保存当前 cell 和独立采样随机状态，恢复后的首次 reset 保留该分配并重建地形，后续回合才重新采样；纯命令课程按恢复后的概率开始新 episode。检查点不保存完整模拟器动力学状态，因此不保证续训轨迹与连续训练逐步一致。不含环境状态的检查点不会恢复 curriculum 数据，配置 `revision_metric` 或 `validity_metric` 的条件窗口也会重新积累。
-
-### 9.8 Randomization Manager
-
-`RandomizationManager` 通过注册表构建和调度随机化 term，目前支持 `terrain`。配置属于 **task YAML**；省略 `randomization_manager_config` 或显式写 `{}` 表示关闭随机化，使用 simulator 原有地面。
-
-该 manager 由 `LocomotionTaskLogic` 构建和管理，包括物理配置准备、后端绑定及 reset 钩子；`BaseTaskLogic` 仅提供通用生命周期接口，不持有 randomization manager。
-
-#### 9.8.1 Terrain
-
-**配置与支持范围**
-
-```yaml
-randomization_manager_config:
-  terms:
-    terrain:
-      category:
-        type: Weighted
-        params:
-          values:
-            plane: {weight: 1}
-            slope: {weight: 1, max_slope: 0.15}
-            rough: {weight: 1, max_height: 0.04}
-      difficulty:
-        type: Uniform
-        params:
-          values: [0.25, 0.6, 1.0]
-      patch_size: [4, 4]
-      resolution: 0.1
-      spawn_size: [1.5, 1.2]
-      seed: 0
-```
-
-MuJoCo 支持三种地形（`plane`、`slope` 和 `rough`），Isaac Sim 当前只支持平地，非平地配置会明确报错。可配对使用 [ANYmal C 地形任务](configs/tasks/locomotion_anymal_c_phase.yaml) 与 [MuJoCo 仿真配置](configs/simulators/mujoco_anymal_c_rgb_array.yaml)；仿真器 YAML 只保存模型和物理参数。
-
-`category` 和 `difficulty` 是 terrain 内部的两个采样子 term，均采用 `type + params`。`category.params.values` 按地形名保存候选及参数，仅 `Weighted` 允许填写 `weight`，默认为 1，决定类别采样概率；`Fixed` 和 `Curriculum` 均拒绝显式权重。`difficulty.params.values` 保存 `[0, 1]` 内不重复的难度候选，与地形类别不按位置对应。省略 category 时使用固定 plane；省略 difficulty 时使用固定难度 `1.0`。尺寸、分辨率、出生区、种子及重采样开关属于 terrain。
-
-**`plane`**：平坦地面，高度相对原地面为零。category 仅含 plane 时沿用原有无限平面；与其他类型混合配置时，使用同尺寸的有限高度场，所有顶点高度为零。
-
-**`slope`**：中央出生区保持平坦，区外沿 ±x、±y 四个方向同号起伏：正 `slope` 均抬升，负值均降低，接近外边界时回到零高度，与外围平地衔接。系数均匀采样于 `[-max_slope × difficulty, +max_slope × difficulty)`；`max_slope` 限制采样系数，不限制双轴合成后的实际坡度。
-
-**`rough`**：各网格顶点在 `[-max_height × difficulty, +max_height × difficulty)` 内独立均匀采样，形成随机起伏；中央出生区及其一圈网格保持平坦，最外圈顶点高度为零。网格间由三角形连接，`resolution` 控制最大网格间距；该类型不受 `max_slope` 约束。
-
-选中的实际难度数值缩放 slope 的采样系数和 rough 的高度幅度；默认难度 `1.0` 使用配置的完整幅度，plane 始终为零高度。
-
-MuJoCo 非平地要求 `floor_geom_names` 指定一个未旋转、启用碰撞且属于 world body 的 plane，原位替换为高度场并保留地面配置。`spawn_size` 是中央平坦区的全尺寸，须容纳 reset 姿态下机器人的完整碰撞投影；ANYmal C 示例使用 `[1.5, 1.2]`。不支持额外 plane、倾斜地面或不适配的出生区。
-
-**初始化与重置**
-
-`task.prepare()` 只声明场景资源需求；仿真器构建后，task 在构建各 manager 时一并创建随机化 manager，再通过 `task.bind()` 绑定并校验资源。地形选择、难度和出生策略由 task 控制，后端只执行物理操作。
-
-**采样策略**
-
-两个轴支持的策略如下，候选放在各自的 `params.values` 中：
-
-| 策略 | category | difficulty |
-|---|---|---|
-| `Fixed` | `params.values` 必须且只能包含一个类别，直接选择它；拒绝 `weight` | `params.values` 必须且只能包含一个难度值 |
-| `Weighted` | 每次训练 reset 按类别权重抽样 | 不支持 |
-| `Uniform` | 不支持 | 每次训练 reset 均匀抽取难度候选 |
-| `Curriculum` | 将类别候选编号作为离散课程轴，拒绝 `weight` | 将难度候选编号作为离散课程轴 |
-
-课程轴必须填写 `params.curriculum: 实例名`。引用同一实例时联合规划，引用不同实例时分别学习；只有配置为 Curriculum 的轴贡献课程维度。课程处理离散编号，子 term 将编号映射回类别或难度；用户配置的难度值不是索引。独立采样不消费训练随机流。ANYmal 示例将两个轴与命令共同接入 locomotion：
-
-```yaml
-category:
-  type: Curriculum
-  params:
-    curriculum: locomotion
-    values:
-      plane: {}
-      slope: {max_slope: 0.15}
-      rough: {max_height: 0.04}
-difficulty:
-  type: Curriculum
-  params:
-    curriculum: locomotion
-    values: [0.25, 0.6, 1.0]
-resample_patch: false
-resample_spawn: false
-```
-
-仅让难度参与课程时，将 category 的 type 改为 `Weighted` 或其他非 `Curriculum` type 并移除其 `params` 中的 `curriculum` ；仅让类别参与时，可省略 difficulty，或将其配置为其他非 `Curriculum` type 。固定 `seed` 可复现场景；`seed: null` 跟随运行种子。旧的 `types`、`difficulty_levels` 和 `sampling` 配置不再接受。
-
-类别和难度未变时复用当前 patch；设置 terrain 下的 `resample_patch: true` 才在每次训练 reset 主动更换同条件下的网格。出生位置默认由 patch 种子确定；`resample_spawn: true` 可独立重新抽取安全出生位置。两项默认均为 false。同条件换网格和换出生位置也可分别请求 `request_reallocation(env_ids)`、`request_spawn(env_ids)`；难度轴未使用课程时可通过 `set_difficulty(env_ids_tensor, difficulties)` 请求候选中的实际难度数值，难度轴使用课程时由课程决定。
-
-完整和局部 reset 都按“旧回合结算 → 分配候选条件 → 应用地形 → 物理 reset → 安全出生 → 初始化任务与观测 → 提交”执行。中途失败会回滚物理、课程、任务缓冲和采样进度，保留请求供重试；未选择的环境不受影响。普通复用 reset 仍保留回滚快照。
-
-**检查点、评估与播放**
-
-正式 runner 检查点保存地形配置、有效种子、类型与难度、patch 代数、采样与出生计数、待处理请求及相关课程分配。恢复后首次 reset 重建同一高度场和出生位置，不消费新条件或待处理请求；下一次训练 reset 才继续采样。候选顺序、配置、种子、环境数或状态版本不匹配会报错；本次配置结构调整前的 terrain 检查点不再接受。检查点不包含 MuJoCo 模型、viewer 或 GL 对象，也不恢复完整机器人动力学轨迹。
-
-评估和播放固定当前地形、出生及其联合 cell，不更新课程统计，也不消费训练中的待处理请求。临时单环境播放保留来源环境的 patch 身份；评估结束后 runner 恢复训练快照及随机状态。纯命令课程仍可从冻结概率生成新命令。
-
-**地面信号与使用边界**
-
-simulator 在 `get_state()` 中批量查询机身及足端地面高度，并将 `base_ground_height`、`foot_ground_heights`、`ground_valid` 和 `terrain_in_bounds` 作为可选物理字段一并构造到 `SimulatorState`，供 task、观测、奖励和终止读取；高度条目默认 `height_reference: ground`，可显式设为 `world`；`base_position`、机身平面相对的步态信号和世界速度项保留原含义。普通平地不执行这项查询。
-
-MuJoCo 几何地形外围每侧延伸 1000 米平地，高度为原地面世界 z，不覆盖内部负高度地形。高度查询按机身/足端各点分别选择高度场或外围平地，跨界后观测、奖励与接触信号仍正常计算。
-
-`ground_valid` 表示机身及全部足端的地面高度是否有效，`terrain_in_bounds` 表示它们是否全部处于随机区域内，两者均为 `[env]`。`termination_manager_config.terms.terrain_bounds: {}` 可选择越出随机区域即终止；当前地形示例未启用该项，可在外围继续运动；按需添加该项后，越出随机区域会终止。查询超出外围覆盖的位置返回 NaN，状态采集将该环境标记为 `ground_valid=False` 并屏蔽无定义高度信号。
-
-<!-- 短训练参数内置于 [手工验收脚本](tests/manual/verify_mujoco_terrain_training.py)，运行时仅在输出目录生成环境参数及可选的前进指令任务副本。几何与物理接口、渲染验证见 [阶段 2 记录](tests/manual/results/stage2_mujoco/README.md)；信号适配、越界和 PPO 验收见 [阶段 3 记录](tests/manual/results/stage3_mujoco/README.md)。阶段 4 的独立／联合采样、恢复及固定回放验收入口为 `tests/manual/verify_terrain_curriculum.py`。 -->
-
-## 10. 完整组合示例
+## 3. 完整组合示例
 
 可直接参考：
 
@@ -1055,10 +218,10 @@ MuJoCo 几何地形外围每侧延伸 1000 米平地，高度为原地面世界 
 1. 在对应子目录复制并修改 runner、algorithm、policy、environment、simulator、task 配置；
 2. 在 `configs/` 新建顶层实验 YAML，通过 `component` 组合它们；
 3. 为每个训练阶段配置 `max_iterations` 和 transition；
-4. 在 `main.py` 将 `ApplicationEntry("...")` 指向新实验名；
+4. 使用 `python -m tools.run_app <实验名>` 启动新实验；
 5. 先用较小 `num_envs`、`rollout_length` 和 `max_iterations` 验证，再扩大训练规模。
 
-## 11. 校验与常见问题
+## 4. 校验与常见问题
 
 运行测试：
 
@@ -1074,17 +237,3 @@ pytest -q
 - **确定性算法报错**：部分 CUDA/Isaac 操作不支持确定性实现，可将 `deterministic_ops` 设为 `false`。
 - **录制失败**：使用 `render_mode: rgb_array`，并确保所选仿真后端已配置相机或能返回 RGB 帧。
 - **续训失败**：确认历史目录有 `configs/<app_name>.yaml` 及所引用的组件配置，并检查 `checkpoints/stage_XXX/latest.pt`、`checkpoints/latest.pt` 或 `checkpoints/resume.pt`。检查点须是包含 `runner.stage_index` 等训练状态的框架产物，单独的模型权重文件不足以恢复训练；如指定了 `checkpoint`，还要检查路径及文件内的阶段编号。
-
-## 12. 扩展注册表
-
-项目通过注册表扩展。新增实现后应在相应 registry 中注册或添加映射：
-
-- Runner：`runners/registry.py`
-- Callback：`runners/callbacks/registry.py`
-- Algorithm：`rl/algorithms/registry.py`
-- Policy：`rl/policies/registry.py`
-- Network module：`rl/policies/modules/registry.py`
-- Environment/Simulator/Task：`envs/*/registry.py`
-- Action、Command、Observation、Reward、Termination、Curriculum term：各 manager 的 `terms/registry.py`
-
-Manager term 使用装饰器注册后，配置名通常由类名转换得到：action/observation/reward/termination/curriculum 使用 snake_case；command 使用类名本身。新增字段应放在 term 的构造函数参数中，然后在 YAML 的 term 配置或 `params` 中传入。

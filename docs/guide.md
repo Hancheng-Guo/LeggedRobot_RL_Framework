@@ -1,0 +1,34 @@
+# 开发者查阅手册
+
+本手册面向配置实验、查阅组件参数和扩展项目的开发者。项目结构、安装运行、完整实验示例、测试及常见问题见[项目 README](../README.md)。
+
+## 章节目录
+
+- [1. 顶层实验配置](1_experiments_zh.md)
+  - [1.1 stage 写法](1_experiments_zh.md#11-stage-写法)
+  - [1.2 component 写法与多阶段继承](1_experiments_zh.md#12-component-写法与多阶段继承)
+- [2. Runner 配置](2_runner_zh.md)
+  - [2.1 全部回调](2_runner_zh.md#21-全部回调)
+  - [2.2 播放时的速度追踪图](2_runner_zh.md#22-播放时的速度追踪图)
+- [3. PPO 算法配置](3_ppo_zh.md)
+- [4. Actor-Critic 策略配置](4_policy_zh.md)
+  - [4.1 将多个模块封装为一个新模块](4_policy_zh.md#41-将多个模块封装为一个新模块)
+  - [4.2 跨 stage 复用复合模块](4_policy_zh.md#42-跨-stage-复用复合模块)
+- [5. 环境配置](5_environment_zh.md)
+- [6. 仿真器配置](6_simulators_zh.md)
+  - [6.1 MuJoCo 基础配置](6_simulators_zh.md#61-mujoco-基础配置)
+  - [6.2 Isaac Sim 基础配置](6_simulators_zh.md#62-isaac-sim-基础配置)
+    - [6.2.1 Isaac Sim 退出异常与训练产物](6_simulators_zh.md#621-isaac-sim-退出异常与训练产物)
+  - [6.3 地形配置](6_simulators_zh.md#63-地形配置)
+- [7. locomotion 任务配置](7_locomotion_zh.md)
+  - [7.1 Task State Manager](7_locomotion_zh.md#71-task-state-manager)
+  - [7.2 Action Manager](7_locomotion_zh.md#72-action-manager)
+  - [7.3 Command Manager](7_locomotion_zh.md#73-command-manager)
+  - [7.4 Observation Manager](7_locomotion_zh.md#74-observation-manager)
+  - [7.5 Reward Manager](7_locomotion_zh.md#75-reward-manager)
+  - [7.6 Termination Manager](7_locomotion_zh.md#76-termination-manager)
+  - [7.7 Curriculum Manager](7_locomotion_zh.md#77-curriculum-manager)
+  - [7.8 Randomization Manager](7_locomotion_zh.md#78-randomization-manager)
+    - [7.8.1 Terrain](7_locomotion_zh.md#781-terrain)
+- [8. 扩展注册表](8_extensions_zh.md)
+- [手动诊断与验收](../tests/manual/README.md)

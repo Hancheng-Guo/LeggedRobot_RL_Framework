@@ -76,9 +76,9 @@ def _keyboard_publisher(
     try:
         import tkinter as tk
 
-        import rclpy  # pyright: ignore[reportMissingImports]
-        from rclpy.context import Context  # pyright: ignore[reportMissingImports]
-        from geometry_msgs.msg import Twist  # pyright: ignore[reportMissingImports]
+        import rclpy
+        from rclpy.context import Context
+        from geometry_msgs.msg import Twist
 
         context = Context()
         context.init()
@@ -196,10 +196,10 @@ class Ros2KeyboardSession:
     ) -> None:
 
         try:
-            import rclpy  # pyright: ignore[reportMissingImports]
-            from rclpy.context import Context  # pyright: ignore[reportMissingImports]
-            from rclpy.executors import SingleThreadedExecutor  # pyright: ignore[reportMissingImports]
-            from geometry_msgs.msg import Twist  # pyright: ignore[reportMissingImports]
+            import rclpy
+            from rclpy.context import Context
+            from rclpy.executors import SingleThreadedExecutor
+            from geometry_msgs.msg import Twist
         except ImportError as error:
             raise ModuleNotFoundError(
                 "Human ROS 2 playback requires rclpy and geometry_msgs "

@@ -2,9 +2,25 @@
     "include": ["app", "envs", "rl", "runners", "tests", "tools", "utils"],
     "exclude": [
         "tests/manual",
-        "tests/test_mujoco_simulator.py",
-        "tests/test_mujoco_terrain.py",
-        "envs/simulators/mujoco.py",
-        "envs/simulators/mujoco_terrain.py"
+        "tests/test_mujoco_*.py",
+        "envs/simulators/mujoco*.py"
+    ],
+    "executionEnvironments": [
+        {
+            "root": "envs/simulators/isaac_sim_model.py",
+            "reportMissingImports": "none"
+        },
+        {
+            "root": "envs/simulators/isaac_sim_runtime.py",
+            "reportMissingImports": "none"
+        },
+        {
+            "root": "envs/simulators/isaac_sim_terrain.py",
+            "reportMissingImports": "none"
+        },
+        {
+            "root": "runners/utils/ros2_keyboard.py",
+            "reportMissingImports": "none"
+        }
     ]
 }

@@ -261,6 +261,31 @@
                     }
                 }
             }
+        },
+        {
+            "label": "Check: ROS2",
+            "icon": { "id": "checklist" },
+            "group": "test",
+            "type": "process",
+            "command": "${command:python.interpreterPath}",
+            "args": ["-m", "tools.run_checks", "ros2"],
+            "problemMatcher": [],
+            "options": { "cwd": "${workspaceFolder}" },
+            "windows": {
+                "type": "shell",
+                "command": "&",
+                "args": [
+                    "'${command:python.interpreterPath}'",
+                    "-m", "tools.run_checks", "ros2"
+                ],
+                "options": {
+                    "cwd": "${workspaceFolder}",
+                    "shell": {
+                        "executable": "powershell.exe",
+                        "args": ["-NoProfile", "-Command"]
+                    }
+                }
+            }
         }
         // {
         //     "label": "Pytest: MuJoCo",

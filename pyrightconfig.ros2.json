@@ -1,0 +1,10 @@
+{
+    "include": [
+        "runners/utils/human_ros2_config.py",
+        "runners/utils/ros2_keyboard.py",
+        "tools/play_human_ros2.py",
+        "tests/test_human_ros2_config.py",
+        "tests/test_play_human_ros2.py"
+    ],
+    "reportMissingImports": "error"
+}

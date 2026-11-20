@@ -139,7 +139,6 @@ python -m tools.play_human_ros2 unitree_go1_mujoco_cpu_velocity_only_2026-10-04_
 ROS 2 Jazzy 的 Conda 包列在 `requirements/ros2.txt`。在项目根目录、运行仿真的 Conda 环境中执行：
 
 ```powershell
-conda activate quadruped_rl
 conda install -c conda-forge -c robostack-jazzy --file requirements/ros2.txt
 ```
 

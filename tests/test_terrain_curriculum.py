@@ -45,6 +45,11 @@ class TerrainBackend:
     def get_ground_heights(self, xy, env_ids=None):
         return xy.new_zeros(xy.shape[:2])
 
+    def get_ground_bounds(self, env_ids=None):
+        count = self.num_envs if env_ids is None else env_ids.numel()
+        extent = self.positions.new_full((count, 2), 2.)
+        return -extent, extent
+
     def set_root_positions(self, env_ids_tensor, positions):
         self.positions[env_ids_tensor] = positions
 

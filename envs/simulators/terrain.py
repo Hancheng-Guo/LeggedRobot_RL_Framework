@@ -9,17 +9,29 @@ import math
 import torch
 from dataclasses import dataclass
 from collections.abc import Sequence
-from typing import Protocol
+from typing import Protocol, TypeAlias, runtime_checkable
 
 from utils import RuntimeContext
 
 
+TerrainRegionKey: TypeAlias = tuple[str, float, int]
+
+
+class TerrainCatalog(Protocol):
+    """The task supplies geometry for each prebuildable sampling condition."""
+
+    @property
+    def conditions(self) -> tuple[tuple[str, float], ...]: ...
+    def patch(self, runtime_seed: int, key: TerrainRegionKey) -> TerrainPatch: ...
+
+
 @dataclass(frozen=True)
 class TerrainGeometry:
-    """Only collision buffer dimensions and bounds; no sampling policy."""
+    """Collision grid dimensions and an optional source of prebuildable patches."""
     patch_size: tuple[float, float]
     grid_shape: tuple[int, int]  # rows (y), columns (x)
     height_bound: float
+    catalog: TerrainCatalog | None = None
 
     def __post_init__(self):
         if (
@@ -67,6 +79,16 @@ class TerrainBackend(Protocol):
     def get_terrain_spawn_geometry(self) -> TerrainSpawnGeometry: ...
     def apply_terrain(self, env_ids_tensor: torch.Tensor, patches: Sequence[TerrainPatch]) -> None: ...
     def set_root_positions(self, env_ids_tensor: torch.Tensor, positions: torch.Tensor) -> None: ...
+    def get_ground_bounds(self, env_ids: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor] | None: ...
     def get_ground_heights(self, xy: torch.Tensor, env_ids: torch.Tensor | None = None) -> torch.Tensor: ...
     def capture_reset_state(self, env_ids_tensor: torch.Tensor) -> object: ...
     def restore_reset_state(self, state: object) -> None: ...
+
+
+@runtime_checkable
+class StaticTerrainBackend(Protocol):
+    """Optional interface for selecting regions on a prebuilt map."""
+
+    def get_terrain_layout(self) -> tuple[int, tuple[int, int], float]: ...
+    def get_terrain_patch(self, key: TerrainRegionKey) -> TerrainPatch: ...
+    def select_terrain(self, env_ids_tensor: torch.Tensor, keys: Sequence[TerrainRegionKey]) -> None: ...

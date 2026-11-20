@@ -542,9 +542,11 @@ def test_play_rejects_invalid_play_count(
         runner.play(num_steps=1, formats="gif", num_plays=num_plays, mode="configured")
 
 
+@pytest.mark.parametrize("tracking", [False, True])
 def test_play_stops_when_primary_environment_episode_ends(
     runtime_context: RuntimeContext,
     monkeypatch: pytest.MonkeyPatch,
+    tracking: bool,
 ) -> None:
     class PlaybackEnvironment(TrackingEnvironment):
         def __init__(self, context: RuntimeContext) -> None:
@@ -576,12 +578,13 @@ def test_play_stops_when_primary_environment_episode_ends(
     runner = OnPolicyRunner(context=runtime_context)
     runner.environment = environment
     runner.callbacks = []
-    runner.tracking_specs = parse_tracking_specs(
-        yaml.safe_load(
-            (Path(__file__).resolve().parents[1] / "configs/runners/mujoco_rollout_256.yaml")
-            .read_text(encoding="utf-8")
-        )["playback"]
-    )
+    if tracking:
+        runner.tracking_specs = parse_tracking_specs(
+            yaml.safe_load(
+                (Path(__file__).resolve().parents[1] / "configs/runners/mujoco_rollout_256.yaml")
+                .read_text(encoding="utf-8")
+            )["playback"]
+        )
     runner.algorithm = MinimalAlgorithm(runtime_context)
     runner.algorithm.set_eval_mode = lambda: None
     monkeypatch.setattr(
@@ -601,9 +604,12 @@ def test_play_stops_when_primary_environment_episode_ends(
 
     def capture_frames(frames: list[np.ndarray], **kwargs: Any) -> list[Path]:
         saved_frame_counts.append(len(frames))
-        saved_commands.extend(kwargs["commands"])
-        saved_measured.extend(kwargs["measured"])
-        saved_labels.extend(spec.label for spec in kwargs["tracking_specs"])
+        if tracking:
+            saved_commands.extend(kwargs["commands"])
+            saved_measured.extend(kwargs["measured"])
+            saved_labels.extend(spec.label for spec in kwargs["tracking_specs"])
+        else:
+            assert kwargs["commands"] is kwargs["measured"] is kwargs["tracking_specs"] is None
         return []
 
     runner._play_steps(
@@ -614,6 +620,8 @@ def test_play_stops_when_primary_environment_episode_ends(
 
     assert environment.steps == 2
     assert saved_frame_counts == [2]
+    if not tracking:
+        return
     assert np.allclose(saved_commands, [(1.0, 0.2, 0.3), (2.0, 0.2, 0.3)])
     assert np.allclose(saved_measured, [(0.4, 0.1, 0.5), (0.4, 0.1, 0.5)])
     assert saved_labels == [

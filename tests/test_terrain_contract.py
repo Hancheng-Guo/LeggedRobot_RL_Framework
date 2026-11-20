@@ -133,9 +133,9 @@ def test_flat_height_query_contract(runtime_context):
         simulator.get_ground_heights(xy)
 
 
-def test_isaac_rejects_unimplemented_geometry_before_backend_start(runtime_context):
+def test_isaac_validates_configuration_before_terrain_backend_start(runtime_context):
     simulator = IsaacSimSimulator(runtime_context)
-    with pytest.raises(NotImplementedError, match="not implemented"):
+    with pytest.raises(ValueError, match="missing attribute 'num_envs'"):
         simulator.config_update(
             component=Component(None, None, None, None, None, None),
             terrain_geometry=TerrainGeometry((4, 4), (41, 41), .1),

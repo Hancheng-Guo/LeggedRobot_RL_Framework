@@ -238,3 +238,14 @@ def test_terrain_bounds_term_is_optional_and_uses_region_not_ground_valid(runtim
     torch.testing.assert_close(term.compute(selected), expected[[1]])
     empty = replace(context, state=context.state.select(torch.empty(0, dtype=torch.long)))
     assert term.compute(empty).shape == (0,)
+
+
+def test_terrain_map_bounds_allows_crossing_the_spawn_patch(runtime_context, model_context):
+    from envs.tasks.managers.termination import TerminationManager
+
+    context = height_context(model_context)
+    context.state.terrain_in_bounds = torch.tensor([False, False])
+    context.state.ground_valid = torch.tensor([True, False])
+    manager = TerminationManager(2, runtime_context, model_context, terms={"terrain_map_bounds": {}})
+    terminated, _ = manager.compute(context)
+    assert terminated.tolist() == [False, True]

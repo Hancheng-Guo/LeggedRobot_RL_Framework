@@ -19,3 +19,19 @@ class TerrainBounds(BaseTerminationTerm):
             return torch.zeros(task_context.state.qpos.shape[0], dtype=torch.bool,
                                device=task_context.state.qpos.device)
         return ~in_bounds
+
+
+@register_termination
+class TerrainMapBounds(BaseTerminationTerm):
+    """End an episode when the root or a foot leaves the covered surface."""
+
+    def compute(
+        self,
+        task_context: TaskContext,
+    ) -> torch.Tensor:
+
+        valid = task_context.state.ground_valid
+        if valid is None:
+            qpos = task_context.state.qpos
+            return torch.zeros(qpos.shape[0], dtype=torch.bool, device=qpos.device)
+        return ~valid

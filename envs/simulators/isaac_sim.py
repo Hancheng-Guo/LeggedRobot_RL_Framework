@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import torch
 import numpy as np
+from math import isfinite
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import cast
 
 from .base import BaseSimulator
-from .terrain import TerrainGeometry
-from .isaac_sim_backend import IsaacSimBackend, IsaacSimResetState
+from .terrain import (
+    StaticTerrainBackend, TerrainBackend, TerrainGeometry,
+    TerrainPatch, TerrainRegionKey, TerrainSpawnGeometry,
+)
+from .isaac_sim_backend import DEFAULT_TERRAIN_LAYOUT, IsaacSimBackend, IsaacSimResetState
 from .utils import ModelContext, SimulatorState
 from utils import Component, RuntimeContext, update_attributes
 
@@ -66,6 +70,8 @@ class IsaacSimSimulator(BaseSimulator):
         self.camera_prim_path: str | None = None
         self.camera_resolution: tuple[int, int] = (640, 480)
         self.reset_state = IsaacSimResetState()
+        self.terrain_geometry: TerrainGeometry | None = None
+        self._terrain_layout = DEFAULT_TERRAIN_LAYOUT
 
 
     def config_update(
@@ -93,12 +99,9 @@ class IsaacSimSimulator(BaseSimulator):
         joint_damping: float | Mapping[str, float] | None = None,
         reset_state: Mapping[str, object] | None = None,
         terrain_geometry: TerrainGeometry | None = None,
+        terrain_atlas: Mapping[str, object] | None = None,
     ) -> None:
 
-        if terrain_geometry is not None:
-            raise NotImplementedError(
-                "Isaac Sim geometric terrain is not implemented yet."
-            )
         backend_configuration_changed = any(
             value is not None
             for value in (
@@ -121,8 +124,9 @@ class IsaacSimSimulator(BaseSimulator):
                 joint_stiffness,
                 joint_damping,
                 reset_state,
+                terrain_atlas,
             )
-        )
+        ) or terrain_geometry != self.terrain_geometry
         if (
             self._backend is not None
             and component.simulator is None
@@ -245,6 +249,9 @@ class IsaacSimSimulator(BaseSimulator):
                 raise ValueError(f"Unsupported render mode: {mode!r}.")
         self.render_mode = render_mode
         self.train_render_mode = train_render_mode
+        self.terrain_geometry = terrain_geometry
+        if terrain_atlas is not None:
+            self._terrain_layout = self._parse_terrain_layout(terrain_atlas)
 
         self._validate_required_configuration()
         # Backend rebuilding is disabled until same-process SimulationApp restart
@@ -278,8 +285,49 @@ class IsaacSimSimulator(BaseSimulator):
             joint_stiffness=joint_stiffness,
             joint_damping=joint_damping,
             reset_state=self.reset_state,
+            terrain_geometry=terrain_geometry,
+            terrain_layout=self._terrain_layout,
         )
         self._build_model_context()
+
+
+    @staticmethod
+    def _parse_terrain_layout(
+        config: Mapping[str, object]
+    ) -> tuple[int, tuple[int, int], float]:
+
+        if (
+            not isinstance(config, Mapping)
+            or set(config) - {"variants", "region_tiles", "border_width"}
+        ):
+            raise ValueError("Invalid Isaac terrain_atlas fields.")
+
+        default_variants, default_tiles, default_width = DEFAULT_TERRAIN_LAYOUT
+        variants = config.get("variants", default_variants)
+        tiles = config.get("region_tiles", default_tiles)
+        width = config.get("border_width", default_width)
+
+        if type(variants) is not int or variants <= 0:
+            raise ValueError("terrain_atlas.variants must be a positive integer.")
+        if (
+            not isinstance(tiles, (list, tuple))
+            or len(tiles) != 2
+            or any(type(value) is not int or value <= 0 for value in tiles)
+        ):
+            raise ValueError(
+                "terrain_atlas.region_tiles must contain positive x and y tile counts."
+            )
+        if (
+            isinstance(width, bool)
+            or not isinstance(width, (int, float))
+            or not isfinite(width)
+            or width < 0
+        ):
+            raise ValueError(
+                "terrain_atlas.border_width must be a finite non-negative length in metres."
+            )
+
+        return variants, (tiles[0], tiles[1]), float(width)
 
 
     @staticmethod
@@ -462,11 +510,86 @@ class IsaacSimSimulator(BaseSimulator):
         self._require_backend().reset(env_ids)
 
 
+    def get_terrain_spawn_geometry(self) -> TerrainSpawnGeometry:
+        return self._require_terrain_backend().get_terrain_spawn_geometry()
+
+
+    def get_terrain_layout(self) -> tuple[int, tuple[int, int], float]:
+        return cast(
+            StaticTerrainBackend, self._require_backend()
+        ).get_terrain_layout()
+
+
+    def get_terrain_patch(
+        self,
+        key: TerrainRegionKey,
+    ) -> TerrainPatch:
+        return cast(
+            StaticTerrainBackend, self._require_backend()
+        ).get_terrain_patch(key)
+
+
+    def select_terrain(
+        self,
+        env_ids_tensor: torch.Tensor,
+        keys: Sequence[TerrainRegionKey],
+    ) -> None:
+        cast(
+            StaticTerrainBackend, self._require_backend()
+        ).select_terrain(env_ids_tensor, keys)
+
+
+    def get_ground_bounds(
+        self,
+        env_ids: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor] | None:
+        if self.terrain_geometry is None:
+            return None
+        return self._require_terrain_backend().get_ground_bounds(env_ids)
+
+
+    def get_ground_heights(
+        self,
+        xy: torch.Tensor,
+        env_ids: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        if self.terrain_geometry is None:
+            return super().get_ground_heights(xy, env_ids)
+        return self._require_terrain_backend().get_ground_heights(xy, env_ids)
+
+
+    def set_root_positions(
+        self,
+        env_ids_tensor: torch.Tensor,
+        positions: torch.Tensor,
+    ) -> None:
+        self._require_terrain_backend().set_root_positions(env_ids_tensor, positions)
+
+
+    def capture_reset_state(
+        self,
+        env_ids_tensor: torch.Tensor,
+    ) -> object:
+        return self._require_terrain_backend().capture_reset_state(env_ids_tensor)
+
+
+    def restore_reset_state(
+        self,
+        state: object,
+    ) -> None:
+        self._require_terrain_backend().restore_reset_state(state)
+
+
+    def _require_terrain_backend(self) -> TerrainBackend:
+        if self.terrain_geometry is None:
+            raise ValueError("Isaac terrain collision geometry is not configured.")
+        return cast(TerrainBackend, self._require_backend())
+
+
     def step(
         self,
         action: torch.Tensor
     ) -> None:
-        
         expected_shape = (self.num_envs, self.model_context.nu)
         if tuple(action.shape) != expected_shape:
             raise ValueError(
@@ -479,7 +602,6 @@ class IsaacSimSimulator(BaseSimulator):
         self,
         env_ids: torch.Tensor | None = None,
     ) -> SimulatorState:
-        
         return SimulatorState(**self._require_backend().get_state(env_ids))
 
 
@@ -491,7 +613,6 @@ class IsaacSimSimulator(BaseSimulator):
         self,
         render_mode: str | None = None
     ) -> None:
-        
         mode = render_mode if render_mode is not None else self.render_mode
         if mode is None:
             return

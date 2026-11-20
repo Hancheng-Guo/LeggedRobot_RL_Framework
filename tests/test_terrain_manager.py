@@ -6,16 +6,16 @@ from typing import Any, cast
 import pytest
 import torch
 
-from envs.simulators.terrain import TerrainPatch, TerrainSpawnGeometry
+from envs.simulators.terrain import TerrainPatch, TerrainRegionKey, TerrainSpawnGeometry
 from envs.tasks.managers.randomization.terms.terrain import TerrainConfig, TerrainRandomizationTerm
 from envs.tasks import BaseTaskLogic
 from envs.tasks.locomotion import LocomotionTaskLogic
 from envs.tasks.managers.randomization import RandomizationManager
-from utils import Component
+from utils import Component, RuntimeContext
 
 
 class PhysicalBackend:
-    def __init__(self, context, num_envs=3):
+    def __init__(self, context: RuntimeContext, num_envs: int = 3):
         self.context = context
         self.num_envs = num_envs
         self.events = []
@@ -38,6 +38,11 @@ class PhysicalBackend:
 
     def reset(self, env_ids: torch.Tensor | None = None) -> None:
         self.events.append(("reset", None if env_ids is None else env_ids.tolist()))
+
+    def get_ground_bounds(self, env_ids: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
+        count = self.num_envs if env_ids is None else env_ids.numel()
+        centre = torch.tensor(self.measured.origin[:2], dtype=torch.float64).expand(count, 2)
+        return centre - 2., centre + 2.
 
     def get_ground_heights(self, xy: torch.Tensor, env_ids: torch.Tensor | None = None) -> torch.Tensor:
         self.events.append("heights")
@@ -101,6 +106,50 @@ def test_manager_rejects_invalid_choices_before_backend_mutation(runtime_context
         manager.set_difficulty(torch.tensor([1]), torch.tensor([2]))
     assert manager.assignments.state_dict() == before
     assert backend.events == []
+
+
+def test_static_terrain_selects_cached_variants_and_restores_assignments(runtime_context):
+    manager, _ = make_manager(runtime_context)
+    assert manager.geometry is not None and manager.geometry.catalog is not None
+    catalog = manager.geometry.catalog
+
+    class StaticBackend(PhysicalBackend):
+        def get_terrain_layout(self) -> tuple[int, tuple[int, int], float]:
+            return 2, (3, 1), 6.
+
+        def get_terrain_patch(self, key: TerrainRegionKey) -> TerrainPatch:
+            return cached[key]
+
+        def select_terrain(self, env_ids_tensor: torch.Tensor, keys: Sequence[TerrainRegionKey]) -> None:
+            self.events.append(("select", env_ids_tensor.tolist(), list(keys)))
+
+    cached = {
+        key: catalog.patch(runtime_context.seed, key)
+        for key in (("rough", .25, 0), ("rough", .25, 1))
+    }
+    env_ids = torch.tensor([1])
+    backend = StaticBackend(runtime_context)
+    manager.bind(backend)
+    reset_from_environment(manager, backend, env_ids)
+    first = manager.patches[1]
+    assert first is not None and first.geometry is cached[("rough", .25, 1)]
+    manager.request_reallocation(env_ids)
+    reset_from_environment(manager, backend, env_ids)
+    second = manager.patches[1]
+    assert second is not None and second.geometry is cached[("rough", .25, 0)]
+    assert manager.patches[0] is manager.patches[2] is None
+    assert not any(isinstance(event, tuple) and event[0] == "apply" for event in backend.events)
+
+    restored, _ = make_manager(runtime_context)
+    other_backend = StaticBackend(runtime_context)
+    restored.bind(other_backend)
+    state = manager.checkpoint_state_dict()
+    with pytest.raises(ValueError, match="layout"):
+        restored.load_checkpoint_state_dict({**state, "terrain_layout": (1, (3, 1), 6.)})
+    restored.load_checkpoint_state_dict(state)
+    reset_from_environment(restored, other_backend, env_ids)
+    assert restored.patches == manager.patches
+    torch.testing.assert_close(other_backend.positions, backend.positions)
 
 
 def test_manager_validates_spawn_space_without_engine_objects(runtime_context):

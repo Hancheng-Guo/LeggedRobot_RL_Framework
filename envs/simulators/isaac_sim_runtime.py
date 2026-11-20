@@ -10,15 +10,34 @@ import torch
 import numpy as np
 from collections.abc import Mapping, Sequence
 from contextlib import redirect_stdout
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .isaac_sim_backend import IsaacSimModelMetadata, IsaacSimResetState
+from .isaac_sim_backend import DEFAULT_TERRAIN_LAYOUT, IsaacSimModelMetadata, IsaacSimResetState
 from .isaac_sim_model import IsaacSimModelConverter
+from .isaac_sim_terrain import IsaacSimTerrain, measure_spawn_geometry
+from .terrain import TerrainGeometry, TerrainPatch, TerrainRegionKey, TerrainSpawnGeometry
 from utils import RuntimeContext, get_logger
 
 
 LOGGER = get_logger("isaac_sim")
+
+
+@dataclass
+class _IsaacResetSnapshot:
+    terrain: IsaacSimTerrain
+    indices: torch.Tensor
+    regions: torch.Tensor
+    positions: torch.Tensor
+    orientations: torch.Tensor
+    linear_velocities: torch.Tensor
+    angular_velocities: torch.Tensor
+    joint_positions: torch.Tensor
+    joint_velocities: torch.Tensor
+    targets: torch.Tensor
+    previous_qvel: torch.Tensor | None
+    contact_stale: torch.Tensor
 
 
 class IsaacSimRuntime:
@@ -50,6 +69,7 @@ class IsaacSimRuntime:
         self._kit_log_forwarding = threading.local()
         self._kit_log_levels: dict[int, int] = {}
         self._closed = False
+        self._terrain: IsaacSimTerrain | None = None
 
 
     def configure(
@@ -74,6 +94,8 @@ class IsaacSimRuntime:
         joint_stiffness: float | Mapping[str, float] | None,
         joint_damping: float | Mapping[str, float] | None,
         reset_state: IsaacSimResetState,
+        terrain_geometry: TerrainGeometry | None = None,
+        terrain_layout: tuple[int, tuple[int, int], float] = DEFAULT_TERRAIN_LAYOUT,
     ) -> None:
 
         self.num_envs = int(num_envs)
@@ -90,6 +112,8 @@ class IsaacSimRuntime:
         self.camera_resolution = tuple(camera_resolution)
         self.foot_contact_force_threshold = float(foot_contact_force_threshold)
         self.reset_state = reset_state
+        if terrain_geometry is not None and floor_prim_paths:
+            raise ValueError("Isaac shared terrain requires empty floor_prim_paths.")
 
         self.base_body_prim_path: str
         self.foot_body_prim_paths: tuple[str, ...]
@@ -97,6 +121,14 @@ class IsaacSimRuntime:
         self.camera_prim_path: str | None = None
 
         self._start_application()
+        if terrain_geometry is not None:
+            self._terrain = IsaacSimTerrain(
+                terrain_geometry,
+                self.num_envs,
+                self.context.seed,
+                terrain_layout,
+                self.context.device,
+            )
         converter = IsaacSimModelConverter(
             ros_package_paths=ros_package_paths,
             merge_fixed_joints=merge_fixed_joints,
@@ -115,6 +147,9 @@ class IsaacSimRuntime:
         )
         self._previous_qvel: torch.Tensor | None = None
         self._last_frame_skip = 1
+        if self._terrain is not None:
+            self.reset(self._all_env_indices[:1])
+            self._terrain_spawn_geometry = self._measure_spawn_geometry()
 
 
     def _start_application(self) -> None:
@@ -234,7 +269,7 @@ class IsaacSimRuntime:
         from isaacsim.core.experimental.prims import Articulation, RigidPrim  # pyright: ignore[reportMissingImports]
         from isaacsim.core.simulation_manager import SimulationManager  # pyright: ignore[reportMissingImports]
         from isaacsim.core.utils.stage import add_reference_to_stage  # pyright: ignore[reportMissingImports]
-        from pxr import Usd, UsdGeom, UsdPhysics
+        from pxr import Usd, UsdGeom, UsdLux, UsdPhysics
 
         self._simulation_manager = SimulationManager
         self._world = World(
@@ -256,6 +291,7 @@ class IsaacSimRuntime:
         stage = self._world.stage
         source_env_path = "/World/envs/env_0"
         source_robot_path = source_env_path + self._normalized_robot_prim_path()
+        self._source_robot_path = source_robot_path
         UsdGeom.Xform.Define(stage, source_env_path)
         add_reference_to_stage(
             usd_path=str(self.model_path),
@@ -271,7 +307,12 @@ class IsaacSimRuntime:
             )
         )
 
-        if self._requested_floor_prim_paths:
+        if self._terrain is not None:
+            self._terrain.build(stage)
+            self.floor_prim_paths = (self._terrain.prim_path,)
+            light: Any = UsdLux.DomeLight.Define(stage, "/World/TerrainSkyLight")
+            light.CreateIntensityAttr(500.)
+        elif self._requested_floor_prim_paths:
             missing_floor_paths = [
                 path
                 for path in self._requested_floor_prim_paths
@@ -290,15 +331,6 @@ class IsaacSimRuntime:
                 name="GroundPlane",
             )
             self.floor_prim_paths = (default_floor_path,)
-        self._floor_collision_prim_paths = tuple(
-            self._find_floor_collision_prim_path(
-                stage,
-                floor_path,
-                Usd,
-                UsdPhysics,
-            )
-            for floor_path in self.floor_prim_paths
-        )
 
         cloner = GridCloner(spacing=self.env_spacing, stage=stage)
         cloner.define_base_env("/World/envs")
@@ -352,10 +384,11 @@ class IsaacSimRuntime:
             for env_id in range(self.num_envs)
             for relative in body_relative_paths
         ]
-        self._body_view = RigidPrim(
-            body_paths,
-            contact_filter_paths=list(self._floor_collision_prim_paths),
-        )
+        contact_filters = [
+            self._find_floor_collision_prim_path(stage, path, Usd, UsdPhysics)
+            for path in self.floor_prim_paths
+        ]
+        self._body_view = RigidPrim(body_paths, contact_filter_paths=contact_filters)
         # Contact filters alone do not apply PhysxContactReportAPI in the
         # experimental wrapper. Enable it before reset creates tensor views.
         self._body_view.set_enabled_contact_tracking([True])
@@ -693,6 +726,9 @@ class IsaacSimRuntime:
             dtype=self.context.dtype,
             device=self.context.device,
         )
+        self._contact_stale = torch.zeros_like(
+            self._all_env_indices, dtype=torch.bool
+        )
 
         body_ids = torch.arange(
             self._body_count,
@@ -728,6 +764,178 @@ class IsaacSimRuntime:
             body_ids.reshape(self.num_envs, -1, 1)
             == foot_ids.view(1, 1, -1)
         )
+        self._foot_body_ids = foot_ids
+
+
+    def _require_terrain(self) -> IsaacSimTerrain:
+        if self._terrain is None:
+            raise ValueError(
+                "Isaac terrain collision geometry is not configured."
+            )
+        return self._terrain
+
+
+    def _measure_spawn_geometry(self) -> TerrainSpawnGeometry:
+        positions, orientations = self._body_view.get_world_poses()
+        return measure_spawn_geometry(
+            self._world.stage,
+            self._source_robot_path,
+            self._body_prim_paths,
+            self._tensor(positions)[:self._body_count].cpu().numpy(),
+            self._tensor(orientations)[:self._body_count].cpu().numpy(),
+            np.zeros(3),
+            self._default_root_positions[0].cpu().numpy(),
+        )
+
+
+    def get_terrain_spawn_geometry(self) -> TerrainSpawnGeometry:
+        self._require_terrain()
+        return self._terrain_spawn_geometry
+
+
+    def _terrain_indices(
+        self,
+        env_ids: torch.Tensor | None,
+    ) -> torch.Tensor:
+        if (
+            env_ids is not None
+            and (env_ids.ndim != 1 or env_ids.dtype != torch.long)
+        ):
+            raise ValueError(
+                "Environment IDs must be a one-dimensional long tensor."
+            )
+        indices = self._indices(env_ids)
+        if env_ids is not None and (
+            indices.unique().numel() != indices.numel()
+            or torch.any((indices < 0) | (indices >= self.num_envs))
+        ):
+            raise ValueError("Environment IDs must be unique and in range.")
+        return indices
+
+
+    def get_ground_bounds(
+        self,
+        env_ids: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor] | None:
+        return (
+            None if self._terrain is None
+            else self._terrain.bounds(self._terrain_indices(env_ids))
+        )
+
+
+    def get_ground_heights(
+        self,
+        xy: torch.Tensor,
+        env_ids: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        indices = self._terrain_indices(env_ids)
+        if (
+            xy.ndim != 3
+            or xy.shape[0] != indices.numel()
+            or xy.shape[-1] != 2
+        ):
+            raise ValueError(
+                "Ground query rows must match environments with shape [env, sample, 2]."
+            )
+        if not xy.is_floating_point() or not torch.isfinite(xy).all():
+            raise ValueError(
+                "Ground queries must contain finite floating-point coordinates."
+            )
+        return self._require_terrain().heights(xy.to(self.context.device)).to(xy)
+
+
+    def get_terrain_layout(self) -> tuple[int, tuple[int, int], float]:
+        return self._require_terrain().layout
+
+
+    def get_terrain_patch(
+        self,
+        key: TerrainRegionKey,
+    ) -> TerrainPatch:
+        return self._require_terrain().get_patch(key)
+
+
+    def select_terrain(
+        self,
+        env_ids_tensor: torch.Tensor,
+        keys: Sequence[TerrainRegionKey],
+    ) -> None:
+        indices = self._terrain_indices(env_ids_tensor)
+        self._require_terrain().select(indices, keys)
+
+
+    def _update_articulation_kinematics(self) -> None:
+        self._simulation_manager.get_physics_simulation_view().update_articulations_kinematic()
+
+
+    def set_root_positions(
+        self,
+        env_ids_tensor: torch.Tensor,
+        positions: torch.Tensor,
+    ) -> None:
+        indices = self._terrain_indices(env_ids_tensor)
+        if (
+            positions.shape != (indices.numel(), 3)
+            or not positions.is_floating_point()
+            or not torch.isfinite(positions).all()
+        ):
+            raise ValueError(
+                "Root positions must be finite floating-point data with shape [env, 3]."
+            )
+        self._articulation.set_world_poses(
+            positions=self._warp(self._tensor(positions)),
+            indices=self._warp(indices),
+        )
+        self._contact_stale[indices] = True
+        self._update_articulation_kinematics()
+
+
+    def capture_reset_state(
+        self,
+        env_ids_tensor: torch.Tensor,
+    ) -> object:
+        indices = self._terrain_indices(env_ids_tensor)
+        terrain = self._require_terrain()
+        positions, orientations = self._articulation.get_world_poses()
+        linear, angular = self._articulation.get_velocities()
+        return _IsaacResetSnapshot(
+            terrain=terrain, indices=indices.clone(), regions=terrain.region_ids[indices],
+            positions=self._tensor(positions)[indices],
+            orientations=self._tensor(orientations)[indices],
+            linear_velocities=self._tensor(linear)[indices],
+            angular_velocities=self._tensor(angular)[indices],
+            joint_positions=self._tensor(self._articulation.get_dof_positions())[indices],
+            joint_velocities=self._tensor(self._articulation.get_dof_velocities())[indices],
+            targets=self._ctrl[indices],
+            previous_qvel=None if self._previous_qvel is None else self._previous_qvel.clone(),
+            contact_stale=self._contact_stale[indices],
+        )
+
+
+    def restore_reset_state(
+        self,
+        state: object,
+    ) -> None:
+        terrain = self._require_terrain()
+        if not isinstance(state, _IsaacResetSnapshot) or state.terrain is not terrain:
+            raise ValueError("Reset snapshot belongs to a different Isaac terrain scene.")
+        terrain.region_ids[state.indices] = state.regions
+        indices = self._warp(state.indices)
+        self._articulation.set_world_poses(
+            positions=self._warp(state.positions),
+            orientations=self._warp(state.orientations), indices=indices,
+        )
+        self._articulation.set_velocities(
+            linear_velocities=self._warp(state.linear_velocities),
+            angular_velocities=self._warp(state.angular_velocities), indices=indices,
+        )
+        self._articulation.set_dof_positions(self._warp(state.joint_positions), indices=indices)
+        self._articulation.set_dof_velocities(self._warp(state.joint_velocities), indices=indices)
+        self._articulation.set_dof_position_targets(self._warp(state.targets), indices=indices)
+        self._ctrl[state.indices] = state.targets
+        self._previous_qvel = state.previous_qvel
+        self._contact_stale[state.indices] = state.contact_stale
+        self._update_articulation_kinematics()
 
 
     def reset(
@@ -767,7 +975,13 @@ class IsaacSimRuntime:
             indices=self._warp(indices),
         )
         self._ctrl[indices] = self._default_joint_positions[indices]
-        self._previous_qvel = None
+        if self._terrain is not None:
+            self._contact_stale[indices] = True
+            self._update_articulation_kinematics()
+        if env_ids is None:
+            self._previous_qvel = None
+        elif self._previous_qvel is not None:
+            self._previous_qvel[indices] = 0.
 
 
     def step(
@@ -782,6 +996,7 @@ class IsaacSimRuntime:
         self._last_frame_skip = frame_skip
         for _ in range(frame_skip):
             self._world.step(render=self.render_mode == "human")
+        self._contact_stale.zero_()
 
 
     def get_state(
@@ -789,14 +1004,17 @@ class IsaacSimRuntime:
         env_ids: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
         
-        state = self._get_full_state()
+        state = self._get_full_state(env_ids)
         if env_ids is None:
             return state
         indices = env_ids.to(device=self.context.device, dtype=torch.long)
         return {name: value[indices] for name, value in state.items()}
 
 
-    def _get_full_state(self) -> dict[str, torch.Tensor]:
+    def _get_full_state(
+        self,
+        env_ids: torch.Tensor | None = None,
+    ) -> dict[str, torch.Tensor]:
 
         root_pos, root_quat = self._articulation.get_world_poses()
         root_linear_velocity, root_angular_velocity = (
@@ -823,7 +1041,11 @@ class IsaacSimRuntime:
             qacc = (
                 qvel - self._previous_qvel
             ) / (self.sim_dt * self._last_frame_skip)
-        self._previous_qvel = qvel.clone()
+        if env_ids is None or self._previous_qvel is None:
+            self._previous_qvel = qvel.clone()
+        else:
+            indices = self._indices(env_ids)
+            self._previous_qvel[indices] = qvel[indices]
 
         body_pos, _ = self._body_view.get_world_poses()
         body_linear_velocity, body_angular_velocity = (
@@ -874,7 +1096,7 @@ class IsaacSimRuntime:
             rotation_world_to_body,
             root_velocity[..., 3:6].unsqueeze(-1),
         ).squeeze(-1)
-        return {
+        state = {
             "qpos": qpos,
             "qvel": qvel,
             "qacc": qacc,
@@ -889,6 +1111,13 @@ class IsaacSimRuntime:
             "foot_ground_contact": foot_contact,
             "foot_contact_normal_force": foot_contact_force,
         }
+        if self._terrain is not None:
+            terrain_xy = torch.cat(
+                (root_pos[:, None, :2], body_pos[:, self._foot_body_ids, :2]),
+                dim=1
+            )
+            state.update(self._terrain.ground_state(terrain_xy, self._all_env_indices))
+        return state
 
 
     def _contact_state(
@@ -905,6 +1134,9 @@ class IsaacSimRuntime:
             3,
         )
         normal_force = force_vectors.norm(dim=-1)
+        if self._terrain is not None:
+            # PhysX reports the preceding simulation step until the next step.
+            normal_force[self._contact_stale] = 0.
         contact_ids = torch.where(
             (normal_force > 0.0).reshape(self.num_envs, -1, 1),
             self._contact_geom_pairs,
@@ -977,7 +1209,13 @@ class IsaacSimRuntime:
         if isinstance(frame, torch.Tensor):
             frame = frame.detach().cpu().numpy()
         frame_array = np.asarray(frame)
-        if frame_array.ndim != 3 or frame_array.shape[-1] < 3:
+        if (
+            frame_array.ndim != 3
+            or frame_array.shape[-1] < 3
+            or frame_array.size == 0
+        ):
+            return None
+        if frame_array.shape[-1] == 4 and not frame_array[..., 3].any():
             return None
         return frame_array[..., :3]
 
@@ -1049,6 +1287,7 @@ class IsaacSimRuntime:
             attempt(self._world.stop)
             self._body_view = None
             self._articulation = None
+            self._terrain = None
             simulation_manager = getattr(self, "_simulation_manager", None)
             if simulation_manager is not None:
                 attempt(simulation_manager.invalidate_physics)

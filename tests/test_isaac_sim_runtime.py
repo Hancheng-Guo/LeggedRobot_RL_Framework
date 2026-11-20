@@ -12,6 +12,8 @@ import numpy as np
 import torch
 
 from envs.simulators.isaac_sim_runtime import IsaacSimRuntime
+from envs.simulators.isaac_sim_terrain import IsaacSimTerrain
+from envs.simulators.terrain import TerrainGeometry, TerrainPatch, TerrainRegionKey
 from envs.simulators.isaac_sim_model import IsaacSimModelConverter
 from envs.simulators import isaac_sim_runtime
 from envs.simulators.isaac_sim_backend import IsaacSimResetState
@@ -361,7 +363,7 @@ def test_playback_cleanup_can_retry_after_camera_destroy_failure(
 
 @pytest.mark.parametrize(
     "camera_frame",
-    (None, np.asarray(None), np.empty((0,))),
+    (None, np.asarray(None), np.empty((0,)), np.zeros((4, 6, 4), dtype=np.uint8)),
 )
 def test_render_skips_camera_warmup_frames(camera_frame: Any) -> None:
     render_calls: list[str] = []
@@ -657,8 +659,7 @@ class FakeBodyView:
 def test_precomputed_contact_layout_is_reused_for_state_queries(
     runtime_context,
 ) -> None:
-    runtime = object.__new__(IsaacSimRuntime)
-    runtime.context = runtime_context
+    runtime = IsaacSimRuntime(runtime_context)
     runtime.num_envs = 2
     runtime.sim_dt = 0.002
     runtime.foot_contact_force_threshold = 15.0
@@ -722,3 +723,29 @@ def test_rejects_ambiguous_articulation_roots(
             FakeUsd,
             FakeUsdPhysics,
         )
+
+
+def test_shared_terrain_uses_world_position_across_a_tile_boundary(runtime_context):
+    class Catalog:
+        conditions = (("slope", 1.), ("rough", 1.))
+
+        def patch(self, runtime_seed: int, key: TerrainRegionKey) -> TerrainPatch:
+            height = 1. if key[0] == "slope" else -.5
+            return TerrainPatch((-1., 0., 1.), (-1., 0., 1.), (
+                (0., 0., 0.), (0., height, 0.), (0., 0., 0.),
+            ))
+
+    terrain = IsaacSimTerrain(
+        TerrainGeometry((2., 2.), (3, 3), 1., catalog=Catalog()),
+        num_envs=2, seed=0, layout=(1, (1, 1), 2.), device=runtime_context.device,
+    )
+    indices = torch.tensor([0, 1])
+    terrain.select(indices, [("slope", 1., 0), ("rough", 1., 0)])
+    xy = torch.tensor([[[-.25, .25], [0., .25], [1.75, .25], [3.9, 0.]]]).expand(2, -1, -1)
+    torch.testing.assert_close(
+        terrain.heights(xy), torch.tensor([[.25, 0., -.125, 0.]]).expand(2, -1),
+    )
+    state = terrain.ground_state(xy, indices)
+    assert state["ground_valid"].tolist() == [True, True]
+    assert state["terrain_in_bounds"].tolist() == [False, False]
+    torch.testing.assert_close(terrain.heights(torch.tensor([[[4.1, 0.]]])), torch.tensor([[torch.nan]]), equal_nan=True)

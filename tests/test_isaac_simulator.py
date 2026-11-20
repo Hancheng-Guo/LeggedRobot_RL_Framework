@@ -12,6 +12,7 @@ from envs.simulators.isaac_sim_backend import (
     IsaacSimResetState,
 )
 from envs.simulators.isaac_sim_runtime import IsaacSimRuntime
+from envs.simulators.terrain import TerrainGeometry
 from envs.simulators.registry import SIM_TYPE_MAP
 from utils import Component
 
@@ -114,6 +115,7 @@ def _configure(
     runtime_context,
     floor_prim_paths: tuple[str, ...] | None = None,
     train_render_mode: str | None = None,
+    terrain_geometry: TerrainGeometry | None = None,
 ) -> tuple[IsaacSimSimulator, FakeIsaacBackend]:
     model_path = tmp_path / "robot.urdf"
     model_path.write_text("<robot name='test'/>", encoding="utf-8")
@@ -134,9 +136,21 @@ def _configure(
         render_mode="rgb_array",
         train_render_mode=train_render_mode,
         floor_prim_paths=floor_prim_paths,
+        terrain_geometry=terrain_geometry,
     )
     assert backend is not None
     return simulator, backend
+
+
+def test_terrain_geometry_is_delivered_to_isaac_backend(tmp_path, runtime_context):
+    geometry = TerrainGeometry((4., 4.), (21, 21), .2)
+    simulator, backend = _configure(tmp_path, runtime_context, terrain_geometry=geometry)
+    try:
+        assert backend.configure_arguments["terrain_geometry"] == geometry
+        simulator.config_update(component=_component(), num_envs=2, terrain_geometry=geometry)
+        assert simulator._require_backend() is backend
+    finally:
+        simulator.close()
 
 
 def test_isaac_sim_is_registered_without_importing_optional_runtime() -> None:
@@ -155,7 +169,7 @@ def test_isaac_ground_state_is_owned_by_backend(tmp_path, runtime_context, monke
     )
     # Exercise the runtime's selection path without starting an Isaac application.
     runtime = IsaacSimRuntime(runtime_context)
-    monkeypatch.setattr(runtime, '_get_full_state', lambda: values)
+    monkeypatch.setattr(runtime, '_get_full_state', lambda env_ids: values)
     monkeypatch.setattr(backend, 'get_state', runtime.get_state)
 
     def unexpected_query(*args, **kwargs):

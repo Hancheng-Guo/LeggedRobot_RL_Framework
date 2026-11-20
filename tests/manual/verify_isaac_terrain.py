@@ -1,0 +1,261 @@
+"""Validate real PhysX terrain and PPO resume in separate Isaac processes."""
+from __future__ import annotations
+
+import argparse
+from copy import deepcopy
+import json
+from pathlib import Path
+import sys
+from time import perf_counter
+from traceback import print_exc
+from unittest.mock import patch
+
+import torch
+import yaml
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+from envs.vector_env import VectorEnv
+from utils import Component, ComponentInfo, RuntimeContext, load_yaml
+from verify_command_curriculum import VerifyFinite, configure
+from verify_terrain_curriculum import assert_equal, get_terrain
+
+
+def build_component(output, num_envs, flat):
+    environment = output / "environment.yaml"
+    environment.write_text(yaml.safe_dump({"num_envs": num_envs, "max_episode_steps": 32}), encoding="utf-8")
+    task = output / "task.yaml"
+    config = load_yaml(ROOT / "configs/tasks/locomotion_unitree_go1_velocity.yaml")
+    if not flat:
+        config["randomization_manager_config"]["terms"] = {
+            "terrain": {
+                "category": {"type": "Curriculum", "params": {
+                    "curriculum": "locomotion",
+                    "values": {"plane": {}, "slope": {"max_slope": .2}, "rough": {"max_height": .08}},
+                }},
+                "difficulty": {"type": "Curriculum", "params": {
+                    "curriculum": "locomotion", "values": [.5, 1.],
+                }},
+                "patch_size": [4., 4.], "resolution": .2, "spawn_size": [1.4, 1.2],
+            },
+        }
+        config["termination_manager_config"]["terms"]["terrain_map_bounds"] = {}
+        for params in config["command_manager_config"]["terms"].values():
+            if "num_cell" in params["params"]:
+                params["params"]["num_cell"] = 2
+    task.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    return Component(
+        runner=None,
+        algorithm=ComponentInfo("ppo", ROOT / "configs/algorithms/ppo_num_batch_4.yaml"),
+        policy=ComponentInfo("actor_critic", ROOT / "configs/policies/actor_critic_direct_actuation.yaml"),
+        environment=ComponentInfo("vector_env", environment),
+        simulator=ComponentInfo("isaac_sim", ROOT / "configs/simulators/isaac_sim_unitree_go1_rgb_array.yaml"),
+        task=ComponentInfo("locomotion", task),
+    )
+
+
+def verify_physics(environment, flat):
+    sim = environment.simulator
+    obs = environment.reset()
+    assert torch.isfinite(obs).all()
+    if not flat:
+        from omni.physx import get_physx_scene_query_interface
+
+        lower, upper = sim.get_ground_bounds()
+        centres = (lower + upper) / 2
+        state = sim.get_state()
+        assert state.ground_valid.all() and state.terrain_in_bounds.all()
+        assert ((state.qpos[:, :2] - centres).abs() < .7).all()
+        environment.set_training_mode(False)
+        terrain = sim._require_backend()._terrain
+        with patch.object(terrain, "build", side_effect=AssertionError("Reset rebuilt the shared mesh.")):
+            environment.reset()
+        environment.set_training_mode(True)
+        selected = torch.tensor([0], device=centres.device)
+        other = torch.tensor([1], device=centres.device)
+        snapshot = sim.capture_reset_state(selected)
+        untouched = sim.get_state(other).qpos
+        query = get_physx_scene_query_interface()
+
+        source = ("plane", 1., 0)
+        neighbour = ("slope", .5, 0)
+        sim.select_terrain(selected, [source])
+        source_bounds = sim.get_ground_bounds(selected)
+        sim.select_terrain(selected, [neighbour])
+        neighbour_bounds = sim.get_ground_bounds(selected)
+        neighbour_centre = (neighbour_bounds[0] + neighbour_bounds[1]) / 2
+        sim.select_terrain(selected, [source])
+        rough = terrain.origins[terrain._region_ids[("rough", 1., 0)], :2]
+        seam = (source_bounds[1] + source_bounds[0] + neighbour_bounds[1] + neighbour_bounds[0]) / 4
+        offsets = centres.new_tensor([[1.27, .36], [1.34, .47]])
+        border = terrain._map_upper + .5
+        points = torch.cat((neighbour_centre + offsets, rough + offsets, seam, border[None]))
+        heights = sim.get_ground_heights(points.unsqueeze(0), selected)
+        torch.testing.assert_close(heights, sim.get_ground_heights(points.unsqueeze(0), other))
+        assert torch.any(heights[0, :4] != 0) and heights[0, -1] == 0.
+        for (x, y), height in zip(points.tolist(), heights[0].tolist(), strict=True):
+            hit = query.raycast_closest((x, y, 1.), (0., 0., -1.), 2.)
+            assert hit["hit"] and hit["collision"] == terrain.prim_path, hit
+            assert abs(hit["position"][2] - height) < 2e-5, (hit, height)
+
+        landing = sim.get_state(selected).qpos[:, :3].clone()
+        landing[:, :2] = neighbour_centre
+        sim.set_root_positions(selected, landing)
+        state = sim.get_state(selected)
+        assert state.ground_valid.all() and not state.terrain_in_bounds.any()
+        torch.testing.assert_close(sim.get_state(other).qpos, untouched)
+
+        runtime = sim._require_backend()
+        for _ in range(20):
+            sim.step(runtime._ctrl)
+            if sim.get_state(selected).foot_ground_contact.any():
+                break
+        assert sim.get_state(selected).foot_ground_contact.any()
+        sim.restore_reset_state(snapshot)
+        torch.testing.assert_close(sim.get_ground_bounds(selected)[0], lower[:1])
+
+        pair = torch.cat((selected, other))
+        snapshot = sim.capture_reset_state(pair)
+        airborne = landing.repeat(2, 1)
+        airborne[:, 2] = 2.
+        sim.set_root_positions(pair, airborne)
+        sim.step(runtime._ctrl)
+        overlapping = sim.get_state(selected)
+        sim.restore_reset_state(snapshot)
+        airborne[1, 0] += 2.
+        sim.set_root_positions(pair, airborne)
+        sim.step(runtime._ctrl)
+        separated = sim.get_state(selected)
+        torch.testing.assert_close(overlapping.qpos, separated.qpos, atol=2e-4, rtol=0)
+        torch.testing.assert_close(overlapping.qvel, separated.qvel, atol=2e-4, rtol=0)
+        sim.restore_reset_state(snapshot)
+
+        outside = terrain._map_upper + terrain.border_width + 1.
+        assert torch.isnan(sim.get_ground_heights(outside[None, None], selected)).all()
+        environment.reset()
+    else:
+        assert sim.get_state().ground_valid is None
+
+    actions = obs.new_zeros((environment.num_envs, environment.action_dim))
+    torch.cuda.synchronize()
+    start = perf_counter()
+    foot_contact = False
+    for _ in range(64):
+        obs, *_ = environment.step(actions)
+        assert torch.isfinite(obs).all()
+        foot_contact |= bool(sim.get_state().foot_ground_contact.any())
+    torch.cuda.synchronize()
+    assert foot_contact
+    return {
+        "num_envs": environment.num_envs,
+        "env_steps_per_second": environment.num_envs * 64 / (perf_counter() - start),
+        "pytorch_peak_bytes": torch.cuda.max_memory_allocated(),
+    }
+
+
+def reset_record(environment):
+    environment.reset()
+    sim = environment.simulator
+    root = sim.get_state().qpos[:, :3]
+    low, high = sim.get_ground_bounds()
+    centres = (low + high) / 2
+    offsets = centres.new_tensor([[0., 0.], [1.25, .25], [-1.36, .47]])
+    ground = sim.get_ground_heights(centres[:, None, :] + offsets)
+    return {
+        "state": deepcopy(environment.checkpoint_state_dict()),
+        "patches": get_terrain(environment).patches,
+        "root": root.clone(),
+        "ground": ground.clone(),
+    }
+
+
+def verify_training(output, context, component, phase, render):
+    checkpoint = output / "terrain.pt"
+    runner = configure(context, component, 2 if phase == "source" else 4,
+                       None if phase == "source" else checkpoint)
+    try:
+        environment = runner.environment
+        checker = VerifyFinite(runner)
+        runner.callbacks.append(checker)
+        if phase == "source":
+            runner.train()
+            print("ISAAC INITIAL PPO UPDATES PASSED", flush=True)
+            terrain = get_terrain(environment)
+            terrain.request_reallocation(torch.tensor([0], device=context.device))
+            terrain.request_spawn(torch.tensor([1], device=context.device))
+            before = deepcopy(environment.checkpoint_state_dict())
+            runner.save(checkpoint)
+            runner.test(num_episodes=environment.num_envs)
+            assert_equal(before, environment.checkpoint_state_dict())
+            print("ISAAC FIXED EVALUATION PASSED", flush=True)
+            if render:
+                from PIL import Image, ImageSequence
+                import numpy as np
+
+                videos_before = set(output.rglob("*.gif"))
+                runner.play(num_steps=5, formats="gif", num_plays=1, mode="configured")
+                assert_equal(before, environment.checkpoint_state_dict())
+                videos = set(output.rglob("*.gif")) - videos_before
+                assert len(videos) == 1
+                with Image.open(videos.pop()) as video:
+                    assert any(np.asarray(frame.convert("RGB")).std() > 1 for frame in ImageSequence.Iterator(video))
+                print("ISAAC RGB PLAYBACK PASSED", flush=True)
+            environment.set_training_mode(True)
+            environment.load_checkpoint_state_dict(before)
+            torch.save([reset_record(environment) for _ in range(5)], output / "future.pt")
+        else:
+            before = deepcopy(environment.checkpoint_state_dict())
+            records = torch.load(output / "future.pt", weights_only=False)
+            for expected in records:
+                record = reset_record(environment)
+                assert_equal(record, expected)
+            print("ISAAC CROSS-PROCESS RESET RECORDS MATCH", flush=True)
+            environment.load_checkpoint_state_dict(before)
+            parameters = [p.detach().clone() for p in runner.algorithm.policy.parameters()]
+            runner.train()
+            assert any(not torch.equal(p, before) for p, before in zip(runner.algorithm.policy.parameters(), parameters))
+            print("ISAAC RESUMED PPO UPDATES PASSED", flush=True)
+        assert checker.updates == 2
+        return {"updates": checker.updates, "render": render and phase == "source"}
+    except Exception:
+        print_exc()
+        raise
+    finally:
+        runner.close()
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("phase", choices=["physics", "flat", "source", "resume"])
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--num-envs", type=int, default=4)
+    parser.add_argument("--render", action="store_true")
+    args = parser.parse_args()
+    if args.num_envs < 2:
+        parser.error("--num-envs must be at least 2")
+    output = args.output.resolve()
+    output.mkdir(parents=True, exist_ok=True)
+    torch.manual_seed(0)
+    torch.set_num_threads(4)
+    context = RuntimeContext(torch.device("cuda:0"), torch.float32, 4, 0, False, ROOT, output)
+    component = build_component(output, args.num_envs, args.phase == "flat")
+    if args.phase in ("source", "resume"):
+        result = verify_training(output, context, component, args.phase, args.render)
+    else:
+        environment = VectorEnv(context)
+        try:
+            environment.config_update(component, num_envs=args.num_envs, max_episode_steps=32)
+            result = verify_physics(environment, args.phase == "flat")
+            print("ISAAC PHYSICS CHECKS PASSED", result, flush=True)
+        except Exception:
+            print_exc()
+            raise
+        finally:
+            environment.close()
+    result["closed"] = True
+    (output / f"{args.phase}.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
+    print(f"ISAAC TERRAIN {args.phase.upper()} PASSED", result, flush=True)
+
+
+if __name__ == "__main__":
+    main()

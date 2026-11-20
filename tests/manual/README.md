@@ -221,4 +221,19 @@ python tests/manual/verify_terrain_curriculum.py --friction --output-dir temp/fr
 
 pytest 使用受控滑块测量滑动速度和接触系数，覆盖三种接触优先级关系，并验证倍率缩放、重复 reset 和局部更新隔离。测试还覆盖接触覆盖配置校验，以及独立摩擦和摩擦与地形组合的失败回滚。短训脚本覆盖摩擦独立采样和摩擦、地形、命令联合课程，检查摩擦系数的精确恢复、评估冻结和单环境播放。可加 `--render` 验收 OpenGL 回放帧。配置说明见 [7.8.2 Friction](../../docs/7_locomotion_zh.md#782-friction)。
 
+## Isaac Sim 几何地形
+
+在 `quadruped_isaacsim` 环境中从项目根目录运行。各命令独立启动和关闭 Kit。训练和恢复使用同一个输出目录。
+
+Windows 下如果 Kit 与 Conda 的 OpenMP 运行库冲突并报告 `OMP: Error #15`，在当前 PowerShell 会话中设置 `$env:MKL_THREADING_LAYER = 'SEQUENTIAL'`，让 NumPy 的 MKL 使用串行线程层。
+
+```powershell
+python -u tests/manual/verify_isaac_terrain.py physics --num-envs 16 --output temp/isaac_terrain_physics
+python -u tests/manual/verify_isaac_terrain.py flat --num-envs 16 --output temp/isaac_terrain_flat
+python -u tests/manual/verify_isaac_terrain.py source --render --output temp/isaac_terrain_training
+python -u tests/manual/verify_isaac_terrain.py resume --output temp/isaac_terrain_training
+```
+
+物理验收用 PhysX 射线对照共享地图内部、接缝和外围平地高度，检查机器人在相邻地块上的接触、局部 reset 隔离、网格复用和基础吞吐。训练验收对照联合课程检查点、待处理请求、五次 reset 的分配和出生位置，并检查固定评估与 RGB 播放。每次运行还需查看 `$LASTEXITCODE`，确认 Kit 进程正常退出。
+
 图形驱动可用时，给短训命令添加 `--render` 可保存播放帧。

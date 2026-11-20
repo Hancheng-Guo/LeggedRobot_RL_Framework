@@ -857,9 +857,9 @@ class OnPolicyRunner(BaseRunner):
             video_dir = Path(self.context.save_dir) / "videos"
             output_paths = frame_saver(
                 frames=frames,
-                commands=commands,
-                measured=measured,
-                tracking_specs=tracking_specs,
+                commands=commands if tracking_specs else None,
+                measured=measured if tracking_specs else None,
+                tracking_specs=tracking_specs or None,
                 directory=video_dir,
                 fps=self.environment.render_fps,
                 file_name=self._next_playback_file_name(video_dir),

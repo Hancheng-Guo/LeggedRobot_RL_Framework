@@ -7,6 +7,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
+from .terrain import TerrainGeometry
+
+
+# Variants per category and difficulty, tiles per variant along (x, y),
+# and the width of the flat border on each side of the map in metres.
+DEFAULT_TERRAIN_LAYOUT: tuple[int, tuple[int, int], float] = (2, (3, 1), 6.)
+#                                                             ↑   ↑↑↑↑   ↑
+#                           variants per category and difficulty  ||||   |
+#                                        tiles per variant along (x, y)  |
+#                width of the flat border on each side of the map in metres
+
 
 @dataclass(frozen=True)
 class IsaacSimResetState:
@@ -37,12 +48,9 @@ class IsaacSimBackend(Protocol):
     render_mode: str | None
 
     def activate_playback(self, render_mode: str) -> None: ...
-
     def terminate_playback(self) -> None: ...
-
     @property
     def playback_env_index(self) -> int: ...
-
     def configure(
         self,
         *,
@@ -65,17 +73,11 @@ class IsaacSimBackend(Protocol):
         joint_stiffness: float | Mapping[str, float] | None,
         joint_damping: float | Mapping[str, float] | None,
         reset_state: IsaacSimResetState,
+        terrain_geometry: TerrainGeometry | None = None,
+        terrain_layout: tuple[int, tuple[int, int], float] = DEFAULT_TERRAIN_LAYOUT,
     ) -> None: ...
-
     def reset(self, env_ids: torch.Tensor | None = None) -> None: ...
-
     def step(self, action: torch.Tensor, frame_skip: int) -> None: ...
-
-    def get_state(
-        self,
-        env_ids: torch.Tensor | None = None,
-    ) -> Mapping[str, torch.Tensor]: ...
-
+    def get_state(self, env_ids: torch.Tensor | None = None) -> Mapping[str, torch.Tensor]: ...
     def render(self) -> np.ndarray | None: ...
-
     def close(self) -> None: ...

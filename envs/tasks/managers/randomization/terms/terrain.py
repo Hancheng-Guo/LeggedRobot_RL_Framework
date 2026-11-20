@@ -22,7 +22,9 @@ from .terrain_category import (
 from .terrain_difficulty import (
     TerrainDifficultyConfig, TerrainDifficultyTerm, difficulty_value
 )
-from envs.simulators.terrain import TerrainBackend, TerrainGeometry, TerrainPatch
+from envs.simulators.terrain import (
+    StaticTerrainBackend, TerrainBackend, TerrainGeometry, TerrainPatch, TerrainRegionKey,
+)
 from envs.tasks.managers.curriculum import (
     CurriculumTermProvider, CurriculumSpaceConfig, CurriculumSpaceConfigs,
 )
@@ -267,6 +269,25 @@ def generate_terrain_patch(
         geometry=TerrainPatch(x, y, tuple(rows)),
         spawn_size=config.spawn_size,
     )
+
+
+@dataclass(frozen=True)
+class _TerrainCatalog:
+    config: TerrainConfig
+
+    @property
+    def conditions(self) -> tuple[tuple[str, float], ...]:
+        return tuple(
+            (category, difficulty)
+            for category in self.config.category.values
+            for difficulty in self.config.difficulty.values
+        )
+
+    def patch(self, runtime_seed: int, key: TerrainRegionKey) -> TerrainPatch:
+        category, difficulty, variant = key
+        return generate_terrain_patch(
+            self.config, runtime_seed, variant, category, difficulty,
+        ).geometry
 
 
 class TerrainAssignments:
@@ -565,6 +586,8 @@ class TerrainRandomizationTerm(BaseRandomizationTerm):
 
         self.geometry = self.geometry_from_config(self.config)
         self.simulator: TerrainBackend
+        self._static_backend: StaticTerrainBackend | None = None
+        self._terrain_layout: tuple[int, tuple[int, int], float] | None = None
         self._patches: list[TerrainAssignment | None] = (
             [None] * num_envs if self.assignments is not None else []
         )
@@ -611,6 +634,7 @@ class TerrainRandomizationTerm(BaseRandomizationTerm):
                 math.ceil(config.patch_size[0] / config.resolution) + 1
             ),
             height_bound,
+            catalog=_TerrainCatalog(config),
         )
 
 
@@ -730,6 +754,7 @@ class TerrainRandomizationTerm(BaseRandomizationTerm):
             "seed": self.config.effective_seed(self.context.seed),
             "allocations": None if self.assignments is None else self.assignments.state_dict(),
             "initialized": [patch is not None for patch in self._patches],
+            **({"terrain_layout": self._terrain_layout} if self._terrain_layout is not None else {}),
         }
 
 
@@ -746,12 +771,13 @@ class TerrainRandomizationTerm(BaseRandomizationTerm):
             state.get("version") != 4
             or state.get("num_envs") != self.num_envs
             or state.get("seed") != self.config.effective_seed(self.context.seed)
+            or state.get("terrain_layout") != self._terrain_layout
             or not isinstance(state.get("config"), Mapping)
             or TerrainConfig.from_mapping(state.get("config")) != self.config
         ):
             raise ValueError(
                 "Incompatible terrain checkpoint configuration, "
-                "seed, version or environment count."
+                "layout, seed, version or environment count."
             )
 
         spawn_generations = state.get("spawn_generations")
@@ -834,7 +860,7 @@ class TerrainRandomizationTerm(BaseRandomizationTerm):
         if self.assignments is not None:
             self.assignments.load_state_dict(state["allocations"])
             self._patches = [
-                self.assignments._patch(i)
+                self._patch_for(self.assignments, i)
                 if initialized else None
                 for i, initialized in enumerate(state["initialized"])
             ]
@@ -868,8 +894,37 @@ class TerrainRandomizationTerm(BaseRandomizationTerm):
             self._spawn_lift = max(0., measured.origin[2] + .002
                                    - measured.root_position[2] - measured.collision_lower[2])
         self.simulator = simulator
-        # A newly configured backend needs the current geometry installed once.
+        self._static_backend = (
+            backend if self.geometry is not None and isinstance(backend, StaticTerrainBackend) else None
+        )
+        self._terrain_layout = (
+            self._static_backend.get_terrain_layout() if self._static_backend is not None else None
+        )
+        # A newly configured backend needs the current assignment installed once.
         self._unapplied_envs = set(range(self.num_envs))
+
+
+    def _patch_for(
+        self,
+        assignments: TerrainAssignments,
+        env_id: int,
+    ) -> TerrainAssignment:
+
+        if self._static_backend is None or self._terrain_layout is None:
+            return assignments._patch(env_id)
+        num_variants = self._terrain_layout[0]
+        generation = max(0, assignments.generations[env_id] - 1)
+        variant = (assignments.allocation_ids[env_id] + generation) % num_variants
+        category = assignments.categories[env_id]
+        difficulty = assignments.difficulties[env_id]
+        return TerrainAssignment(
+            patch_id=variant,
+            seed=terrain_patch_seed(assignments.seed, variant),
+            terrain_type=category,
+            difficulty=difficulty,
+            geometry=self._static_backend.get_terrain_patch((category, difficulty, variant)),
+            spawn_size=self.config.spawn_size,
+        )
 
 
     def _selected_ids(
@@ -934,7 +989,7 @@ class TerrainRandomizationTerm(BaseRandomizationTerm):
         candidate._reset(changed_env_ids_list, selected_difficulties, selected_categories)
         changed = set(changed_env_ids_list)
         patches = tuple(
-            candidate._patch(env_id)
+            self._patch_for(candidate, env_id)
             if env_id in changed else cast(TerrainAssignment, self._patches[env_id])
             for env_id in env_ids_list
         )
@@ -953,15 +1008,22 @@ class TerrainRandomizationTerm(BaseRandomizationTerm):
         )
 
         try:
-            updates = [(env_id, patch.geometry) for env_id, patch in zip(env_ids_list, patches)
+            updates = [(env_id, patch) for env_id, patch in zip(env_ids_list, patches)
                        if env_id in changed or env_id in self._unapplied_envs]
             if updates and self.geometry is not None:
-                self.simulator.apply_terrain(
-                    torch.tensor(
-                        [env_id for env_id, _ in updates], dtype=torch.long, device=env_ids_tensor.device
-                    ),
-                    [geometry for _, geometry in updates],
+                selected = torch.tensor(
+                    [env_id for env_id, _ in updates], dtype=torch.long, device=env_ids_tensor.device,
                 )
+                if self._static_backend is None:
+                    self.simulator.apply_terrain(selected, [patch.geometry for _, patch in updates])
+                else:
+                    self._static_backend.select_terrain(
+                        selected,
+                        [
+                            (patch.terrain_type, patch.difficulty, patch.patch_id)
+                            for _, patch in updates
+                        ]
+                    )
         except Exception as error:
             try:
                 self.abort_simulator_reset(env_ids)
@@ -1062,16 +1124,29 @@ class TerrainRandomizationTerm(BaseRandomizationTerm):
             self._spawn_generations if self._pending is None
             else self._pending.spawn_generations
         )
-        seeds = [
-            p.seed if generations[env_id] == 0
-            else terrain_patch_seed(p.seed, generations[env_id])
-            for env_id, p in zip(env_ids_tensor.tolist(), patches)
-        ]
+        seeds = []
+        for env_id, patch in zip(env_ids_tensor.tolist(), patches, strict=True):
+            seed = patch.seed
+            if self._static_backend is not None:
+                assert self.assignments is not None
+                seed = terrain_patch_seed(seed, self.assignments.allocation_ids[env_id])
+            generation = generations[env_id]
+            seeds.append(seed if generation == 0 else terrain_patch_seed(seed, generation))
         positions = torch.tensor([
-            [measured.origin[0] + xmin + (xmax - xmin) * _uniform(seed, "spawn:x"),
-             measured.origin[1] + ymin + (ymax - ymin) * _uniform(seed, "spawn:y"),
+            [xmin + (xmax - xmin) * _uniform(seed, "spawn:x"),
+             ymin + (ymax - ymin) * _uniform(seed, "spawn:y"),
              measured.root_position[2] + self._spawn_lift - measured.origin[2]]
             for seed in seeds
         ], dtype=torch.float64, device=self.simulator.context.device)
-        positions[:, 2] += self.simulator.get_ground_heights(positions[:, None, :2], env_ids_tensor)[:, 0]
+        bounds = self.simulator.get_ground_bounds(env_ids_tensor)
+        if bounds is None:
+            raise RuntimeError(
+                "Terrain spawn requires ground bounds for the selected environments."
+            )
+        lower, upper = bounds
+        positions[:, :2] += (lower + upper) / 2
+        height = self.simulator.get_ground_heights(
+            positions[:, None, :2], env_ids_tensor
+        )
+        positions[:, 2] += height[:, 0]
         return positions

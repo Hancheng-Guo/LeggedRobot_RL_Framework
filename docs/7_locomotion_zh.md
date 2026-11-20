@@ -323,11 +323,13 @@ Stage 可将 `revision_metric` 指向实例的 `statistics_revision`，避免重
 
 ## 7.8 Randomization Manager
 
-`RandomizationManager` 通过注册表构建和调度随机化 term。MuJoCo 支持 `terrain` 和 `friction`，可单独启用或组合。配置属于 **task YAML**，省略 `randomization_manager_config` 或设为 `{}` 时沿用模型的地面和接触参数。
+`RandomizationManager` 通过注册表构建和调度随机化 term。MuJoCo 和 Isaac Sim 支持 `terrain`。MuJoCo 还支持独立或组合使用 `friction`。配置属于 **task YAML**，省略 `randomization_manager_config` 或设为 `{}` 时沿用模型的地面和接触参数。
 
 ### 7.8.1 Terrain
 
-**配置与支持范围**
+MuJoCo 和 Isaac Sim 共用 task YAML 的地形配置。下面的示例让每个环境按权重选择地形类别，并独立均匀抽取难度。只配置 `plane` 时，使用仿真场景原有的平地。
+
+#### 快速配置
 
 ```yaml
 randomization_manager_config:
@@ -350,32 +352,30 @@ randomization_manager_config:
       seed: 0
 ```
 
-MuJoCo 支持三种地形（`plane`、`slope` 和 `rough`），Isaac Sim 当前只支持平地，非平地配置会明确报错。可配对使用 [ANYmal C 地形任务](../configs/tasks/locomotion_anymal_c_phase.yaml) 与 [MuJoCo 仿真配置](../configs/simulators/mujoco_anymal_c_rgb_array.yaml)；仿真器 YAML 只保存模型和物理参数。
+- **`plane`**：平坦地面。和其他类别混用时，以零高度地块参与采样。
+- **`slope`**：坡地，并在中央留出平坦出生区，区外沿 X、Y 两轴的正负方向同时抬升或降低，外缘回到零高度。实际采样系数在 `[-max_slope × difficulty, +max_slope × difficulty)` 内均匀抽取。`max_slope` 控制采样系数上限，双轴叠加后的实际坡度另由网格决定。
+- **`rough`**：粗糙地面，在出生区及其相邻一圈网格之外，使各顶点高度在 `[-max_height × difficulty, +max_height × difficulty)` 内独立均匀采样。外缘回到零高度，与周围地面衔接。
 
-`category` 和 `difficulty` 是 terrain 内部的两个采样子 term，均采用 `type + params`。`category.params.values` 按地形名保存候选及参数，仅 `Weighted` 允许填写 `weight`，默认为 1，决定类别采样概率；`Fixed` 和 `Curriculum` 均拒绝显式权重。`difficulty.params.values` 保存 `[0, 1]` 内不重复的难度候选，与地形类别不按位置对应。省略 category 时使用固定 plane；省略 difficulty 时使用固定难度 `1.0`。尺寸、分辨率、出生区、种子及重采样开关属于 terrain。
-
-**`plane`**：平坦地面，高度相对原地面为零。category 仅含 plane 时沿用原有无限平面；与其他类型混合配置时，使用同尺寸的有限高度场，所有顶点高度为零。
-
-**`slope`**：中央出生区保持平坦，区外沿 ±x、±y 四个方向同号起伏：正 `slope` 均抬升，负值均降低，接近外边界时回到零高度，与外围平地衔接。系数均匀采样于 `[-max_slope × difficulty, +max_slope × difficulty)`；`max_slope` 限制采样系数，不限制双轴合成后的实际坡度。
-
-**`rough`**：各网格顶点在 `[-max_height × difficulty, +max_height × difficulty)` 内独立均匀采样，形成随机起伏；中央出生区及其一圈网格保持平坦，最外圈顶点高度为零。网格间由三角形连接，`resolution` 控制最大网格间距；该类型不受 `max_slope` 约束。
-
-选中的实际难度数值缩放 slope 的采样系数和 rough 的高度幅度；默认难度 `1.0` 使用配置的完整幅度，plane 始终为零高度。
-
-MuJoCo 非平地要求 `floor_geom_names` 指定一个未旋转、启用碰撞且属于 world body 的 plane，原位替换为高度场并保留地面配置。`spawn_size` 是中央平坦区的全尺寸，须容纳 reset 姿态下机器人的完整碰撞投影；ANYmal C 示例使用 `[1.5, 1.2]`。不支持额外 plane、倾斜地面或不适配的出生区。
-
-**采样策略**
-
-两个轴支持的策略如下，候选放在各自的 `params.values` 中：
-
-| 策略 | category | difficulty |
+| `terrain` 下的参数 | 含义 | 默认值 |
 |---|---|---|
-| `Fixed` | `params.values` 必须且只能包含一个类别，直接选择它；拒绝 `weight` | `params.values` 必须且只能包含一个难度值 |
-| `Weighted` | 每次训练 reset 按类别权重抽样 | 不支持 |
-| `Uniform` | 不支持 | 每次训练 reset 均匀抽取难度候选 |
-| `Curriculum` | 将类别候选编号作为离散课程轴，拒绝 `weight` | 将难度候选编号作为离散课程轴 |
+| `patch_size` | 单块地形沿 X、Y 的全尺寸，单位为米 | `[4.0, 4.0]` |
+| `resolution` | 最大网格间距，单位为米 | `0.1` |
+| `spawn_size` | 中央平坦出生区的全尺寸，须容纳 reset 姿态下机器人的完整碰撞投影 | `[0.5, 0.5]` |
+| `spawn_margin` | 校验出生区尺寸时，每侧预留的最小边距，单位为米 | `0.5` |
+| `seed` | 地形种子，可为非负整数。留空时使用运行种子 | `null` |
 
-课程轴必须填写 `params.curriculum: 实例名`。引用同一实例时联合规划，引用不同实例时分别学习；只有配置为 Curriculum 的轴贡献课程维度。课程处理离散编号，子 term 将编号映射回类别或难度；用户配置的难度值不是索引。独立采样不消费训练随机流。ANYmal 示例将两个轴与命令共同接入 locomotion：
+#### 类别、难度与课程
+
+`category` 和 `difficulty` 是两个独立采样轴，各用自己的 `type` 和 `params.values`。类别候选以地形名为键。难度候选是 `[0, 1]` 内互不重复的实际数值，抽到的值会缩放当前地形的起伏。省略类别时使用固定平地，省略难度时使用固定值 `1.0`。
+
+| `type` | `category` | `difficulty` |
+|---|---|---|
+| `Fixed` | 只填一个类别 | 只填一个难度 |
+| `Weighted` | 按类别的 `weight` 抽样，权重默认是 `1` | — |
+| `Uniform` | — | 均匀抽取一个难度候选 |
+| `Curriculum` | 把类别作为离散课程轴 | 把难度作为离散课程轴 |
+
+类别的 `weight` 仅用于 `Weighted`。`Curriculum` 轴在 `params.curriculum` 填课程实例名。命令、类别和难度引用同一实例时联合采样，引用不同实例时各自采样。可以只让其中一个地形轴加入课程。下面两段写在 `terrain` 下，会把类别和难度都接到 `locomotion`。
 
 ```yaml
 category:
@@ -391,25 +391,51 @@ difficulty:
   params:
     curriculum: locomotion
     values: [0.25, 0.6, 1.0]
-resample_patch: false
-resample_spawn: false
 ```
 
-仅让难度参与课程时，将 category 的 type 改为 `Weighted` 或其他非 `Curriculum` type 并移除其 `params` 中的 `curriculum` ；仅让类别参与时，可省略 difficulty，或将其配置为其他非 `Curriculum` type 。固定 `seed` 可复现场景；`seed: null` 跟随运行种子。旧的 `types`、`difficulty_levels` 和 `sampling` 配置不再接受。
+完整联合课程配置见 [ANYmal C 地形任务](../configs/tasks/locomotion_anymal_c_phase.yaml)。
 
-类别和难度未变时复用当前 patch；设置 terrain 下的 `resample_patch: true` 才在每次训练 reset 主动更换同条件下的网格。出生位置默认由 patch 种子确定；`resample_spawn: true` 可独立重新抽取安全出生位置。两项默认均为 false。同条件换网格和换出生位置也可分别请求 `request_reallocation(env_ids)`、`request_spawn(env_ids)`；难度轴未使用课程时可通过 `set_difficulty(env_ids_tensor, difficulties)` 请求候选中的实际难度数值，难度轴使用课程时由课程决定。
+#### 后端、地块切换与越界
 
-**检查点、评估与播放**
+| | MuJoCo | Isaac Sim |
+|---|---|---|
+| **仿真器 YAML** | `floor_geom_names` 指向一个未旋转、启用碰撞的 world-body 平面。启用几何地形时，场景只能有这一个平面 | 启用几何地形时将 `floor_prim_paths` 留空 |
+| **地面布局** | 每个环境独立分配一个高度场，四周各延伸 `1000` 米平地 | 启动时把预建地块拼成一张共享静态网格，机器人之间保持碰撞隔离 |
+| **换地方式** | 更新所选环境的高度场 | 把所选机器人 reset 到预建区域的出生位置 |
+| **越出出生地块** | 进入该环境自己的外围平地 | 可以走到相邻地块，回合成绩仍计入出生时分配的课程条件 |
 
-续训时保持地形配置、候选顺序、种子和环境数与快照一致。恢复后的首次 reset 会重建同一块地形和出生位置，后续训练 reset 再按配置采样。评估和播放固定当前地形、出生位置及对应课程 cell，课程统计保持冻结。
+Isaac 的 `terrain_atlas` 写在 **simulator YAML** 中。以下是默认布局。`variants` 是每个类别和难度组合的预建版本数，`region_tiles` 表示每个版本沿 X、Y 方向重复铺几块，`border_width` 是整图每侧外围平地的宽度（米）。例如单块地形为 `4 × 4` 米时，默认每个变体占 `12 × 4` 米。增大区域或提高网格密度都会增加三角形数，整图上限为 200 万个三角形。
 
-**地面信号与使用边界**
+```yaml
+terrain_atlas:
+  variants: 2
+  region_tiles: [3, 1]
+  border_width: 6.0
+```
 
-simulator 在 `get_state()` 中批量查询机身及足端地面高度，并将 `base_ground_height`、`foot_ground_heights`、`ground_valid` 和 `terrain_in_bounds` 作为可选物理字段一并构造到 `SimulatorState`，供 task、观测、奖励和终止读取；高度条目默认 `height_reference: ground`，可显式设为 `world`；`base_position`、机身平面相对的步态信号和世界速度项保留原含义。普通平地不执行这项查询。
+越界终止项均按**机身和所有足端**判断，按需写在 `termination_manager_config.terms` 下。
 
-MuJoCo 几何地形外围每侧延伸 1000 米平地，高度为原地面世界 z，不覆盖内部负高度地形。高度查询按机身/足端各点分别选择高度场或外围平地，跨界后观测、奖励与接触信号仍正常计算。
+| 终止项 | 触发条件 |
+|---|---|
+| `terrain_bounds: {}` | 机身或任一足端离开出生地块 |
+| `terrain_map_bounds: {}` | 机身或任一足端离开整张地面覆盖范围，包括外围平地 |
 
-`ground_valid` 表示机身及全部足端的地面高度是否有效，`terrain_in_bounds` 表示它们是否全部处于随机区域内，两者均为 `[env]`。`termination_manager_config.terms.terrain_bounds: {}` 可选择越出随机区域即终止；当前地形示例未启用该项，可在外围继续运动；按需添加该项后，越出随机区域会终止。查询超出外围覆盖的位置返回 NaN，状态采集将该环境标记为 `ground_valid=False` 并屏蔽无定义高度信号。
+希望机器人能跨块行走，并且只在离开整个地面时 reset，可以只启用 `terrain_map_bounds`。普通平地不会触发这两个地形终止项。
+
+#### 重采样、恢复与回放
+
+- **`resample_patch`** 默认为 `false`，类别和难度未变时复用地块。设为 `true` 后，每次训练 reset 时，MuJoCo 会生成同条件下的新高度网格并写入现有高度场，Isaac 会切换到同条件下的下一个预建变体。
+- **`resample_spawn`** 默认为 `false`，出生位置由当前地块的种子确定。设为 `true` 可以在保留同一地块时重新抽取安全出生位置。
+- **续训**需要相同的地形配置、候选顺序、种子和环境数。Isaac 还需要相同的 `terrain_atlas`。恢复后的首次 reset 复现快照中的分配和出生位置，后续训练 reset 再继续采样。
+- **评估与回放**复用当前地块、出生位置和已有课程 cell，并冻结课程统计。
+
+#### 地面状态
+
+`get_state()` 提供 `base_ground_height` 和 `foot_ground_heights`。带 `height_reference` 参数的高度条目可用 `ground`（默认）或 `world`，分别表示离地高度和世界 Z 值。`base_position` 仍表示世界位置。
+
+`terrain_in_bounds` 表示机身及足端是否都在出生地块内，`ground_valid` 表示它们下方是否都有可查询的地面。在两个后端中，机器人走上外围平地后可以同时出现 `terrain_in_bounds=False` 和 `ground_valid=True`。几何地面覆盖范围之外的高度查询返回 NaN，`SimulatorState` 会将对应高度信号清零。Isaac 刚 reset 时接触力为零，完成下一次物理步后再读取新接触力。
+
+复跑入口见 [MuJoCo 仿真配置](../configs/simulators/mujoco_anymal_c_rgb_array.yaml) 和 [Isaac Sim 几何地形验收](../tests/manual/README.md#isaac-sim-几何地形)。
 
 ### 7.8.2 Friction
 

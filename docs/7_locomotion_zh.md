@@ -323,7 +323,7 @@ Stage 可将 `revision_metric` 指向实例的 `statistics_revision`，避免重
 
 ## 7.8 Randomization Manager
 
-`RandomizationManager` 通过注册表构建和调度随机化 term，目前支持 `terrain`。配置属于 **task YAML**；省略 `randomization_manager_config` 或显式写 `{}` 表示关闭随机化，使用 simulator 原有地面。
+`RandomizationManager` 通过注册表构建和调度随机化 term。MuJoCo 支持 `terrain` 和 `friction`，可单独启用或组合。配置属于 **task YAML**，省略 `randomization_manager_config` 或设为 `{}` 时沿用模型的地面和接触参数。
 
 ### 7.8.1 Terrain
 
@@ -410,3 +410,31 @@ simulator 在 `get_state()` 中批量查询机身及足端地面高度，并将 
 MuJoCo 几何地形外围每侧延伸 1000 米平地，高度为原地面世界 z，不覆盖内部负高度地形。高度查询按机身/足端各点分别选择高度场或外围平地，跨界后观测、奖励与接触信号仍正常计算。
 
 `ground_valid` 表示机身及全部足端的地面高度是否有效，`terrain_in_bounds` 表示它们是否全部处于随机区域内，两者均为 `[env]`。`termination_manager_config.terms.terrain_bounds: {}` 可选择越出随机区域即终止；当前地形示例未启用该项，可在外围继续运动；按需添加该项后，越出随机区域会终止。查询超出外围覆盖的位置返回 NaN，状态采集将该环境标记为 `ground_valid=False` 并屏蔽无定义高度信号。
+
+### 7.8.2 Friction
+
+MuJoCo 的 `friction` term 为每个环境采样一个倍率。该环境中地面与足端几何体的滑动摩擦系数分别按「模型初始系数 × 采样倍率」计算，地面包含启用高度场时的外围平地。
+
+```yaml
+randomization_manager_config:
+  terms:
+    friction:
+      type: Uniform
+      params:
+        factors: [0.5, 1.0, 1.5]
+      seed: 17
+```
+
+| `type` | 采样规则 |
+|---|---|
+| `Fixed` | `params.factors` 包含一个倍率 |
+| `Uniform` | 在候选中等概率选择 |
+| `Curriculum` | 通过 `params.curriculum` 引用课程实例，候选作为离散轴 `friction` |
+
+倍率必须为有限、非负、互不重复的数值。`1.0` 对应模型初始值。`0.0` 将目标几何体的滑动摩擦设为零，MuJoCo 生成接触时仍会将滑动摩擦限制在 `1e-5` 或以上。
+
+省略 `seed` 时使用运行种子。地形、摩擦和命令引用同一实例时联合采样。评估、回放和续训首次 reset 复用已保存的倍率。每次计算都以模型初始值为基准。reset 失败时，所选环境恢复到 reset 前的几何体摩擦系数、物理状态和采样进度。
+
+MuJoCo 按接触优先级选用一侧的系数，优先级相同时取两侧较大值。两侧共用一个倍率，因此地面或足端占优时，足地接触滑动摩擦都会随倍率变化。全局接触覆盖和涉及目标几何体的显式接触对都会覆盖几何体摩擦，启用该 term 时会报错。当前该 term 支持 MuJoCo。
+
+可复跑验证见[手动诊断与验收](../tests/manual/README.md#摩擦倍率随机化)。

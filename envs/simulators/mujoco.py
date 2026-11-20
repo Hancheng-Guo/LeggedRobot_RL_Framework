@@ -8,6 +8,7 @@ if os.name == "nt":
 import mujoco
 import torch
 import numpy as np
+from math import isfinite
 from collections.abc import Sequence
 from mujoco import viewer
 from dataclasses import dataclass, fields
@@ -35,6 +36,15 @@ class _MujocoResetSnapshot:
     datas: tuple[Any, ...]
     hfields: tuple[np.ndarray, ...]
     grids: tuple[np.ndarray, ...]
+
+
+@dataclass
+class _MujocoFrictionSnapshot:
+    env_ids: tuple[int, ...]
+    geom_ids: tuple[int, ...]
+    models: tuple[Any, ...]
+    coefficients: tuple[np.ndarray, ...]
+    datas: tuple[Any, ...]
 
 
 @dataclass
@@ -200,6 +210,8 @@ class MujocoSimulator(BaseSimulator):
                 self.num_envs,
             )
             self.models = self._terrain.build_models(self.model_path, self.floor_geom_names)
+        self._friction_geom_ids: tuple[int, ...] = ()
+        self._baseline_sliding_friction: tuple[np.ndarray, ...] = ()
         for model in self.models:
             model.opt.timestep = self.sim_dt
 
@@ -458,6 +470,100 @@ class MujocoSimulator(BaseSimulator):
         if self.viewer is not None and env_id == self.playback_env_index:
             return self.viewer.lock()
         return nullcontext()
+
+
+    def prepare_friction(self) -> None:
+        if self._baseline_sliding_friction:
+            return
+        floor_geom_ids = self.model_context.floor_geom_ids.tolist()
+        foot_geom_ids = self.model_context.foot_geom_ids.tolist()
+        if not floor_geom_ids or not foot_geom_ids:
+            raise ValueError(
+                "Friction randomization requires floor and foot geoms."
+            )
+
+        geom_ids = tuple(sorted(set(floor_geom_ids) | set(foot_geom_ids)))
+        model = self.models[self.playback_env_index]
+        if model.opt.enableflags & mujoco.mjtEnableBit.mjENBL_OVERRIDE:  # pyright: ignore[reportAttributeAccessIssue]
+            raise ValueError(
+                "MuJoCo contact override replaces geom friction."
+            )
+        if (
+            np.isin(model.pair_geom1, geom_ids).any()
+            or np.isin(model.pair_geom2, geom_ids).any()
+        ):
+            raise ValueError(
+                "MuJoCo explicit contact pairs involving floor "
+                "or foot geoms override geom friction."
+            )
+        self._friction_geom_ids = geom_ids
+        self._baseline_sliding_friction = tuple(
+            model.geom_friction[geom_ids, 0] for model in self.models
+        )
+
+
+    def capture_friction(
+        self,
+        env_ids: Sequence[int],
+    ) -> object:
+
+        geom_ids = self._friction_geom_ids
+        models = tuple(self.models[env_id] for env_id in env_ids)
+        return _MujocoFrictionSnapshot(
+            env_ids=tuple(env_ids),
+            geom_ids=geom_ids,
+            models=models,
+            coefficients=tuple(
+                model.geom_friction[geom_ids, 0]
+                for model in models
+            ),
+            datas=tuple(copy(self.datas[env_id]) for env_id in env_ids),
+        )
+
+
+    def apply_friction(
+        self,
+        env_ids: Sequence[int],
+        factors: Sequence[float],
+    ) -> None:
+
+        if (
+            len(env_ids) != len(factors)
+            or any(not isfinite(factor) or factor < 0 for factor in factors)
+        ):
+            raise ValueError("Invalid sliding friction factors.")
+        with np.errstate(over="ignore"):
+            coefficients = [
+                self._baseline_sliding_friction[env_id] * factor
+                for env_id, factor in zip(env_ids, factors)
+            ]
+        if any(not np.isfinite(values).all() for values in coefficients):
+            raise ValueError("Scaled sliding friction coefficients must be finite.")
+        for env_id, values in zip(env_ids, coefficients):
+            with self._viewer_lock(env_id):
+                self.models[env_id].geom_friction[self._friction_geom_ids, 0] = values
+
+
+    def restore_friction(
+        self,
+        snapshot: object,
+    ) -> None:
+
+        if not isinstance(snapshot, _MujocoFrictionSnapshot):
+            raise TypeError("Invalid MuJoCo friction snapshot.")
+        if any(
+            self.models[i] is not model
+            for i, model in zip(snapshot.env_ids, snapshot.models)
+        ):
+            raise ValueError(
+                "Friction snapshot belongs to a different model configuration."
+            )
+        for env_id, model, coefficients, data in zip(
+            snapshot.env_ids, snapshot.models, snapshot.coefficients, snapshot.datas
+        ):
+            with self._viewer_lock(env_id):
+                model.geom_friction[snapshot.geom_ids, 0] = coefficients
+                mujoco.mj_copyData(self.datas[env_id], model, data)  # pyright: ignore[reportAttributeAccessIssue]
 
 
     def reset(

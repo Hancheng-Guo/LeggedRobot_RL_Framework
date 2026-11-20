@@ -1,6 +1,7 @@
 from .base import BaseRandomizationTerm
 from .registry import RANDOMIZATION_CLASS_MAP, get_randomization_class, register_randomization
 from .terrain import TerrainRandomizationTerm
+from .friction import FrictionRandomizationTerm
 
 __all__ = (
     "BaseRandomizationTerm",
@@ -10,4 +11,6 @@ __all__ = (
     "register_randomization",
 
     "TerrainRandomizationTerm",
+
+    "FrictionRandomizationTerm",
 )

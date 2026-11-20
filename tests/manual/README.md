@@ -209,3 +209,16 @@ python tests/manual/train_isaac_without_camera.py --disable-viewport-updates *> 
 ```
 
 两份日志都应出现 `CAMERA-FREE TRAINING PASSED`。比较 `TRAINING TIMINGS` 中 `IsaacSimRuntime.step`、`IsaacSimRuntime.get_state`、`VectorEnv.step`、`PPO.update` 的 `calls` 和 `mean`，以及整体训练耗时。尽量在相同设备负载下交替运行两组至少两轮；每次运行在独立进程中完成，以免 Isaac 状态相互影响。这个开关只作用于手动脚本，不修改正式运行时配置。
+
+## 摩擦倍率随机化
+
+在 MuJoCo 环境中从项目根目录运行以下验收命令。
+
+```powershell
+python -m pytest tests/test_mujoco_friction.py -q
+python tests/manual/verify_terrain_curriculum.py --friction --output-dir temp/friction_acceptance
+```
+
+pytest 使用受控滑块测量滑动速度和接触系数，覆盖三种接触优先级关系，并验证倍率缩放、重复 reset 和局部更新隔离。测试还覆盖接触覆盖配置校验，以及独立摩擦和摩擦与地形组合的失败回滚。短训脚本覆盖摩擦独立采样和摩擦、地形、命令联合课程，检查摩擦系数的精确恢复、评估冻结和单环境播放。可加 `--render` 验收 OpenGL 回放帧。配置说明见 [7.8.2 Friction](../../docs/7_locomotion_zh.md#782-friction)。
+
+图形驱动可用时，给短训命令添加 `--render` 可保存播放帧。

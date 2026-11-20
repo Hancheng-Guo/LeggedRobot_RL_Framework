@@ -30,5 +30,6 @@
   - [7.7 Curriculum Manager](7_locomotion_zh.md#77-curriculum-manager)
   - [7.8 Randomization Manager](7_locomotion_zh.md#78-randomization-manager)
     - [7.8.1 Terrain](7_locomotion_zh.md#781-terrain)
+    - [7.8.2 Friction](7_locomotion_zh.md#782-friction)
 - [8. 扩展注册表](8_extensions_zh.md)
 - [手动诊断与验收](../tests/manual/README.md)

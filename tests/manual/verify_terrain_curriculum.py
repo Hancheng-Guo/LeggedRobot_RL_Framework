@@ -35,7 +35,7 @@ def assert_equal(first, second):
         assert first == second
 
 
-def component_for(output, mode):
+def component_for(output, mode, friction=False):
     component = build_component(output)
     config = load_yaml(component.task.config)
     terrain = config['randomization_manager_config']['terms']['terrain']
@@ -80,6 +80,14 @@ def component_for(output, mode):
             terrain['difficulty']['params']['curriculum'] = 'levels'
         for course in config['curriculum_manager_config']['terms'].values():
             course['params']['min_samples_per_cell'] = 1
+    if friction:
+        strategy = 'Uniform' if mode == 'uniform' else 'Curriculum'
+        params = {'factors': [.2, .8, 1.1]}
+        if strategy == 'Curriculum':
+            params['curriculum'] = 'locomotion'
+        config['randomization_manager_config']['terms']['friction'] = {
+            'type': strategy, 'seed': 17, 'params': params,
+        }
     path = output / 'task.yaml'
     path.write_text(yaml.safe_dump(config, sort_keys=False), encoding='utf-8')
     return replace(component, task=ComponentInfo('locomotion', path))
@@ -89,8 +97,8 @@ def get_terrain(environment):
     return environment.task.randomization_manager.terms['terrain']
 
 
-def verify_mode(output, mode, render):
-    component = component_for(output, mode)
+def verify_mode(output, mode, render, friction=False):
+    component = component_for(output, mode, friction)
     context = RuntimeContext(torch.device('cpu'), torch.float32, 4, 0, True, ROOT, output)
     torch.manual_seed(0)
     source = configure(context, component, 2)
@@ -122,6 +130,9 @@ def verify_mode(output, mode, render):
         assert get_terrain(physical).patches == patches
         for model, saved in zip(physical.simulator.models, heights):
             np.testing.assert_array_equal(model.hfield_data, saved)
+        if friction:
+            for model, original in zip(physical.simulator.models, env.simulator.models):
+                np.testing.assert_array_equal(model.geom_friction, original.geom_friction)
 
         # The actual temporary single-environment construction path, without a viewer.
         playback = physical._create_playback_environment()
@@ -131,6 +142,11 @@ def verify_mode(output, mode, render):
         for _ in range(3):
             playback.reset()
             assert_equal(fixed, playback.checkpoint_state_dict())
+        if friction:
+            np.testing.assert_array_equal(
+                playback.simulator.models[0].geom_friction,
+                physical.simulator.models[physical.playback_env_index].geom_friction,
+            )
         assert_equal(before, physical.checkpoint_state_dict())
 
         # Restoration reset above must not advance either independent or joint conditions.
@@ -142,6 +158,9 @@ def verify_mode(output, mode, render):
             physical.reset()
             assert_equal(env.checkpoint_state_dict(), physical.checkpoint_state_dict())
             assert get_terrain(env).patches == get_terrain(physical).patches
+            if friction:
+                for model, original in zip(physical.simulator.models, env.simulator.models):
+                    np.testing.assert_array_equal(model.geom_friction, original.geom_friction)
 
         if render:
             from PIL import Image
@@ -166,6 +185,8 @@ def verify_mode(output, mode, render):
                       render_verified=render,
                       checkpoint_sha256=hashlib.sha256(checkpoint.read_bytes()).hexdigest(),
                       sampled_types=sorted({p.terrain_type for p in patches}))
+        if friction:
+            result['friction_buffers_verified'] = True
     except Exception as error:
         result.update(error_type=type(error).__name__, error=str(error))
         raise
@@ -182,10 +203,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output-dir', type=Path, default=ROOT / 'temp/stage4_mujoco')
     parser.add_argument('--render', action='store_true')
+    parser.add_argument('--friction', action='store_true',
+                        help='Verify both independent and joint friction sampling with terrain.')
     args = parser.parse_args()
     torch.set_num_threads(4)
-    report = {mode: verify_mode(args.output_dir.resolve() / mode, mode, args.render)
-              for mode in ('uniform', 'terrain_only', 'joint', 'separate', 'difficulty_only', 'type_only', 'axis_separate')}
+    modes = (('uniform', 'joint') if args.friction else
+             ('uniform', 'terrain_only', 'joint', 'separate', 'difficulty_only', 'type_only', 'axis_separate'))
+    report = {mode: verify_mode(args.output_dir.resolve() / mode, mode, args.render, args.friction)
+              for mode in modes}
     (args.output_dir / 'verification.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
     print('TERRAIN CURRICULUM VERIFICATION PASSED', flush=True)
 

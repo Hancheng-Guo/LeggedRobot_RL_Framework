@@ -1,4 +1,4 @@
-"""Physical interface for task-owned sliding friction randomization."""
+"""Physical interface for task-owned contact friction randomization."""
 from collections.abc import Sequence
 from typing import Protocol, runtime_checkable
 

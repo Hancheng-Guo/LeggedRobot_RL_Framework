@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from .isaac_sim_backend import DEFAULT_TERRAIN_LAYOUT, IsaacSimModelMetadata, IsaacSimResetState
+from .isaac_sim_friction import IsaacSimFriction
 from .isaac_sim_model import IsaacSimModelConverter
 from .isaac_sim_terrain import IsaacSimTerrain, measure_spawn_geometry
 from .terrain import TerrainGeometry, TerrainPatch, TerrainRegionKey, TerrainSpawnGeometry
@@ -69,9 +70,10 @@ def _keep_windows_kit_libraries_loaded() -> None:
 
 @dataclass
 class _IsaacResetSnapshot:
-    terrain: IsaacSimTerrain
+
+    terrain: IsaacSimTerrain | None
     indices: torch.Tensor
-    regions: torch.Tensor
+    regions: torch.Tensor | None
     positions: torch.Tensor
     orientations: torch.Tensor
     linear_velocities: torch.Tensor
@@ -81,6 +83,12 @@ class _IsaacResetSnapshot:
     targets: torch.Tensor
     previous_qvel: torch.Tensor | None
     contact_stale: torch.Tensor
+
+
+@dataclass
+class _IsaacFrictionResetSnapshot:
+    materials: object
+    articulation: _IsaacResetSnapshot
 
 
 class IsaacSimRuntime:
@@ -114,6 +122,8 @@ class IsaacSimRuntime:
         self._kit_log_levels: dict[int, int] = {}
         self._closed = False
         self._terrain: IsaacSimTerrain | None = None
+        self._friction: IsaacSimFriction | None = None
+        self._friction_requested = False
         self._windows_shutdown_workaround = False
 
 
@@ -141,6 +151,7 @@ class IsaacSimRuntime:
         reset_state: IsaacSimResetState,
         terrain_geometry: TerrainGeometry | None = None,
         terrain_layout: tuple[int, tuple[int, int], float] = DEFAULT_TERRAIN_LAYOUT,
+        friction_enabled: bool = False,
     ) -> None:
 
         self.num_envs = int(num_envs)
@@ -157,6 +168,7 @@ class IsaacSimRuntime:
         self.camera_resolution = tuple(camera_resolution)
         self.foot_contact_force_threshold = float(foot_contact_force_threshold)
         self.reset_state = reset_state
+        self._friction_requested = friction_enabled
         if terrain_geometry is not None and floor_prim_paths:
             raise ValueError("Isaac shared terrain requires empty floor_prim_paths.")
 
@@ -462,6 +474,9 @@ class IsaacSimRuntime:
             path.rsplit("/", 1)[-1]
             for path in body_relative_paths
         )
+        self._resolve_foot_body_prim_paths()
+        if self._friction_requested:
+            self._bind_friction()
         body_paths = [
             f"/World/envs/env_{env_id}{self._normalized_robot_prim_path()}{relative}"
             for env_id in range(self.num_envs)
@@ -677,6 +692,93 @@ class IsaacSimRuntime:
         return collision_paths[0]
 
 
+    def prepare_friction(self) -> None:
+        if self._friction is not None:
+            return
+        self._world.stop()
+        try:
+            self._bind_friction()
+        finally:
+            self._world.reset()
+
+
+    def disable_friction(self) -> None:
+        if self._friction is None:
+            return
+        self._world.stop()
+        try:
+            self._friction.unbind()
+            self._friction = None
+        finally:
+            self._world.reset()
+
+
+    def _bind_friction(self) -> None:
+
+        from pxr import Usd, UsdPhysics
+
+        stage = self._world.stage
+        floor_paths = [
+            self._find_floor_collision_prim_path(stage, path, Usd, UsdPhysics)
+            for path in self.floor_prim_paths
+        ]
+        robot_path = self._normalized_robot_prim_path()
+        foot_paths_by_env = [
+            [
+                f"/World/envs/env_{env_id}{robot_path}{path}"
+                for path in self.foot_body_prim_paths
+            ]
+            for env_id in range(self.num_envs)
+        ]
+        self._friction = IsaacSimFriction(stage, floor_paths, foot_paths_by_env)
+
+
+    def capture_friction(
+        self,
+        env_ids: Sequence[int],
+    ) -> object:
+        indices = torch.tensor(env_ids, dtype=torch.long, device=self.context.device)
+        return _IsaacFrictionResetSnapshot(
+            materials=self._require_friction().capture(env_ids),
+            articulation=self._capture_articulation_state(indices),
+        )
+
+
+    def apply_friction(
+        self,
+        env_ids: Sequence[int],
+        factors: Sequence[float],
+    ) -> None:
+        self._require_friction().apply(env_ids, factors)
+
+
+    def restore_friction(
+        self,
+        snapshot: object,
+    ) -> None:
+        if not isinstance(snapshot, _IsaacFrictionResetSnapshot):
+            raise TypeError("Invalid Isaac friction reset snapshot.")
+        self._require_friction().restore(snapshot.materials)
+        self._restore_articulation_state(snapshot.articulation)
+
+
+    def _require_friction(self) -> IsaacSimFriction:
+        if self._friction is None:
+            raise RuntimeError("Prepare Isaac friction before updating it.")
+        return self._friction
+
+
+    def _resolve_foot_body_prim_paths(self) -> None:
+        self.foot_body_prim_paths = self._requested_foot_body_prim_paths or tuple(
+            path for path in self._body_prim_paths
+            if path.rsplit("/", 1)[-1].lower().endswith("foot")
+        )
+        if not self.foot_body_prim_paths:
+            raise ValueError(
+                "No foot bodies were inferred; configure 'foot_body_prim_paths'."
+            )
+
+
     def _build_metadata(self) -> None:
 
         dof_names = tuple(self._articulation.dof_names)
@@ -692,16 +794,6 @@ class IsaacSimRuntime:
             self._requested_base_body_prim_path
             or self._body_prim_paths[0]
         )
-        self.foot_body_prim_paths = self._requested_foot_body_prim_paths or tuple(
-            path
-            for path in self._body_prim_paths
-            if path.rsplit("/", 1)[-1].lower().endswith("foot")
-        )
-        if not self.foot_body_prim_paths:
-            raise ValueError(
-                "No foot bodies were inferred; configure "
-                "'foot_body_prim_paths'."
-            )
         unknown_paths = {
             self.base_body_prim_path,
             *self.foot_body_prim_paths,
@@ -978,11 +1070,19 @@ class IsaacSimRuntime:
         env_ids_tensor: torch.Tensor,
     ) -> object:
         indices = self._terrain_indices(env_ids_tensor)
-        terrain = self._require_terrain()
+        return self._capture_articulation_state(indices, self._require_terrain())
+
+
+    def _capture_articulation_state(
+        self,
+        indices: torch.Tensor,
+        terrain: IsaacSimTerrain | None = None,
+    ) -> _IsaacResetSnapshot:
         positions, orientations = self._articulation.get_world_poses()
         linear, angular = self._articulation.get_velocities()
         return _IsaacResetSnapshot(
-            terrain=terrain, indices=indices.clone(), regions=terrain.region_ids[indices],
+            terrain=terrain, indices=indices.clone(),
+            regions=None if terrain is None else terrain.region_ids[indices],
             positions=self._tensor(positions)[indices],
             orientations=self._tensor(orientations)[indices],
             linear_velocities=self._tensor(linear)[indices],
@@ -1000,9 +1100,20 @@ class IsaacSimRuntime:
         state: object,
     ) -> None:
         terrain = self._require_terrain()
-        if not isinstance(state, _IsaacResetSnapshot) or state.terrain is not terrain:
+        if (
+            not isinstance(state, _IsaacResetSnapshot)
+            or state.terrain is not terrain
+            or state.regions is None
+        ):
             raise ValueError("Reset snapshot belongs to a different Isaac terrain scene.")
         terrain.region_ids[state.indices] = state.regions
+        self._restore_articulation_state(state)
+
+
+    def _restore_articulation_state(
+        self,
+        state: _IsaacResetSnapshot,
+    ) -> None:
         indices = self._warp(state.indices)
         self._articulation.set_world_poses(
             positions=self._warp(state.positions),
@@ -1371,6 +1482,7 @@ class IsaacSimRuntime:
             self._body_view = None
             self._articulation = None
             self._terrain = None
+            self._friction = None
             simulation_manager = getattr(self, "_simulation_manager", None)
             if simulation_manager is not None:
                 attempt(simulation_manager.invalidate_physics)

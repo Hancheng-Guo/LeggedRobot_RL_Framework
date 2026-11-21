@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import cast
 
 from .base import BaseSimulator
+from .friction import FrictionBackend
 from .terrain import (
     StaticTerrainBackend, TerrainBackend, TerrainGeometry,
     TerrainPatch, TerrainRegionKey, TerrainSpawnGeometry,
@@ -71,6 +72,7 @@ class IsaacSimSimulator(BaseSimulator):
         self.camera_resolution: tuple[int, int] = (640, 480)
         self.reset_state = IsaacSimResetState()
         self.terrain_geometry: TerrainGeometry | None = None
+        self._friction_enabled = False
         self._terrain_layout = DEFAULT_TERRAIN_LAYOUT
 
 
@@ -99,6 +101,7 @@ class IsaacSimSimulator(BaseSimulator):
         joint_damping: float | Mapping[str, float] | None = None,
         reset_state: Mapping[str, object] | None = None,
         terrain_geometry: TerrainGeometry | None = None,
+        friction_enabled: bool | None = None,
         terrain_atlas: Mapping[str, object] | None = None,
     ) -> None:
 
@@ -133,6 +136,18 @@ class IsaacSimSimulator(BaseSimulator):
             and not backend_configuration_changed
             and (num_envs is None or num_envs == self.num_envs)
         ):
+            backend = self._require_backend()
+            if bool(friction_enabled) != self._friction_enabled:
+                if friction_enabled:
+                    self._require_friction_backend().prepare_friction()
+                else:
+                    disable_friction = getattr(backend, "disable_friction", None)
+                    if disable_friction is None:
+                        raise NotImplementedError(
+                            "This Isaac runtime cannot release friction materials."
+                        )
+                    disable_friction()
+                self._friction_enabled = bool(friction_enabled)
             return
 
         if self._backend is not None:
@@ -250,6 +265,7 @@ class IsaacSimSimulator(BaseSimulator):
         self.render_mode = render_mode
         self.train_render_mode = train_render_mode
         self.terrain_geometry = terrain_geometry
+        self._friction_enabled = bool(friction_enabled)
         if terrain_atlas is not None:
             self._terrain_layout = self._parse_terrain_layout(terrain_atlas)
 
@@ -287,6 +303,7 @@ class IsaacSimSimulator(BaseSimulator):
             reset_state=self.reset_state,
             terrain_geometry=terrain_geometry,
             terrain_layout=self._terrain_layout,
+            **({"friction_enabled": True} if self._friction_enabled else {}),
         )
         self._build_model_context()
 
@@ -584,6 +601,41 @@ class IsaacSimSimulator(BaseSimulator):
         if self.terrain_geometry is None:
             raise ValueError("Isaac terrain collision geometry is not configured.")
         return cast(TerrainBackend, self._require_backend())
+
+
+    def prepare_friction(self) -> None:
+        self._require_friction_backend().prepare_friction()
+
+
+    def capture_friction(
+        self,
+        env_ids: Sequence[int],
+    ) -> object:
+        return self._require_friction_backend().capture_friction(env_ids)
+
+
+    def apply_friction(
+        self,
+        env_ids: Sequence[int],
+        factors: Sequence[float],
+    ) -> None:
+        self._require_friction_backend().apply_friction(env_ids, factors)
+
+
+    def restore_friction(
+        self,
+        snapshot: object,
+    ) -> None:
+        self._require_friction_backend().restore_friction(snapshot)
+
+
+    def _require_friction_backend(self) -> FrictionBackend:
+        backend = self._require_backend()
+        if not isinstance(backend, FrictionBackend):
+            raise NotImplementedError(
+                "This Isaac runtime does not support friction randomization."
+            )
+        return backend
 
 
     def step(

@@ -121,6 +121,7 @@ class MujocoSimulator(BaseSimulator):
         foot_contact_force_threshold: float | None = None,
         reset_keyframe: str | None = None,
         terrain_geometry: TerrainGeometry | None | object = _TERRAIN_UNCHANGED,
+        friction_enabled: bool | None = None,  # Unused by MuJoCo. Accepted for task compatibility.
     ) -> None:
 
         if terrain_geometry is not _TERRAIN_UNCHANGED:

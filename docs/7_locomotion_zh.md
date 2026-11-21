@@ -15,7 +15,7 @@ reward_manager_config: {terms: {}}
 termination_manager_config: {terms: {}}
 ```
 
-`curriculum_manager_config`、`event_manager_config` 和 `randomization_manager_config` 可省略或写 `null`，分别表示不启用课程、事件和随机化，也可显式写 `{}`。event manager 当前仍为预留项，不接受非空配置。未启用随机化时使用 simulator 原有地面。命令若引用了未配置的课程，仍会明确报错，不自动退回独立采样。
+`curriculum_manager_config`、`event_manager_config` 和 `randomization_manager_config` 可省略、写 `null` 或写 `{}`，表示停用相应功能。event manager 当前只接受空配置。课程采样条目必须引用一个已配置的课程实例。
 
 可用 YAML anchor 复用常量：
 
@@ -206,11 +206,14 @@ termination_manager_config:
 |---|---|
 | `body_contact` | 必填 `body_names`，任一指定 body 发生接触即终止 |
 | `base_height` | 必填 `min_height`；`height_reference=ground`（可选 `world`），低于阈值即终止 |
-| `terrain_bounds` | 无参数；机身或任意足端离开随机地形区域时终止；未配置有限地形时不会触发 |
+| `terrain_bounds` | 无参数。机身或任一足端离开出生地块时终止 |
+| `terrain_map_bounds` | 无参数。机身或任一足端离开整张地面覆盖范围时终止 |
 
-Episode 达到 `max_episode_steps` 属于 `truncated`，不是 termination term。
+普通平地不会触发这两个地形终止项。跨地块行走时可只启用 `terrain_map_bounds`。达到 `max_episode_steps` 的 episode 会标记为 `truncated`。地面覆盖范围见 [Terrain](#781-terrain)。
 
 ## 7.7 Curriculum Manager
+
+### 实例配置
 
 ```yaml
 curriculum_manager_config:
@@ -233,7 +236,11 @@ curriculum_manager_config:
 | `lpac_reward` | `temperature=0.01`（>0）、`exploration=0.1`（[0,1]）、`min_samples_per_cell=5`（正整数）、`normalize_by_episode_steps=false`（布尔值） |
 | `fast_lpac_reward` | 同上，并增加 `min_coverage=0.8`（(0,1]） |
 
-课程条目必须显式填写 `type`，算法参数放在 `params` 中（无参数时可省略）。一个实例对应一个联合采样空间，独立持有奖励统计与采样概率。同一种算法可以构建多个实例，例如分别学习平移与转向：
+课程条目必须显式填写 `type`，算法参数放在 `params` 中。每个实例有一个采样空间，并独立维护奖励统计和采样概率。
+
+### 独立采样与联合采样
+
+让平移和转向引用不同的实例，即可分别学习各自的采样概率。
 
 ```yaml
 curriculum_manager_config:
@@ -247,7 +254,7 @@ command_manager_config:
     ang_vel_z: {type: Curriculum, params: {curriculum: rotation, min_value: -1.0, max_value: 1.0, num_cell: 5}}
 ```
 
-若需要联合规划这两个命令维度，就让它们引用同一个实例，并为该实例配置共同的 `reward_sources` :
+联合规划平移和转向时，让两个命令引用同一实例，并为该实例配置共同的 `reward_sources`。
 
 ```yaml
 curriculum_manager_config:
@@ -267,9 +274,9 @@ command_manager_config:
 
 上例将两个命令维度划分为 `10 × 5 = 50` 个联合 cell，并用两项奖励共同评价每个速度组合，学习对应的采样概率。无需课程学习时，可省略 `curriculum_manager_config` 或配置为空，command 使用独立的 `Uniform` 采样。
 
-回合结束后，课程通过 `finalize_episodes()` 结算该回合的奖励，再通过 `resample()` 为新回合分配 cell，command 随后在对应区间内采样。评估与播放时冻结 cell 评价和采样概率，仍允许从冻结分布生成命令。
+联合空间过大时会报错。可减少各命令维度的格数，或将维度分到不同的课程实例。地形类别、地形难度和摩擦倍率也可加入联合空间，配置见 [Terrain](#781-terrain) 和 [Friction](#782-friction)。
 
-联合空间过大时会报错，应减少各维度的格数或拆分课程实例。terrain 的 `category`／`difficulty` 轴可通过 `type: Curriculum` 和 `params: {curriculum: locomotion}` 引用同一实例，将地形类型、难度与命令组成联合空间；引用另一实例则分别学习。地形采样方式见 [7.8.1 Terrain](#781-terrain)。
+### 奖励来源与回合计分
 
 `reward_sources` 为该课程实例的必填非空列表，元素为来源字符串或单项字典：
 
@@ -278,8 +285,6 @@ command_manager_config:
 - `reward`：使用逐环境的所有奖励按训练权重加权后的总和。整体奖励不支持覆盖系数，可写作 `reward_sources: [reward]`。
 
 以上来源均不做整体 `dt` 缩放；同一实例的来源直接求和，不自动归一化。仅接受完整名称，同一实例不能重复配置同一来源，不能全部为显式零系数。`reward` 可以和逐项来源混合，选中的逐项会再次计入，不做隐式去重。
-
-**Episode 累计奖励的统计口径与注意事项：**
 
 LPAC/FastLPAC 通过 `normalize_by_episode_steps` 决定 episode 结束时如何向 cell 计分：
 
@@ -293,7 +298,9 @@ LPAC/FastLPAC 通过 `normalize_by_episode_steps` 决定 episode 结束时如何
 - 累计分数的尺度会受到 episode 长度、最大步数和奖励权重影响；修改这些设置后，应重新检查采样 `temperature` 及使用相关分数的阈值，避免直接沿用每步均值口径下的数值。
 - curriculum 使用未乘 `control_dt` 的课程奖励，累计模式对其逐步求和，归一化模式再除以实际步数；训练传给 PPO 的总奖励仍由环境统一乘 `control_dt`，两条链路的缩放相互独立。切换来源、归一化模式或控制步长后，应重新检查 `temperature` 和相关阈值。
 
-**Cell 评价统计：**
+### Cell 评价与训练指标
+
+回合结束后，课程通过 `finalize_episodes()` 结算奖励，再通过 `resample()` 为新回合分配 cell。命令随后在分配的区间内采样。
 
 每个课程实例使用独立的 cell 评价缓冲，每个 cell 收集至少 `min_samples_per_cell` 个已结束 episode 后，保存这批 episode 分数的均值，再清空该批累计；下一批未完成时保留上次评价。episode 分数受 `reward_sources` 和 `normalize_by_episode_steps` 控制。FastLPAC 为未采样 cell 填充的 baseline 不计入真实评价，也不会提高覆盖率。
 
@@ -317,19 +324,23 @@ LPAC/FastLPAC 通过 `normalize_by_episode_steps` 决定 episode 结束时如何
 
 Stage 可将 `revision_metric` 指向实例的 `statistics_revision`，避免重复计入同一份结果，并将 `validity_metric` 指向 `all_cells_valid`，要求该实例的全体 cell 评价有效；配置方式见 [1.1 节](1_experiments_zh.md#11-stage-写法)。
 
+### 评估、回放与续训
+
+评估与回放时冻结 cell 评价和采样概率，命令仍可从冻结的分布生成。
+
 训练检查点会保存 curriculum 的采样状态、cell 统计，以及 Stage 条件窗口和已采样的统计版本，续训时会校验配置并恢复；配置 `revision_metric` 时，同一统计版本不会重复计入窗口。
 
 未结束 episode 的累计数据不会恢复。涉及 terrain 的课程会保存当前 cell 和独立采样随机状态，恢复后的首次 reset 保留该分配并重建地形，后续回合才重新采样；纯命令课程按恢复后的概率开始新 episode。检查点不保存完整模拟器动力学状态，因此不保证续训轨迹与连续训练逐步一致。不含环境状态的检查点不会恢复 curriculum 数据，配置 `revision_metric` 或 `validity_metric` 的条件窗口也会重新积累。
 
 ## 7.8 Randomization Manager
 
-`RandomizationManager` 通过注册表构建和调度随机化 term。MuJoCo 和 Isaac Sim 支持 `terrain`。MuJoCo 还支持独立或组合使用 `friction`。配置属于 **task YAML**，省略 `randomization_manager_config` 或设为 `{}` 时沿用模型的地面和接触参数。
+MuJoCo 和 Isaac Sim 都支持地形随机化（`terrain`）和摩擦倍率随机化（`friction`）。两项均配置在 task YAML 的 `randomization_manager_config.terms` 下，可以独立启用，也可以组合使用。省略整个配置或写 `{}` 时，使用仿真场景原有的地面和接触参数。
 
 ### 7.8.1 Terrain
 
-MuJoCo 和 Isaac Sim 共用 task YAML 的地形配置。下面的示例让每个环境按权重选择地形类别，并独立均匀抽取难度。只配置 `plane` 时，使用仿真场景原有的平地。
-
 #### 快速配置
+
+下面的示例让每个环境按权重选择类别，并独立均匀抽取难度。只配置 `plane` 时，使用仿真场景原有的平地。
 
 ```yaml
 randomization_manager_config:
@@ -351,6 +362,8 @@ randomization_manager_config:
       spawn_size: [1.5, 1.2]
       seed: 0
 ```
+
+#### 地形类别与公共参数
 
 - **`plane`**：平坦地面。和其他类别混用时，以零高度地块参与采样。
 - **`slope`**：坡地，并在中央留出平坦出生区，区外沿 X、Y 两轴的正负方向同时抬升或降低，外缘回到零高度。实际采样系数在 `[-max_slope × difficulty, +max_slope × difficulty)` 内均匀抽取。`max_slope` 控制采样系数上限，双轴叠加后的实际坡度另由网格决定。
@@ -395,7 +408,7 @@ difficulty:
 
 完整联合课程配置见 [ANYmal C 地形任务](../configs/tasks/locomotion_anymal_c_phase.yaml)。
 
-#### 后端、地块切换与越界
+#### 地面布局与越界
 
 | | MuJoCo | Isaac Sim |
 |---|---|---|
@@ -413,14 +426,7 @@ terrain_atlas:
   border_width: 6.0
 ```
 
-越界终止项均按**机身和所有足端**判断，按需写在 `termination_manager_config.terms` 下。
-
-| 终止项 | 触发条件 |
-|---|---|
-| `terrain_bounds: {}` | 机身或任一足端离开出生地块 |
-| `terrain_map_bounds: {}` | 机身或任一足端离开整张地面覆盖范围，包括外围平地 |
-
-希望机器人能跨块行走，并且只在离开整个地面时 reset，可以只启用 `terrain_map_bounds`。普通平地不会触发这两个地形终止项。
+可按出生地块或整张地面覆盖范围设置越界终止。整张地面覆盖范围包含外围平地。配置见 [Termination Manager](#76-termination-manager)。
 
 #### 重采样、恢复与回放
 
@@ -439,7 +445,9 @@ terrain_atlas:
 
 ### 7.8.2 Friction
 
-MuJoCo 的 `friction` term 为每个环境采样一个倍率。该环境中地面与足端几何体的滑动摩擦系数分别按「模型初始系数 × 采样倍率」计算，地面包含启用高度场时的外围平地。
+#### 配置与倍率
+
+`friction` 为每个环境采样一个倍率。**目标足地接触系数 = 初始足地接触系数 × 倍率**。倍率 `1.0` 对应初始接触系数，`0.0` 对应零摩擦目标。
 
 ```yaml
 randomization_manager_config:
@@ -451,16 +459,31 @@ randomization_manager_config:
       seed: 17
 ```
 
-| `type` | 采样规则 |
+| `type` | 配置与采样规则 |
 |---|---|
 | `Fixed` | `params.factors` 包含一个倍率 |
 | `Uniform` | 在候选中等概率选择 |
-| `Curriculum` | 通过 `params.curriculum` 引用课程实例，候选作为离散轴 `friction` |
+| `Curriculum` | 在 `params.curriculum` 填课程实例名，`params.factors` 作为离散轴 `friction` 的候选 |
 
-倍率必须为有限、非负、互不重复的数值。`1.0` 对应模型初始值。`0.0` 将目标几何体的滑动摩擦设为零，MuJoCo 生成接触时仍会将滑动摩擦限制在 `1e-5` 或以上。
+候选倍率须为有限、非负、互不重复的数值。省略 `seed` 时使用运行种子。若摩擦、地形和命令引用同一课程实例，课程会联合分配这些维度。
 
-省略 `seed` 时使用运行种子。地形、摩擦和命令引用同一实例时联合采样。评估、回放和续训首次 reset 复用已保存的倍率。每次计算都以模型初始值为基准。reset 失败时，所选环境恢复到 reset 前的几何体摩擦系数、物理状态和采样进度。
+#### 两个后端如何应用倍率
 
-MuJoCo 按接触优先级选用一侧的系数，优先级相同时取两侧较大值。两侧共用一个倍率，因此地面或足端占优时，足地接触滑动摩擦都会随倍率变化。全局接触覆盖和涉及目标几何体的显式接触对都会覆盖几何体摩擦，启用该 term 时会报错。当前该 term 支持 MuJoCo。
+| 后端 | 应用方式 | 影响范围 |
+|---|---|---|
+| MuJoCo | 将本环境的地面与足端滑动摩擦系数分别乘以倍率，沿用模型的接触优先级。同优先级时取两侧较大值 | 地面包含高度场和外围平地。足端与其他物体、机身与地面的接触也可能受材料变化影响 |
+| Isaac Sim | 分别计算原始足地静摩擦和动摩擦，各乘一次倍率，再反推本环境足端材质应写入的系数 | 共享地面保留原材质，倍率随机器人跨地块移动。足端碰到其他物体也会使用补偿后的材质 |
 
-可复跑验证见[手动诊断与验收](../tests/manual/README.md#摩擦倍率随机化)。
+Isaac 计算基线时沿用原接触的 `average`、`min`、`multiply` 或 `max` 规则。正摩擦地面通常通过 `multiply` 实现补偿，足端写入「目标接触系数 ÷ 地面系数」。所有地面的静、动摩擦均为零时，通过 `max` 合成，足端直接写入目标系数。
+
+#### 地面材质与模型限制
+
+- **MuJoCo** 的实际接触滑动摩擦下限为 `1e-5`。启用全局接触覆盖，或使用涉及地面、足端的显式接触对时，绑定会报错。
+- **Isaac 内置地形**的平地、坡地、粗糙地块和外围平地共用一份物理材质，静摩擦和动摩擦均为 `0.5`。
+- **Isaac 自定义地面**如果有多种物理材质，同一足端必须能用一组系数实现所有地面的目标。正摩擦地面的 `max` 合成优先于足端的 `multiply`，当前实现会在绑定时报错。需要对零摩擦通道产生正接触系数且无法使用 `max`，或各地面要求的补偿系数不同，也会报错。
+
+#### Reset、恢复与验收
+
+每次应用倍率都从初始值计算。局部 reset 只更新选中的环境。评估、回放和续训首次 reset 复用已保存的倍率。reset 失败时恢复所选环境的摩擦、物理状态和采样进度。
+
+可复跑验证见 [MuJoCo 摩擦验收](../tests/manual/README.md#摩擦倍率随机化) 和 [Isaac Sim 摩擦验收](../tests/manual/README.md#isaac-sim-摩擦倍率随机化)。

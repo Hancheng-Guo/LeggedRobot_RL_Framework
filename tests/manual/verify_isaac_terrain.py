@@ -22,7 +22,7 @@ from verify_command_curriculum import VerifyFinite, configure
 from verify_terrain_curriculum import assert_equal, get_terrain
 
 
-def build_component(output, num_envs, flat):
+def build_component(output, num_envs, flat, friction=False):
     environment = output / "environment.yaml"
     environment.write_text(yaml.safe_dump({"num_envs": num_envs, "max_episode_steps": 32}), encoding="utf-8")
     task = output / "task.yaml"
@@ -44,6 +44,11 @@ def build_component(output, num_envs, flat):
         for params in config["command_manager_config"]["terms"].values():
             if "num_cell" in params["params"]:
                 params["params"]["num_cell"] = 2
+    if friction:
+        config.setdefault("randomization_manager_config", {}).setdefault("terms", {})["friction"] = (
+            {"type": "Curriculum", "params": {"curriculum": "locomotion", "factors": [.4, 1.2]}}
+            if not flat else {"type": "Uniform", "params": {"factors": [.4, 1.2]}}
+        )
     task.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
     return Component(
         runner=None,
@@ -184,6 +189,72 @@ def verify_human_window(environment):
     return window, viewport
 
 
+def read_foot_friction(environment, env_ids=None):
+    runtime = environment.simulator._require_backend()
+    view = runtime._simulation_manager.get_physics_simulation_view()
+    robot_path = runtime._normalized_robot_prim_path()
+    return tuple(
+        torch.from_numpy(
+            view.create_rigid_body_view(
+                f"/World/envs/env_{env_id}{robot_path}{path}"
+            ).get_material_properties().numpy().copy()
+        )
+        for env_id in (range(environment.num_envs) if env_ids is None else env_ids)
+        for path in runtime.foot_body_prim_paths
+    )
+
+
+def verify_friction_rollback(environment):
+    observations = environment.reset()
+    environment.step(observations.new_ones((environment.num_envs, environment.action_dim)))
+    term = environment.task.randomization_manager.terms["friction"]
+    before = deepcopy(environment.checkpoint_state_dict())
+    checked = (0, environment.num_envs - 1)
+    material = read_foot_friction(environment, checked)
+    state = environment.simulator.get_state()
+    selected = torch.zeros(environment.num_envs, device=observations.device, dtype=torch.bool)
+    selected[0] = True
+
+    def fail_observation(*args, **kwargs):
+        raise RuntimeError("injected observation failure")
+
+    with (
+        patch.object(term, "_sample", return_value=[.1]),
+        patch.object(environment.task, "compute_observation", side_effect=fail_observation),
+    ):
+        try:
+            environment._reset_done_envs(observations, selected, torch.zeros_like(selected))
+        except RuntimeError as error:
+            assert str(error) == "injected observation failure"
+        else:
+            raise AssertionError("The injected reset failure was not propagated.")
+    assert_equal(before, environment.checkpoint_state_dict())
+    assert_equal(material, read_foot_friction(environment, checked))
+    restored = environment.simulator.get_state()
+    torch.testing.assert_close(state.qpos, restored.qpos)
+    torch.testing.assert_close(state.qvel, restored.qvel)
+    print("ISAAC FRICTION ROLLBACK PASSED", flush=True)
+
+
+def verify_friction_stage_change(environment, component, output):
+    config = load_yaml(component.task.config)
+    del config["randomization_manager_config"]["terms"]["friction"]
+    task_path = output / "task_without_friction.yaml"
+    task_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+    stage_component = replace(component, simulator=None)
+    environment.config_update(replace(
+        stage_component, task=replace(component.task, config=task_path),
+    ))
+    environment.reset()
+    for coefficients in read_foot_friction(environment, [0]):
+        torch.testing.assert_close(coefficients[..., :2], torch.full_like(coefficients[..., :2], .5))
+    environment.config_update(stage_component)
+    observations = environment.reset()
+    assert torch.isfinite(observations).all()
+    assert any((coefficients[..., :2] != .5).any() for coefficients in read_foot_friction(environment, [0]))
+    print("ISAAC FRICTION STAGE CHANGE PASSED", flush=True)
+
+
 def reset_record(environment):
     environment.reset()
     sim = environment.simulator
@@ -192,12 +263,15 @@ def reset_record(environment):
     centres = (low + high) / 2
     offsets = centres.new_tensor([[0., 0.], [1.25, .25], [-1.36, .47]])
     ground = sim.get_ground_heights(centres[:, None, :] + offsets)
-    return {
+    record = {
         "state": deepcopy(environment.checkpoint_state_dict()),
         "patches": get_terrain(environment).patches,
         "root": root.clone(),
         "ground": ground.clone(),
     }
+    if "friction" in environment.task.randomization_manager.terms:
+        record["friction"] = read_foot_friction(environment)
+    return record
 
 
 def verify_training(output, context, component, phase, render):
@@ -261,6 +335,7 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--num-envs", type=int, default=4)
     parser.add_argument("--render", action="store_true")
+    parser.add_argument("--friction", action="store_true")
     args = parser.parse_args()
     if args.num_envs < 2:
         parser.error("--num-envs must be at least 2")
@@ -269,7 +344,7 @@ def main():
     torch.manual_seed(0)
     torch.set_num_threads(4)
     context = RuntimeContext(torch.device("cuda:0"), torch.float32, 4, 0, False, ROOT, output)
-    component = build_component(output, args.num_envs, args.phase in ("flat", "human"))
+    component = build_component(output, args.num_envs, args.phase in ("flat", "human"), args.friction)
     if args.phase == "human":
         simulator = component.simulator
         config = load_yaml(simulator.config)
@@ -289,6 +364,10 @@ def main():
                 result = {"window": True, "viewport": True}
             else:
                 result = verify_physics(environment, args.phase == "flat")
+                if args.friction:
+                    verify_friction_rollback(environment)
+                    if args.phase == "flat":
+                        verify_friction_stage_change(environment, component, output)
                 print("ISAAC PHYSICS CHECKS PASSED", result, flush=True)
         except Exception:
             print_exc()

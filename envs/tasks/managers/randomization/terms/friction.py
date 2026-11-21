@@ -75,6 +75,15 @@ class FrictionRandomizationTerm(BaseRandomizationTerm):
     CHECKPOINT_STATE_FIELDS = ("factors", "sample_counts", "sampling_env_ids")
 
 
+    @classmethod
+    def get_simulator_requirements(
+        cls,
+        params: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        FrictionConfig.from_mapping(params)
+        return {"friction_enabled": True}
+
+
     def __init__(
         self,
         name: str,

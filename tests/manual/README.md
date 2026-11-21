@@ -252,3 +252,17 @@ foreach ($run in 1..2) {
 图形驱动可用时，给短训命令添加 `--render` 可保存播放帧。
 
 `human` 验收会打开交互窗口，检查视口和菜单扩展，并将 SDK 窗口和视口对象保留到 Kit 关闭返回后再释放。
+
+### Isaac Sim 摩擦倍率随机化
+
+滑块验收在同一碰撞平面上测量两个独立倍率、单环境更新和回滚后的动摩擦。项目验收覆盖平地局部 reset 失败回滚、阶段切换启用和停用摩擦，以及地形、摩擦和命令联合课程、固定评估、RGB 播放与跨进程恢复。各命令运行后检查 `$LASTEXITCODE`。
+
+```powershell
+python -u tests/manual/verify_isaac_friction.py
+python -u tests/manual/verify_isaac_friction.py --floor-combine multiply
+python -u tests/manual/verify_isaac_friction.py --floor-friction 0
+python -u tests/manual/verify_isaac_terrain.py flat --friction --output temp/isaac_friction_flat
+python -u tests/manual/verify_isaac_terrain.py physics --friction --num-envs 1024 --output temp/isaac_friction_scale
+python -u tests/manual/verify_isaac_terrain.py source --friction --render --output temp/isaac_friction_training
+python -u tests/manual/verify_isaac_terrain.py resume --friction --output temp/isaac_friction_training
+```

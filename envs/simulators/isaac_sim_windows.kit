@@ -1,0 +1,45 @@
+[package]
+title = "Legged Robot Framework Isaac Sim"
+
+[dependencies]
+"isaacsim.simulation_app" = {}
+"isaacsim.core.api" = {}
+"isaacsim.core.cloner" = {}
+"isaacsim.core.experimental.prims" = {}
+"isaacsim.sensors.camera" = {}
+"isaacsim.asset.importer.urdf" = {}
+"isaacsim.asset.importer.mjcf" = {}
+"omni.kit.loop-isaac" = {}
+"omni.kit.usd.layers" = {}
+"omni.kit.viewport.window" = {}
+"omni.hydra.engine.stats" = {}
+"omni.hydra.rtx" = {}
+"omni.hydra.usdrt_delegate" = {}
+"omni.rtx.settings.core" = {}
+"omni.rtx.spg" = {}
+"omni.syntheticdata" = {}
+
+[settings]
+foundation.verifyOsVersion.enabled = false
+app.settings.persistent = false
+app.vulkan = true
+app.extensions.registryEnabled = false
+app.asyncRendering = false
+app.asyncRenderingLowLatency = false
+app.events.qualifiedNames = true
+app.file.ignoreUnsavedStage = true
+app.gatherRenderResults = true
+app.player.useFixedTimeStepping = false
+app.runLoops.main.manualModeEnabled = true
+app.runLoops.main.rateLimitEnabled = false
+app.settings.fabricDefaultStageFrameHistoryCount = 3
+app.useFabricSceneDelegate = true
+omni.replicator.asyncRendering = false
+renderer.asyncInit = true
+rtx.hydra.supportMultiTickRate = true
+rtx.rendering.perSensorTickTlas = true
+rtx.spg.enabled = true
+
+[settings.persistent]
+omni.replicator.captureOnPlay = true
+omnihydra.parallelHydraSprimSync = true

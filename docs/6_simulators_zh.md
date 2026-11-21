@@ -61,9 +61,11 @@ reset_state:
 
 两种仿真器的 `leg_joint_names` 均可省略（默认为空）；启用 `leg_joint_position_diff_l2` 时，至少须配置一个模型中已受控的腿关节名称。构建 `ModelContext` 时会解析成 `leg_joint_qpos_ids`，名称不存在时会报错。`base_joint_position_diff_l2` 中的 `base` 指未列入名单的受控关节，在当前 Go1 配置中为四个髋关节，不是浮动基座的位置或姿态。
 
-### 6.2.1 Isaac Sim 退出异常与训练产物
+### 6.2.1 Isaac Sim 关闭与训练产物
 
-在 Windows、Isaac Sim 6.1.0.0 的当前测试环境中，`SimulationApp.close()` 返回后，Python 进程仍可能在原生插件的退出清理阶段以 `0xC0000005`（PowerShell 中通常显示为 `-1073741819`）结束。请同时记录进程退出码与下列训练产物。诊断过程见 [手动测试说明](../tests/manual/README.md#isaac-sim-关闭诊断)。
+Windows 上的 Isaac Sim 6.1 默认应用曾在关闭后访问已卸载的 DLL，PhysX 原生克隆也会在解释器退出时访问已失效的 Python 线程状态。使用 6.1 pip 包时，项目自动采用自己的 [Kit 配置](../envs/simulators/isaac_sim_windows.kit)，通过 USD 克隆和显式碰撞过滤隔离环境。Kit 仍逐个关闭扩展，相关 DLL 保持加载到进程完成退出。复验应同时核对训练产物和原始退出码，步骤见 [手动测试说明](../tests/manual/README.md#isaac-sim-关闭诊断)。
+
+共享地形会为重叠的机器人和批量 reset 预留 PhysX 碰撞对缓冲区。`human` 模式会加载 Stage、Property 和视口菜单，并在 Kit 停止前显式关闭窗口，以便调用方仍持有的窗口对象能安全释放。
 
 判断一次训练是否已经留下可用产物，应检查同一次运行的 `checkpoints/<app_name>_<time>/`：`logs/<file_name>` 中出现 `All training stages completed.`，对应 `checkpoints/stage_XXX/latest.pt` 中的阶段回调状态记录完成，且 `configs/` 有本次配置快照。阶段完成时项目会保存包含回调状态的检查点；目录中的 `stage_completed` 标记不参与恢复判断。若只是达到最大迭代数或被回调停止，不能把日志中已运行的迭代数当作阶段完成；若需要确认检查点可用于继续训练，应在受信任的本地产物上实际执行一次续训加载。播放结果另看 `videos/` 下生成的文件和播放脚本的完成标记。即使这些检查都通过，退出码异常仍须单独记录，自动化任务也应将该进程视为退出失败。
 

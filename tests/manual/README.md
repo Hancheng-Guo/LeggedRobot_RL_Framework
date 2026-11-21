@@ -34,6 +34,8 @@ python tests/manual/benchmark_mujoco_step_threads.py --num-envs 16,32,64 --worke
 
 ## Isaac Sim 关闭诊断
 
+Windows 上使用 Isaac Sim 6.1 pip 包时，项目入口会自动启用兼容的关闭路径。用 [Isaac Sim 几何地形](#isaac-sim-几何地形) 的命令复验平地、共享地形、RGB 回放、续训和交互窗口，每个命令应正常返回退出码 0。下方直接调用 SDK 的对照用于复现原生故障。
+
 先用下面的退出码矩阵确认这台设备的关闭行为。每个场景运行两次，脚本自动创建 `temp/isaac_shutdown_exit_时间戳/`，分别保存标准输出、错误输出和 `summary.json`。父脚本自身返回 0 仅表示矩阵执行完毕，**不能代表所有子进程都成功**；应查看汇总中的 `exit_code`、`timed_out` 和最后一条 `MARK`。单个子进程最长运行 360 秒，可用 `--timeout` 调整。
 
 ```powershell
@@ -229,11 +231,24 @@ Windows 下如果 Kit 与 Conda 的 OpenMP 运行库冲突并报告 `OMP: Error 
 
 ```powershell
 python -u tests/manual/verify_isaac_terrain.py physics --num-envs 16 --output temp/isaac_terrain_physics
+python -u tests/manual/verify_isaac_terrain.py physics --num-envs 1024 --output temp/isaac_terrain_physics_1024
 python -u tests/manual/verify_isaac_terrain.py flat --num-envs 16 --output temp/isaac_terrain_flat
 python -u tests/manual/verify_isaac_terrain.py source --render --output temp/isaac_terrain_training
 python -u tests/manual/verify_isaac_terrain.py resume --output temp/isaac_terrain_training
+python -u tests/manual/verify_isaac_terrain.py human --num-envs 2 --output temp/isaac_human_window
 ```
 
 物理验收用 PhysX 射线对照共享地图内部、接缝和外围平地高度，检查机器人在相邻地块上的接触、局部 reset 隔离、网格复用和基础吞吐。训练验收对照联合课程检查点、待处理请求、五次 reset 的分配和出生位置，并检查固定评估与 RGB 播放。每次运行还需查看 `$LASTEXITCODE`，确认 Kit 进程正常退出。
 
+复验 Windows 上的 1024 环境共享地形时，关闭其他 Isaac Sim 进程，按顺序运行两次，每次使用独立的输出目录。这个流程直接检查子进程退出码。
+
+```powershell
+foreach ($run in 1..2) {
+    python -u tests/manual/verify_isaac_terrain.py physics --num-envs 1024 --output "temp/isaac_terrain_physics_1024_$run"
+    if ($LASTEXITCODE -ne 0) { throw "Isaac physics run $run exited with code $LASTEXITCODE" }
+}
+```
+
 图形驱动可用时，给短训命令添加 `--render` 可保存播放帧。
+
+`human` 验收会打开交互窗口，检查视口和菜单扩展，并将 SDK 窗口和视口对象保留到 Kit 关闭返回后再释放。

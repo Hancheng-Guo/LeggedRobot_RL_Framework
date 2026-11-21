@@ -1,8 +1,9 @@
-"""Validate real PhysX terrain and PPO resume in separate Isaac processes."""
+"""Validate PhysX terrain, PPO resume and window shutdown in separate Isaac processes."""
 from __future__ import annotations
 
 import argparse
 from copy import deepcopy
+from dataclasses import replace
 import json
 from pathlib import Path
 import sys
@@ -153,6 +154,36 @@ def verify_physics(environment, flat):
     }
 
 
+def verify_human_window(environment):
+    from omni.appwindow import get_default_app_window
+    from omni.kit.app import get_app
+    from omni.kit.viewport.utility import get_active_viewport
+
+    observations = environment.reset()
+    actions = observations.new_zeros((environment.num_envs, environment.action_dim))
+    for _ in range(5):
+        observations, *_ = environment.step(actions)
+        environment.simulator.render()
+    assert torch.isfinite(observations).all()
+
+    window = get_default_app_window()
+    viewport = get_active_viewport()
+    assert window is not None and viewport is not None
+    manager = get_app().get_extension_manager()
+    if environment.simulator._require_backend()._windows_shutdown_workaround:
+        for extension in (
+            "omni.kit.window.stage",
+            "omni.kit.window.property",
+            "omni.kit.viewport.menubar.camera",
+            "omni.kit.viewport.menubar.display",
+            "omni.kit.viewport.menubar.lighting",
+            "omni.kit.viewport.menubar.render",
+            "omni.kit.viewport.menubar.settings",
+        ):
+            assert manager.is_extension_enabled(extension), extension
+    return window, viewport
+
+
 def reset_record(environment):
     environment.reset()
     sim = environment.simulator
@@ -226,7 +257,7 @@ def verify_training(output, context, component, phase, render):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("phase", choices=["physics", "flat", "source", "resume"])
+    parser.add_argument("phase", choices=["physics", "flat", "source", "resume", "human"])
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--num-envs", type=int, default=4)
     parser.add_argument("--render", action="store_true")
@@ -238,20 +269,34 @@ def main():
     torch.manual_seed(0)
     torch.set_num_threads(4)
     context = RuntimeContext(torch.device("cuda:0"), torch.float32, 4, 0, False, ROOT, output)
-    component = build_component(output, args.num_envs, args.phase == "flat")
+    component = build_component(output, args.num_envs, args.phase in ("flat", "human"))
+    if args.phase == "human":
+        simulator = component.simulator
+        config = load_yaml(simulator.config)
+        config.update(render_mode="human", train_render_mode="human")
+        simulator_path = output / "simulator.yaml"
+        simulator_path.write_text(yaml.safe_dump(config), encoding="utf-8")
+        component = replace(component, simulator=replace(simulator, config=simulator_path))
     if args.phase in ("source", "resume"):
         result = verify_training(output, context, component, args.phase, args.render)
     else:
         environment = VectorEnv(context)
         try:
             environment.config_update(component, num_envs=args.num_envs, max_episode_steps=32)
-            result = verify_physics(environment, args.phase == "flat")
-            print("ISAAC PHYSICS CHECKS PASSED", result, flush=True)
+            if args.phase == "human":
+                # Keep both native wrappers referenced until after Kit shutdown.
+                window_handles = verify_human_window(environment)
+                result = {"window": True, "viewport": True}
+            else:
+                result = verify_physics(environment, args.phase == "flat")
+                print("ISAAC PHYSICS CHECKS PASSED", result, flush=True)
         except Exception:
             print_exc()
             raise
         finally:
             environment.close()
+        if args.phase == "human":
+            del window_handles
     result["closed"] = True
     (output / f"{args.phase}.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
     print(f"ISAAC TERRAIN {args.phase.upper()} PASSED", result, flush=True)

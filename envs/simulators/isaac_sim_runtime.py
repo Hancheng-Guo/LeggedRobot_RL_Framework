@@ -4,6 +4,7 @@ import gc
 import logging
 import math
 import os
+import sys
 import threading
 
 import torch
@@ -11,6 +12,7 @@ import numpy as np
 from collections.abc import Mapping, Sequence
 from contextlib import redirect_stdout
 from dataclasses import dataclass
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +24,47 @@ from utils import RuntimeContext, get_logger
 
 
 LOGGER = get_logger("isaac_sim")
+
+
+def _requires_windows_shutdown_workaround() -> bool:
+
+    if sys.platform != "win32":
+        return False
+
+    try:
+        return version("isaacsim").startswith("6.1.")
+    except PackageNotFoundError:
+        return False
+
+
+def _keep_windows_kit_libraries_loaded() -> None:
+
+    if sys.platform != "win32":
+        return
+
+    import ctypes
+    from ctypes import wintypes
+
+    # Kit shuts down these plugins before some SDK Python bindings release
+    # their native references. Keep the DLLs mapped through Python teardown.
+    pin_module = ctypes.WinDLL("kernel32", use_last_error=True).GetModuleHandleExW
+    pin_module.argtypes = [
+        wintypes.DWORD, wintypes.LPCWSTR, ctypes.POINTER(wintypes.HMODULE)
+    ]
+    pin_module.restype = wintypes.BOOL
+    pin_until_process_exit = 0x1  # GET_MODULE_HANDLE_EX_FLAG_PIN
+    for name in (
+        "omni.appwindow.plugin.dll",
+        "omni.timeline.plugin.dll",
+        "carb.events.plugin.dll",
+        "carb.variant.plugin.dll",
+        "omni.stageupdate.plugin.dll",
+    ):
+        handle = wintypes.HMODULE()
+        if not pin_module(pin_until_process_exit, name, ctypes.byref(handle)):
+            error = ctypes.get_last_error()
+            if error != 126:  # ERROR_MOD_NOT_FOUND
+                raise ctypes.WinError(error)
 
 
 @dataclass
@@ -60,6 +103,7 @@ class IsaacSimRuntime:
         self._articulation: Any = None
         self._body_view: Any = None
         self._camera: Any = None
+        self.render_mode: str | None = None
         self._camera_env_index: int | None = None
         self._playback_restore: tuple[str | None, bool, bool, bool] | None = None
         self._simulation_manager: Any = None
@@ -70,6 +114,7 @@ class IsaacSimRuntime:
         self._kit_log_levels: dict[int, int] = {}
         self._closed = False
         self._terrain: IsaacSimTerrain | None = None
+        self._windows_shutdown_workaround = False
 
 
     def configure(
@@ -163,12 +208,34 @@ class IsaacSimRuntime:
 
         headless = self.render_mode != "human"
         LOGGER.info("Starting Isaac Sim runtime.")
-        self._start_log_bridge()
         extra_args = [
             "--/app/enableStdoutOutput=false",
             "--/app/python/logSysStdOutput=false",
             "--/log/enableStandardStreamOutput=false",
         ]
+        self._windows_shutdown_workaround = _requires_windows_shutdown_workaround()
+        launcher_kwargs = {}
+        if self._windows_shutdown_workaround:
+            # The default 6.1 experience loads extensions which retain PhysX
+            # Python callbacks beyond interpreter shutdown on Windows.
+            launcher_kwargs["experience"] = str(Path(__file__).with_name("isaac_sim_windows.kit"))
+            sdk_path = Path(os.environ["ISAAC_PATH"])
+            extra_args.extend([
+                "--/app/python/interceptSysStdOutput=false",
+                "--ext-folder", str(sdk_path / "extscache"),
+                "--ext-folder", str(sdk_path / "extsDeprecated"),
+            ])
+            if self.render_mode == "human":
+                for extension in (
+                    "omni.kit.window.stage",
+                    "omni.kit.window.property",
+                    "omni.kit.viewport.menubar.camera",
+                    "omni.kit.viewport.menubar.display",
+                    "omni.kit.viewport.menubar.lighting",
+                    "omni.kit.viewport.menubar.render",
+                    "omni.kit.viewport.menubar.settings",
+                ):
+                    extra_args.extend(("--enable", extension))
         if self.render_mode == "rgb_array":
             # A standalone camera does not benefit from deferred texture
             # residency, and the streaming client can stall Kit teardown after
@@ -177,6 +244,7 @@ class IsaacSimRuntime:
                 "--/rtx-transient/resourcemanager/"
                 "texturestreaming/enabled=false"
             )
+        self._start_log_bridge()
         try:
             with open(os.devnull, "w", encoding="utf-8") as output_sink:
                 with redirect_stdout(output_sink):
@@ -188,7 +256,8 @@ class IsaacSimRuntime:
                             # Use orderly extension teardown for this embedded app.
                             "fast_shutdown": False,
                             "extra_args": extra_args,
-                        }
+                        },
+                        **launcher_kwargs,
                     )
         except BaseException:
             self._stop_log_bridge()
@@ -280,14 +349,25 @@ class IsaacSimRuntime:
             physics_prim_path="/World/physicsScene",
         )
         physics_context = self._world.get_physics_context()
-        aggregate_pairs_capacity = max(1024, self.num_envs * 64)
+        found_lost_capacity = max(1024, self.num_envs * 64)
+        if self._windows_shutdown_workaround and self._terrain is not None:
+            # Shared terrain can bring robots together. PhysX discovers those
+            # overlaps before the USD collision groups reject cross-env pairs.
+            env_pairs = self.num_envs * (self.num_envs - 1) // 2
+            total_capacity = found_lost_capacity + env_pairs
+            if (
+                physics_context.get_gpu_total_aggregate_pairs_capacity()
+                < total_capacity
+            ):
+                physics_context.set_gpu_total_aggregate_pairs_capacity(total_capacity)
+            # Batched resets move overlapping articulations in one step. The
+            # GPU broadphase can report several found/lost records per env pair.
+            found_lost_capacity += 8 * env_pairs
         if (
             physics_context.get_gpu_found_lost_aggregate_pairs_capacity()
-            < aggregate_pairs_capacity
+            < found_lost_capacity
         ):
-            physics_context.set_gpu_found_lost_aggregate_pairs_capacity(
-                aggregate_pairs_capacity
-            )
+            physics_context.set_gpu_found_lost_aggregate_pairs_capacity(found_lost_capacity)
         stage = self._world.stage
         source_env_path = "/World/envs/env_0"
         source_robot_path = source_env_path + self._normalized_robot_prim_path()
@@ -335,13 +415,16 @@ class IsaacSimRuntime:
         cloner = GridCloner(spacing=self.env_spacing, stage=stage)
         cloner.define_base_env("/World/envs")
         env_paths = cloner.generate_paths("/World/envs/env", self.num_envs)
+        # On Windows 6.1 the native replicator retains Python callbacks until
+        # DLL detach. USD clones still use the collision groups below.
+        replicate_physics = not self._windows_shutdown_workaround
         cloner.clone(
             source_prim_path=source_env_path,
             prim_paths=env_paths,
-            replicate_physics=True,
+            replicate_physics=replicate_physics,
             base_env_path="/World/envs",
             root_path="/World/envs/env_",
-            enable_env_ids=True,
+            enable_env_ids=replicate_physics,
             # The legacy Articulation/RigidPrim views discover their default
             # states from USD. Fabric-only clones leave those defaults at one
             # row while the PhysX view contains every environment.
@@ -1299,6 +1382,10 @@ class IsaacSimRuntime:
             gc.collect()
         if self._app is not None:
             attempt(self._stop_log_bridge)
+            if self._windows_shutdown_workaround:
+                if self.render_mode == "human":
+                    attempt(self._shutdown_app_window)
+                attempt(_keep_windows_kit_libraries_loaded)
             # Camera render products have already been released, so there is no
             # Replicator work to drain. Avoid its update loop while retaining the
             # orderly Kit teardown selected by fast_shutdown=False.
@@ -1312,6 +1399,18 @@ class IsaacSimRuntime:
                 "Multiple errors occurred while closing Isaac Sim.",
                 failures,
             )
+
+
+    @staticmethod
+    def _shutdown_app_window() -> None:
+
+        from omni.appwindow import get_default_app_window  # pyright: ignore[reportMissingImports]
+
+        window = get_default_app_window()
+        if window is not None:
+            # Release input and windowing resources while their interfaces are
+            # alive, even if external Python code still holds the window.
+            window.shutdown()
 
 
     def _indices(

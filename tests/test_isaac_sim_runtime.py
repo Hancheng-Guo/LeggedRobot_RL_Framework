@@ -4,6 +4,7 @@ import logging
 import math
 import sys
 import threading
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any, cast
 
@@ -184,24 +185,49 @@ def test_kit_log_bridge_forwards_selected_levels_without_recursion(
     ]
 
 
+@pytest.mark.parametrize(
+    ("platform", "sdk_version", "expected"),
+    [("win32", "6.1.0.0", True), ("win32", "6.2.0.0", False), ("linux", "6.1.0.0", False)],
+)
+def test_windows_shutdown_workaround_applies_only_to_isaac_61(
+    monkeypatch,
+    platform: str,
+    sdk_version: str,
+    expected: bool,
+) -> None:
+    monkeypatch.setattr(isaac_sim_runtime, "sys", SimpleNamespace(platform=platform))
+    monkeypatch.setattr(isaac_sim_runtime, "version", lambda name: sdk_version)
+
+    assert isaac_sim_runtime._requires_windows_shutdown_workaround() is expected
+
+
+@pytest.mark.parametrize("windows_workaround", [False, True])
 def test_start_application_disables_native_kit_console(
     monkeypatch,
     capsys,
     fake_carb_settings,
+    tmp_path,
+    windows_workaround: bool,
 ) -> None:
     launch_configs: list[dict[str, Any]] = []
+    launch_options: list[dict[str, Any]] = []
     lifecycle: list[str] = []
 
     class FakeSimulationApp:
-        def __init__(self, config: dict[str, Any]) -> None:
+        def __init__(self, config: dict[str, Any], **options: Any) -> None:
             lifecycle.append("application")
             print("native startup info")
             launch_configs.append(config)
+            launch_options.append(options)
 
     simulation_app = ModuleType("isaacsim.simulation_app")
     simulation_app.SimulationApp = FakeSimulationApp  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "isaacsim.simulation_app", simulation_app)
     monkeypatch.setattr(isaac_sim_runtime.LOGGER, "info", lambda *args: None)
+    monkeypatch.setattr(
+        isaac_sim_runtime, "_requires_windows_shutdown_workaround", lambda: windows_workaround
+    )
+    monkeypatch.setenv("ISAAC_PATH", str(tmp_path))
 
     runtime = IsaacSimRuntime.__new__(IsaacSimRuntime)
     runtime.render_mode = None
@@ -209,17 +235,29 @@ def test_start_application_disables_native_kit_console(
 
     runtime._start_application()
 
+    expected_extra_args = [
+        "--/app/enableStdoutOutput=false",
+        "--/app/python/logSysStdOutput=false",
+        "--/log/enableStandardStreamOutput=false",
+    ]
+    expected_options = {}
+    if windows_workaround:
+        expected_extra_args.extend([
+            "--/app/python/interceptSysStdOutput=false",
+            "--ext-folder", str(tmp_path / "extscache"),
+            "--ext-folder", str(tmp_path / "extsDeprecated"),
+        ])
+        experience = Path(isaac_sim_runtime.__file__).with_name("isaac_sim_windows.kit")
+        assert experience.is_file()
+        expected_options["experience"] = str(experience)
     assert launch_configs == [
         {
             "headless": True,
             "fast_shutdown": False,
-            "extra_args": [
-                "--/app/enableStdoutOutput=false",
-                "--/app/python/logSysStdOutput=false",
-                "--/log/enableStandardStreamOutput=false",
-            ],
+            "extra_args": expected_extra_args,
         }
     ]
+    assert launch_options == [expected_options]
     assert lifecycle == ["bridge", "application"]
     assert "native startup info" not in capsys.readouterr().out
     assert fake_carb_settings == {
@@ -242,6 +280,7 @@ def test_rgb_application_disables_texture_streaming(
     simulation_app.SimulationApp = FakeSimulationApp  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "isaacsim.simulation_app", simulation_app)
     monkeypatch.setattr(isaac_sim_runtime.LOGGER, "info", lambda *args: None)
+    monkeypatch.setattr(isaac_sim_runtime, "_requires_windows_shutdown_workaround", lambda: False)
 
     runtime = IsaacSimRuntime.__new__(IsaacSimRuntime)
     runtime.render_mode = "rgb_array"
@@ -272,6 +311,7 @@ def test_start_application_stops_log_bridge_after_startup_failure(
     simulation_app = ModuleType("isaacsim.simulation_app")
     simulation_app.SimulationApp = FailingSimulationApp  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "isaacsim.simulation_app", simulation_app)
+    monkeypatch.setattr(isaac_sim_runtime, "_requires_windows_shutdown_workaround", lambda: False)
     monkeypatch.setattr(isaac_sim_runtime.LOGGER, "info", lambda message: None)
 
     runtime = IsaacSimRuntime.__new__(IsaacSimRuntime)
@@ -425,11 +465,20 @@ def test_camera_follows_selected_environment_robot(runtime_context, env_index) -
     assert poses[0]["camera_axes"] == "world"
 
 
-def test_close_releases_camera_before_world_and_application() -> None:
+def test_close_releases_camera_before_world_and_application(monkeypatch, runtime_context) -> None:
     lifecycle: list[str] = []
 
-    runtime = IsaacSimRuntime.__new__(IsaacSimRuntime)
-    runtime._closed = False
+    runtime = IsaacSimRuntime(runtime_context)
+    runtime._windows_shutdown_workaround = True
+    runtime.render_mode = "human"
+    appwindow = ModuleType("omni.appwindow")
+    appwindow.get_default_app_window = lambda: SimpleNamespace(  # type: ignore[attr-defined]
+        shutdown=lambda: lifecycle.append("window.shutdown")
+    )
+    monkeypatch.setitem(sys.modules, "omni.appwindow", appwindow)
+    monkeypatch.setattr(
+        isaac_sim_runtime, "_keep_windows_kit_libraries_loaded", lambda: lifecycle.append("keep Kit DLLs loaded")
+    )
     runtime._camera = SimpleNamespace(
         destroy=lambda: lifecycle.append("camera.destroy")
     )
@@ -455,6 +504,8 @@ def test_close_releases_camera_before_world_and_application() -> None:
         "world.stop",
         "world.clear",
         "bridge.stop",
+        "window.shutdown",
+        "keep Kit DLLs loaded",
         "application.close:False",
     ]
     assert runtime._camera is None
@@ -465,15 +516,14 @@ def test_close_releases_camera_before_world_and_application() -> None:
     assert runtime._closed
 
 
-def test_close_continues_after_resource_cleanup_failure() -> None:
+def test_close_continues_after_resource_cleanup_failure(runtime_context) -> None:
     lifecycle: list[str] = []
 
     def fail_camera_destroy() -> None:
         lifecycle.append("camera.destroy")
         raise RuntimeError("camera cleanup failed")
 
-    runtime = IsaacSimRuntime.__new__(IsaacSimRuntime)
-    runtime._closed = False
+    runtime = IsaacSimRuntime(runtime_context)
     runtime._camera = SimpleNamespace(destroy=fail_camera_destroy)
     runtime._world = SimpleNamespace(
         stop=lambda: lifecycle.append("world.stop"),

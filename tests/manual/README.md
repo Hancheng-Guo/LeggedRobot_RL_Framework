@@ -221,7 +221,7 @@ python -m pytest tests/test_mujoco_friction.py -q
 python tests/manual/verify_terrain_curriculum.py --friction --output-dir temp/friction_acceptance
 ```
 
-pytest 使用受控滑块测量滑动速度和接触系数，覆盖三种接触优先级关系，并验证倍率缩放、重复 reset 和局部更新隔离。测试还覆盖接触覆盖配置校验，以及独立摩擦和摩擦与地形组合的失败回滚。短训脚本覆盖摩擦独立采样和摩擦、地形、命令联合课程，检查摩擦系数的精确恢复、评估冻结和单环境播放。可加 `--render` 验收 OpenGL 回放帧。配置说明见 [7.8.2 Friction](../../docs/7_locomotion_zh.md#782-friction)。
+pytest 使用受控滑块测量滑动速度和接触系数，覆盖三种接触优先级关系，并验证倍率缩放、重复 reset 和局部更新隔离。测试还覆盖接触覆盖配置校验，以及独立摩擦和摩擦与地形组合的失败回滚。短训脚本覆盖摩擦独立采样和摩擦、地形、命令联合课程，检查摩擦系数的精确恢复、评估冻结和单环境播放。可加 `--render` 验收 OpenGL 回放帧。配置说明见 [7.8.2 Friction](../../docs/7_task_zh.md#782-friction)。
 
 ## Isaac Sim 几何地形
 

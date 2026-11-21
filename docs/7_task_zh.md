@@ -1,4 +1,4 @@
-# 7. locomotion 任务配置
+# 7. Task 配置
 
 [开发者手册目录](guide.md) · [项目首页](../README.md)
 

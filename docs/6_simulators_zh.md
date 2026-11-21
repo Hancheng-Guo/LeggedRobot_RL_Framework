@@ -71,4 +71,4 @@ Windows 上的 Isaac Sim 6.1 默认应用曾在关闭后访问已卸载的 DLL�
 
 ## 6.3 地形配置
 
-地形随机化由 task 的 Randomization Manager 控制，配置见 [7.8.1 Terrain](7_locomotion_zh.md#781-terrain)。
+地形随机化由 task 的 Randomization Manager 控制，配置见 [7.8.1 Terrain](7_task_zh.md#781-terrain)。

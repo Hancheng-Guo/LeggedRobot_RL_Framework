@@ -32,4 +32,5 @@
     - [7.8.1 Terrain](7_task_zh.md#781-terrain)
     - [7.8.2 Friction](7_task_zh.md#782-friction)
 - [8. 扩展注册表](8_extensions_zh.md)
+- [开发计划总览](plans/plans.md)
 - [手动诊断与验收](../tests/manual/README.md)

@@ -2,11 +2,13 @@ import torch
 import numpy as np
 from pathlib import Path
 from typing import Any
+from copy import deepcopy
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from .terrain import TerrainPatch, TerrainSpawnGeometry
-from .utils import ModelContext, SimulatorState
+from .state import SimulatorState, SimulatorStateManager
+from .utils import ModelContext, GroundRayQuery
 from utils import RuntimeContext
 
 
@@ -28,6 +30,55 @@ class BaseSimulator(ABC):
         self.frame_skip: int
         self.render_mode: str | None
         self.model_context: ModelContext
+        self.simulator_state_manager: SimulatorStateManager
+        self._simulator_state_manager_config: dict[str, Any] = {}
+        self._ground_ray_query: GroundRayQuery | None = None
+
+
+    def _get_simulator_state_manager_config(
+        self,
+        config: Mapping[str, object] | None,
+        *,
+        replace_config: bool,
+    ) -> dict[str, Any]:
+
+        if config is None:
+            return {} if replace_config else self._simulator_state_manager_config
+        if not isinstance(config, Mapping) or set(config) - {"terms"}:
+            raise ValueError("simulator_state_manager_config accepts only 'terms'.")
+        return deepcopy(dict(config))
+
+
+    def _build_simulator_state_manager(
+        self,
+        simulator_state_manager_config: dict[str, Any],
+    ) -> None:
+
+        self.simulator_state_manager = SimulatorStateManager(
+            context=self.context,
+            model_context=self.model_context,
+            simulator=self,
+            **simulator_state_manager_config,
+        )
+        self.model_context = self.simulator_state_manager.model_context
+        self._simulator_state_manager_config = simulator_state_manager_config
+
+
+    def query_ground_rays(
+        self,
+        origins: torch.Tensor,
+        directions: torch.Tensor,
+        max_distance: float,
+        env_ids: torch.Tensor | None,
+    ) -> torch.Tensor:
+
+        query = self._ground_ray_query
+        if query is None:
+            raise ValueError(
+                "This simulator does not provide "
+                "ground ray queries for the current scene."
+            )
+        return query(origins, directions, max_distance, env_ids)
 
 
     @abstractmethod
@@ -50,11 +101,7 @@ class BaseSimulator(ABC):
 
     @property
     def control_dt(self) -> float:
-
-        return (
-            self.sim_dt *
-            self.frame_skip
-        )
+        return (self.sim_dt * self.frame_skip)
 
 
     @property

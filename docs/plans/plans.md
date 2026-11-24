@@ -12,8 +12,8 @@
 | 7 | 扩展 A：Isaac | 摩擦随机化及对应状态恢复、评估验证 | 已完成 |
 | 8 | 扩展 B | 台阶地形，先 MuJoCo、再 Isaac | 待实施 |
 | 9 | 阶段 6 | 跨后端验收、性能与交付 | 待完成 |
-| [足端地形感知](terrain_sensor_development_plan_zh.md) |  |  |  | 待实施 |
-| 1 | 阶段 1 | 状态管理与平地基线：构建 `SimulatorStateManager` 和足端扫描 term，验证采样契约与配置 | 待实施 |
+| [足端地形感知](terrain_sensor_development_plan_zh.md) |  |  | 已完成 1/6 |
+| 1 | 阶段 1 | 状态管理与平地基线：构建 `SimulatorStateManager` 和足端扫描 term，验证采样契约与配置 | 已完成 |
 | 2 | 阶段 2 | 双后端地形采集：ANYmal C 完整对照，Go1 验证通过配置切换机型 | 待实施 |
 | 3 | 阶段 3 | 观测与训练集成：ANYmal C 双后端 PPO 短训与吞吐基线，Go1 观测冒烟验收 | 待实施 |
 | 4 | 扩展 A | 采集时序与缓存：独立采样频率、延迟、逐环境缓存与重置恢复 | 待实施 |

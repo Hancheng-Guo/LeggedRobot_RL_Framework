@@ -2,13 +2,13 @@
 
 > 更新时间：2026-11-22（Asia/Shanghai）
 >
-> 状态：待实施。配置示例和性能预算将在验收时确定。
+> 状态：阶段 1 已验收，下一项为阶段 2 双后端地形采集。
 >
 > 实施顺序：足端高度观测 → 扩展 A 采集时序与缓存 → 扩展 B 高程图与实机感知 → 性能与交付。台阶地形按地形计划单独验收。 [随机几何地形阶段开发计划](terrain_development_plan_zh.md)
 
 ## 一、第一版目标
 
-为多种足式机器人提供同一套足端扫描接口。在每只脚周围按 `base` 坐标布点，沿 `−base Z` 求交，输出命中点相对该足端沿重力对齐坐标系的高度差。MuJoCo 使用各环境的独立地形，Isaac Sim 使用共享地形图。采样结果通过可选的 `foot_terrain_heights` 和 `foot_terrain_heights_valid` 观测条目接入策略。首版直接查询仿真地面几何，覆盖平地、斜坡、粗糙地形、外围平地及 Isaac 跨地块行走。 [公共状态](../../envs/simulators/utils/state.py) · [仿真接口](../../envs/simulators/base.py)
+为多种足式机器人提供同一套足端扫描接口。在每只脚周围按 `base` 坐标布点，沿 `−base Z` 求交，输出命中点相对该足端沿重力对齐坐标系的高度差。MuJoCo 使用各环境的独立地形，Isaac Sim 使用共享地形图。采样结果通过可选的 `foot_terrain_heights` 和 `foot_terrain_heights_valid` 观测条目接入策略。首版直接查询仿真地面几何，覆盖平地、斜坡、粗糙地形、外围平地及 Isaac 跨地块行走。 [公共状态](../../envs/simulators/state/state.py) · [仿真接口](../../envs/simulators/base.py)
 
 ANYmal C 是主要训练对象和首个双后端完整验收机型。Unitree Go1 用于验证机型切换，沿用现有双后端配置，通过各机型的足端映射和采样参数接入同一套扫描与观测。扩展 B 以 ANYmal C 为首个实机验收对象。 [Go1 MuJoCo 配置](../../configs/simulators/mujoco_unitree_go1_rgb_array.yaml) · [Go1 Isaac 配置](../../configs/simulators/isaac_sim_unitree_go1_headless.yaml)
 
@@ -16,7 +16,7 @@ Miki 等人的实机方案从局部高程图采集足端周围的高度。本项
 
 | 实施顺序 | 阶段或扩展 | 内容 | 状态 |
 |---|---|---|---|
-| 1 | 阶段 1 | 状态管理与平地基线：构建 `SimulatorStateManager` 和足端扫描 term，验证采样契约与配置 | 待实施 |
+| 1 | 阶段 1 | 状态管理与平地基线：构建 `SimulatorStateManager` 和足端扫描 term，验证采样契约与配置 | 已完成 |
 | 2 | 阶段 2 | 双后端地形采集：ANYmal C 完整对照，Go1 验证通过配置切换机型 | 待实施 |
 | 3 | 阶段 3 | 观测与训练集成：ANYmal C 双后端 PPO 短训与吞吐基线，Go1 观测冒烟验收 | 待实施 |
 | 4 | 扩展 A | 采集时序与缓存：独立采样频率、延迟、逐环境缓存与重置恢复 | 待实施 |
@@ -80,15 +80,15 @@ dy = d * sqrt(3) * r / 2
 |---|---|
 | simulator 配置 | 通过可选的 `simulator_state_manager_config.terms.foot_terrain_scan` 启用足端扫描 |
 | MuJoCo / Isaac 后端 | 读取并规范化现有物理状态，提供本帧基座位姿、足端位置和后端地面求交能力 |
-| `SimulatorStateManager` | 由 simulator 持有。根据配置构建状态 term，接收后端本次读取的状态，调用已启用的 term 并组装 `SimulatorState` |
-| `foot_terrain_scan` 状态 term | 校验布局与量程，预生成蜂窝偏移。使用同帧姿态和足端位置生成射线，调用后端地面求交，计算重力方向上的高度差和有效掩码 |
-| `ModelContext` | 提供 simulator 解析出的足端索引顺序及已启用扫描的每足采样点数，供观测条目在初始化时确定维数和校验依赖 |
-| `SimulatorState` | 提供可选的 `foot_terrain_scan_heights` 与 `foot_terrain_scan_valid`，均为 `[N, F, K]`。高度已经是重力方向上的足端相对高度，沿用运行时 dtype 和 device，掩码为布尔值。验证 `clone()`、`select()` 和缓冲复用 |
+| `SimulatorStateManager` | 由 simulator 持有。按配置名从注册表构建状态 term，原样转交 simulator 等构造依赖，调用启用的 term 并按名称保存输出 |
+| `foot_terrain_scan` 状态 term | 校验布局与量程，预生成蜂窝偏移。使用同帧姿态和足端位置生成射线，通过 `GroundRayQueryProvider.query_ground_rays()` 从 simulator 取得命中距离，计算重力方向上的高度差和有效掩码。求交器由 simulator 随场景配置和持有 |
+| `ModelContext` | 提供 simulator 解析出的足端索引顺序，以及 `state_term_output_shapes[term 名][输出名]`。足端扫描的两个输出均声明 `(F, K)`，供观测条目确定维数和校验依赖 |
+| `SimulatorState` | 通过 `state.foot_terrain_scan_heights` 和 `state.foot_terrain_scan_valid` 读取启用的扫描输出，两者均为 `[N, F, K]`。动态字段按输出名查找，允许显式返回 `None`。未发布的字段触发 `AttributeError`，不同 term 声明同名输出时在 manager 构建阶段报错。`clone()` 和 `select()` 保留 `None`。`as_dict()` 按字段名导出张量，固定字段优先，值为 `None` 时省略该字段 |
 | `TaskContext` 与 `TaskStateManager` | `TaskContext.state` 传递已组装的状态。task state term 可消费状态并更新步态相位等任务量 |
 | `ObservationManager` | 注册只读的 `foot_terrain_heights` 和 `foot_terrain_heights_valid`，处理缩放、裁剪、无效填充，并按 simulator 解析出的足序展平为 `[N, F*K]` |
 | runner、policy、课程 | 沿用现有命名切片和维数组装，按配置决定 actor、critic 读取哪些条目。课程继续分配地形、摩擦和命令 |
 
-simulator 在模型和足端映射可用后构建 `SimulatorStateManager`，在 task 构建观测前发布扫描元数据。`get_state()` 先读取后端状态，再由 manager 对本次选中的环境运行状态 term 并组装结果。现有基础与派生物理字段沿用原采集路径。首版仅将足端扫描作为可配置的状态 term，同步使用本次读取的物理状态。扫描关闭时，两个扫描字段为 `None`，跳过射线查询。扩展 A 由 simulator 侧的 manager 和 term 管理采样时序与缓存。 [仿真接口](../../envs/simulators/base.py) · [环境 step 与 reset](../../envs/vector_env.py)
+simulator 在模型和足端映射可用后构建 `SimulatorStateManager`，在 task 构建观测前发布已启用条目的输出形状。`get_state()` 先读取后端状态，再由 manager 对本次选中的环境运行状态 term 并组装结果。现有基础与派生物理字段沿用原采集路径。首版的足端扫描同步使用本次读取的物理状态。关闭后，结果与形状映射均省略该条目，射线查询为零。扩展 A 由 simulator 侧的 manager 和 term 管理采样时序与缓存。 [仿真接口](../../envs/simulators/base.py) · [环境 step 与 reset](../../envs/vector_env.py)
 
 simulator YAML 负责选择采集项。task 继续使用现有接线和 `TaskContext.state`，通过观测配置选择要消费的数据。
 
@@ -135,7 +135,14 @@ observation_manager_config:
 
 ### 完成标准
 
-同一状态得到固定点序和一致结果。紧凑与二维布局往返后保留数据、点序及有效性，六邻域索引通过距离校验。平地高度、量程边界和无效点符合第二章的约定。关闭扫描时，原有物理字段与基线一致，扫描字段为 `None`，射线查询次数为零。
+同一状态得到固定点序和一致结果。紧凑与二维布局往返后保留数据、点序及有效性，六邻域索引通过距离校验。平地高度、量程边界和无效点符合第二章的约定。关闭扫描时，原有物理字段与基线一致，扫描条目从结果和形状映射中省略，射线查询次数为零。
+
+### 验收记录
+
+- 公共测试覆盖蜂窝点序与二维往返、六邻域距离、非连续索引、空选择、量程边界、无效位姿和足序重排，并用解析水平面和倾斜平面对照命中距离及重力投影。首版配置校验的点数预算为每足最多 4096 点。 [足端扫描测试](../../tests/test_foot_terrain_scan.py)
+- 真实平地验收使用 3 个 Go1 环境，经 YAML 配置分别启用和关闭扫描。当前 MuJoCo 支持单个静态水平 floor plane，Isaac 使用默认平地。斜坡和其他地形的后端求交在阶段 2 接入。 [平地验收脚本](../../tests/manual/verify_foot_terrain_scan_plane.py)
+- 两端启用扫描时均得到每足 61 点及 `(4, 61)` 的输出形状，扫描高度与实际足端相对平地的高度一致。关闭扫描时结果和形状映射均省略扫描条目，射线查询次数为零，现有 task 的观测维数保持 112。
+- MuJoCo/core 回归 1301 项通过，Isaac/core 回归 1236 项通过，各跳过 11 项。两套 Pyright 均无错误和警告。本机运行 Isaac Sim 原生验收时使用 Conda DLL 路径和 `MKL_THREADING_LAYER=SEQUENTIAL`，解决 NumPy 加载时的 OpenMP 运行库冲突。扫描启用和关闭两次原生进程均以 `0` 退出。
 
 ## 五、阶段 2：双后端地形采集
 

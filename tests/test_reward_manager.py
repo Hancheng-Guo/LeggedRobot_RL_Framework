@@ -32,7 +32,7 @@ from envs.tasks.managers.reward.terms.tracking import (
     TrackLinearVelocityYErrorIntegralL2,
 )
 from envs.tasks.utils import TaskContext
-from envs.simulators.utils import SimulatorState
+from envs.simulators.state import SimulatorState
 
 
 def make_simulator_state(

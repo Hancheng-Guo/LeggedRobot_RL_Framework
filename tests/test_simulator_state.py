@@ -1,6 +1,9 @@
+from copy import deepcopy
+
+import pytest
 import torch
 
-from envs.simulators.utils import SimulatorState
+from envs.simulators.state import SimulatorState
 
 
 def make_state() -> SimulatorState:
@@ -27,6 +30,40 @@ def test_simulator_state_supports_attributes_and_dictionary_export():
 
     assert state.as_dict()["qpos"] is state.qpos
     assert state.as_dict()["geom_xvel"] is state.geom_xvel
+
+
+def test_simulator_state_exposes_term_outputs_as_attributes():
+    state = make_state()
+    output = torch.tensor([[1.0], [2.0]])
+    state.term_values = {
+        "scan_height": output, "qpos": output, "base_ground_height": output,
+    }
+    assert state.scan_height is output
+    assert state.qpos is not output
+    assert state.base_ground_height is None
+    exported = state.as_dict()
+    assert exported["scan_height"] is output
+    assert exported["qpos"] is state.qpos
+    assert "base_ground_height" not in exported
+    torch.testing.assert_close(state.select(torch.tensor([1])).scan_height, output[1:])
+    torch.testing.assert_close(deepcopy(state).scan_height, output)
+
+
+def test_simulator_state_reports_missing_term_outputs():
+    state = make_state()
+    assert not hasattr(state, "scan_height")
+    with pytest.raises(AttributeError, match="scan_height"):
+        _ = state.scan_height
+
+
+def test_simulator_state_preserves_explicit_none_term_outputs():
+    state = make_state()
+    state.term_values["scan_height"] = None
+
+    for result in (state, state.clone(), state.select(torch.tensor([1]))):
+        assert hasattr(result, "scan_height")
+        assert result.scan_height is None
+        assert "scan_height" not in result.as_dict()
 
 
 def test_simulator_state_clone_owns_independent_storage():

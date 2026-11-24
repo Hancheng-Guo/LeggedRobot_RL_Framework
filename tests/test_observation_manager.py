@@ -2,7 +2,7 @@ import pytest
 import torch
 from dataclasses import replace
 
-from envs.simulators.utils import SimulatorState
+from envs.simulators.state import SimulatorState
 from envs.tasks import BaseTaskLogic
 from envs.tasks.managers.observation import ObservationManager
 from envs.tasks.managers.observation.terms import BaseObservationTerm

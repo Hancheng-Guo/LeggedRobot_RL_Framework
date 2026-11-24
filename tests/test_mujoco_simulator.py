@@ -7,7 +7,7 @@ from contextlib import nullcontext
 from pathlib import Path
 
 from envs.simulators.mujoco import MujocoSimulator
-from envs.simulators.utils import SimulatorState
+from envs.simulators.state import SimulatorState
 from utils import Component, load_yaml
 from envs.simulators.terrain import TerrainGeometry
 
@@ -296,16 +296,15 @@ def test_mujoco_state_exposes_base_velocity_in_body_frame(runtime_context):
         / "go1.xml"
     )
     simulator = MujocoSimulator(runtime_context)
-    simulator.foot_geom_names = ()
-    simulator.floor_geom_names = ()
-    simulator.models = [
-        mujoco.MjModel.from_xml_path(str(model_path))  # pyright: ignore[reportAttributeAccessIssue]
-    ]
-    simulator.datas = [
-        mujoco.MjData(simulator.models[0])  # pyright: ignore[reportAttributeAccessIssue]
-    ]
-
-    simulator._build_model_context()
+    simulator.config_update(
+        component=Component(None, None, None, None, None, None),
+        model_path=model_path,
+        num_envs=1,
+        sim_dt=.002,
+        frame_skip=1,
+        foot_geom_names=(),
+        floor_geom_names=(),
+    )
     mujoco.mj_forward(  # pyright: ignore[reportAttributeAccessIssue]
         simulator.models[0],
         simulator.datas[0],

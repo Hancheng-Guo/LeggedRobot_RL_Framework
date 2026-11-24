@@ -9,7 +9,7 @@ import mujoco
 import torch
 import numpy as np
 from math import isfinite
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from mujoco import viewer
 from dataclasses import dataclass, fields
 from pathlib import Path
@@ -21,7 +21,8 @@ from copy import copy
 from .base import BaseSimulator
 from .terrain import TerrainGeometry, TerrainPatch, TerrainSpawnGeometry
 from .mujoco_terrain import MujocoTerrain
-from .utils import ModelContext, SimulatorState
+from .state import SimulatorState, SimulatorStateManager
+from .utils import ModelContext, GROUND_RAY_QUERY, HorizontalGroundRayQuery
 from utils import Component, RuntimeContext, update_attributes
 
 
@@ -122,8 +123,13 @@ class MujocoSimulator(BaseSimulator):
         reset_keyframe: str | None = None,
         terrain_geometry: TerrainGeometry | None | object = _TERRAIN_UNCHANGED,
         friction_enabled: bool | None = None,  # Unused by MuJoCo. Accepted for task compatibility.
+        simulator_state_manager_config: Mapping[str, object] | None = None,
     ) -> None:
 
+        state_manager_config = self._get_simulator_state_manager_config(
+            simulator_state_manager_config,
+            replace_config=model_path is not None or component.simulator is not None,
+        )
         if terrain_geometry is not _TERRAIN_UNCHANGED:
             if terrain_geometry is not None and not isinstance(terrain_geometry, TerrainGeometry):
                 raise TypeError("terrain_geometry must be a TerrainGeometry or None.")
@@ -199,6 +205,7 @@ class MujocoSimulator(BaseSimulator):
             self._render_camera = None
 
         self._terrain_render_dirty = False
+        self._ground_ray_query = None
         if self.terrain_geometry is None:
             self._terrain = None
             self.models = [
@@ -234,7 +241,34 @@ class MujocoSimulator(BaseSimulator):
             self.reset_keyframe_id = reset_keyframe_id
 
         self._build_model_context()
+        self._ground_ray_query = self._build_ground_ray_query()
+        unavailable_capabilities = {}
+        if self._ground_ray_query is None:
+            unavailable_capabilities[GROUND_RAY_QUERY] = (
+                "MuJoCo ground ray queries currently require "
+                "one static horizontal floor plane."
+            )
+        SimulatorStateManager.validate_config(
+            unavailable_capabilities=unavailable_capabilities,
+            **state_manager_config,
+        )
+        self._build_simulator_state_manager(state_manager_config)
         self._initialize_state_buffers()
+
+
+    def _build_ground_ray_query(self) -> HorizontalGroundRayQuery | None:
+        floor_ids = self.model_context.floor_geom_ids.tolist()
+        if self._terrain is None and len(floor_ids) == 1:
+            geom_id = floor_ids[0]
+            model = self.models[0]
+            plane_type = mujoco.mjtGeom.mjGEOM_PLANE  # pyright: ignore[reportAttributeAccessIssue]
+            if (
+                model.geom_type[geom_id] == plane_type
+                and model.geom_bodyid[geom_id] == 0
+                and np.all(model.geom_quat[geom_id, 1:3] == 0.)
+            ):
+                return HorizontalGroundRayQuery(float(model.geom_pos[geom_id, 2]))
+        return None
 
 
     def _build_model_context(self) -> None:
@@ -899,6 +933,7 @@ class MujocoSimulator(BaseSimulator):
 
     def close(self) -> None:
 
+        self._ground_ray_query = None
         self._shutdown_step_executor()
 
         if self.viewer is not None:
@@ -987,7 +1022,7 @@ class MujocoSimulator(BaseSimulator):
             geom_xpos=basic_state["geom_xpos"],
             env_ids=env_ids,
         )
-        return SimulatorState(
+        state_fields = dict(
             **ground_state,
             **basic_state,
             **base_velocity_state,
@@ -996,6 +1031,7 @@ class MujocoSimulator(BaseSimulator):
             contact_forces=contact_forces,
             geom_xvel=geom_xvel,
         )
+        return self.simulator_state_manager.assemble(env_ids, **state_fields)
 
 
     def _initialize_state_buffers(self) -> None:

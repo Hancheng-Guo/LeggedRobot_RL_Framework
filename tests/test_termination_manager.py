@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from envs.simulators.utils import SimulatorState
+from envs.simulators.state import SimulatorState
 from envs.tasks.managers.termination import TerminationManager
 from envs.tasks.managers.termination.terms import BaseTerminationTerm
 from envs.tasks.managers.termination.terms import (

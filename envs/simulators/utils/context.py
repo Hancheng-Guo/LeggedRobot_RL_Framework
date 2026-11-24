@@ -1,6 +1,6 @@
 import torch
 from typing import Any
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -39,3 +39,5 @@ class ModelContext:
     foot_geom_ids: torch.Tensor
     floor_geom_ids: torch.Tensor
     # fatal_body_ids: torch.Tensor
+
+    state_term_output_shapes: dict[str, dict[str, tuple[int, ...]]] = field(default_factory=dict)

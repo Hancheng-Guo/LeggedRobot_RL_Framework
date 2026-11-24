@@ -153,6 +153,47 @@ def test_terrain_geometry_is_delivered_to_isaac_backend(tmp_path, runtime_contex
         simulator.close()
 
 
+def test_isaac_state_manager_configuration_can_change_without_restarting_backend(
+    tmp_path, runtime_context,
+):
+    simulator, backend = _configure(tmp_path, runtime_context)
+    try:
+        initial_manager = simulator.simulator_state_manager
+        ground_query = simulator._ground_ray_query
+        assert ground_query is not None
+        assert not simulator.model_context.state_term_output_shapes
+        simulator.config_update(
+            component=_component(),
+            simulator_state_manager_config={"terms": {"foot_terrain_scan": {"layers": 0}}},
+        )
+        enabled_manager = simulator.simulator_state_manager
+        assert enabled_manager is not initial_manager
+        assert simulator.model_context.state_term_output_shapes["foot_terrain_scan"]["foot_terrain_scan_heights"] == (2, 1)
+        simulator.config_update(component=_component(), num_envs=2)
+        assert simulator.simulator_state_manager is enabled_manager
+        simulator.config_update(component=_component(), simulator_state_manager_config={})
+        assert not simulator.model_context.state_term_output_shapes
+        assert not simulator.get_state().term_values
+        assert simulator._require_backend() is backend and not backend.closed
+        assert simulator._ground_ray_query is ground_query
+    finally:
+        simulator.close()
+    assert simulator._ground_ray_query is None
+
+
+def test_isaac_checks_ground_ray_requirement_before_starting_backend(runtime_context):
+    def unexpected_backend(context):
+        pytest.fail("An incompatible ground configuration must fail before startup.")
+
+    simulator = IsaacSimSimulator(runtime_context, backend_factory=unexpected_backend)
+    with pytest.raises(ValueError, match="ground ray queries.*default ground plane"):
+        simulator.config_update(
+            component=_component(),
+            floor_prim_paths=("/World/CustomFloor",),
+            simulator_state_manager_config={"terms": {"foot_terrain_scan": {}}},
+        )
+
+
 def test_isaac_sim_is_registered_without_importing_optional_runtime() -> None:
     assert SIM_TYPE_MAP["isaac_sim"] is IsaacSimSimulator
 

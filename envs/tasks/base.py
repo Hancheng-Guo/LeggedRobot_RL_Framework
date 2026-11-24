@@ -12,7 +12,8 @@ from .managers import (
     TerminationManager,
 )
 from .utils import TaskContext, TaskStepResult
-from envs.simulators.utils import ModelContext, SimulatorState
+from envs.simulators.state import SimulatorState
+from envs.simulators.utils import ModelContext
 from utils import Component, RuntimeContext, update_attributes
 
 

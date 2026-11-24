@@ -14,7 +14,8 @@ from .terrain import (
     TerrainPatch, TerrainRegionKey, TerrainSpawnGeometry,
 )
 from .isaac_sim_backend import DEFAULT_TERRAIN_LAYOUT, IsaacSimBackend, IsaacSimResetState
-from .utils import ModelContext, SimulatorState
+from .state import SimulatorState, SimulatorStateManager
+from .utils import ModelContext, GROUND_RAY_QUERY, HorizontalGroundRayQuery
 from utils import Component, RuntimeContext, update_attributes
 
 
@@ -103,8 +104,26 @@ class IsaacSimSimulator(BaseSimulator):
         terrain_geometry: TerrainGeometry | None = None,
         friction_enabled: bool | None = None,
         terrain_atlas: Mapping[str, object] | None = None,
+        simulator_state_manager_config: Mapping[str, object] | None = None,
     ) -> None:
 
+        state_manager_config = self._get_simulator_state_manager_config(
+            simulator_state_manager_config,
+            replace_config=model_path is not None or component.simulator is not None,
+        )
+        unavailable_capabilities = {}
+        effective_floor_paths = (
+            self.floor_prim_paths if floor_prim_paths is None
+            else floor_prim_paths
+        )
+        if terrain_geometry is not None or effective_floor_paths:
+            unavailable_capabilities[GROUND_RAY_QUERY] = (
+                "Isaac ground ray queries currently require the default ground plane."
+            )
+        SimulatorStateManager.validate_config(
+            unavailable_capabilities=unavailable_capabilities,
+            **state_manager_config,
+        )
         backend_configuration_changed = any(
             value is not None
             for value in (
@@ -148,6 +167,8 @@ class IsaacSimSimulator(BaseSimulator):
                         )
                     disable_friction()
                 self._friction_enabled = bool(friction_enabled)
+            if simulator_state_manager_config is not None:
+                self._build_simulator_state_manager(state_manager_config)
             return
 
         if self._backend is not None:
@@ -306,6 +327,10 @@ class IsaacSimSimulator(BaseSimulator):
             **({"friction_enabled": True} if self._friction_enabled else {}),
         )
         self._build_model_context()
+        self._ground_ray_query = (
+            None if GROUND_RAY_QUERY in unavailable_capabilities else HorizontalGroundRayQuery(0.)
+        )
+        self._build_simulator_state_manager(state_manager_config)
 
 
     @staticmethod
@@ -654,7 +679,9 @@ class IsaacSimSimulator(BaseSimulator):
         self,
         env_ids: torch.Tensor | None = None,
     ) -> SimulatorState:
-        return SimulatorState(**self._require_backend().get_state(env_ids))
+        return self.simulator_state_manager.assemble(
+            env_ids, **self._require_backend().get_state(env_ids),
+        )
 
 
     def render(self) -> np.ndarray | None:
@@ -690,6 +717,7 @@ class IsaacSimSimulator(BaseSimulator):
 
 
     def close(self) -> None:
+        self._ground_ray_query = None
         if self._backend is not None:
             self._backend.close()
             self._backend = None

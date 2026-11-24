@@ -2,7 +2,7 @@
 from dataclasses import replace
 import pytest
 import torch
-from envs.simulators.utils import SimulatorState
+from envs.simulators.state import SimulatorState
 from envs.tasks.utils import TaskContext
 from envs.tasks.managers.observation.terms.state import BaseHeight as HeightObservation
 from envs.tasks.managers.observation.terms.foot import FootHeight

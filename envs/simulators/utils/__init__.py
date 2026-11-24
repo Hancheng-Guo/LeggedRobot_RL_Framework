@@ -1,9 +1,17 @@
 from .context import ModelContext
-from .state import SimulatorState
+from .ground_ray import (
+    GROUND_RAY_QUERY,
+    GroundRayQuery,
+    GroundRayQueryProvider,
+    HorizontalGroundRayQuery,
+)
 
 
 __all__ = (
     "ModelContext",
-    
-    "SimulatorState"
+
+    "GROUND_RAY_QUERY",
+    "GroundRayQuery",
+    "GroundRayQueryProvider",
+    "HorizontalGroundRayQuery",
 )

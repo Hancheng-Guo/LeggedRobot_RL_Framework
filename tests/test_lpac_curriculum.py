@@ -7,7 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from envs.simulators.utils import SimulatorState
+from envs.simulators.state import SimulatorState
 from envs.tasks.locomotion import LocomotionTaskLogic
 from envs.tasks.managers.command import CommandManager
 from envs.tasks.managers.curriculum import CurriculumManager

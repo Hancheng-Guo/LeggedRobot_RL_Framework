@@ -6,7 +6,7 @@ from typing import cast
 
 from envs import VectorEnv
 from envs.simulators import BaseSimulator
-from envs.simulators.utils import SimulatorState
+from envs.simulators.state import SimulatorState
 from envs.tasks import BaseTaskLogic
 from envs.tasks.utils import TaskContext, TaskStepResult
 from utils import Component, ComponentInfo

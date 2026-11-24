@@ -1,0 +1,833 @@
+#usda 1.0
+(
+    customLayerData = {
+        string creator = "URDF USD Converter v0.3.2"
+    }
+    defaultPrim = "anymal"
+    endTimeCode = 1000000
+    kilogramsPerUnit = 1
+    metersPerUnit = 1
+    startTimeCode = 0
+    upAxis = "Z"
+)
+
+over "anymal" (
+    prepend apiSchemas = ["IsaacRobotAPI"]
+)
+{
+    prepend rel isaac:physics:robotJoints = [
+        </anymal/Physics/base_to_base_inertia>,
+        </anymal/Physics/base_top_shell>,
+        </anymal/Physics/base_bottom_shell>,
+        </anymal/Physics/base_remote>,
+        </anymal/Physics/base_handle>,
+        </anymal/Physics/base_face_front>,
+        </anymal/Physics/base_face_rear>,
+        </anymal/Physics/base_battery>,
+        </anymal/Physics/base_to_docking_hatch_cover>,
+        </anymal/Physics/imu_joint>,
+        </anymal/Physics/base_to_depth_camera_left_camera>,
+        </anymal/Physics/base_to_depth_camera_right_camera>,
+        </anymal/Physics/base_to_lidar_cage>,
+        </anymal/Physics/base_LF_HAA>,
+        </anymal/Physics/base_RF_HAA>,
+        </anymal/Physics/base_LH_HAA>,
+        </anymal/Physics/base_RH_HAA>,
+        </anymal/Physics/base_hatch>,
+        </anymal/Physics/face_front_to_depth_camera_front_camera>,
+        </anymal/Physics/face_front_to_wide_angle_camera_front_camera>,
+        </anymal/Physics/face_rear_to_depth_camera_rear_camera>,
+        </anymal/Physics/face_rear_to_wide_angle_camera_rear_camera>,
+        </anymal/Physics/lidar_cage_to_lidar>,
+        </anymal/Physics/LF_HAA>,
+        </anymal/Physics/LF_HIP_LF_hip_fixed>,
+        </anymal/Physics/LF_hip_fixed_LF_HFE>,
+        </anymal/Physics/LF_HFE>,
+        </anymal/Physics/LF_THIGH_LF_thigh_fixed>,
+        </anymal/Physics/LF_thigh_fixed_LF_KFE>,
+        </anymal/Physics/LF_KFE>,
+        </anymal/Physics/LF_shank_LF_shank_fixed>,
+        </anymal/Physics/LF_shank_fixed_LF_FOOT>,
+        </anymal/Physics/RF_HAA>,
+        </anymal/Physics/RF_HIP_RF_hip_fixed>,
+        </anymal/Physics/RF_hip_fixed_RF_HFE>,
+        </anymal/Physics/RF_HFE>,
+        </anymal/Physics/RF_THIGH_RF_thigh_fixed>,
+        </anymal/Physics/RF_thigh_fixed_RF_KFE>,
+        </anymal/Physics/RF_KFE>,
+        </anymal/Physics/RF_shank_RF_shank_fixed>,
+        </anymal/Physics/RF_shank_fixed_RF_FOOT>,
+        </anymal/Physics/LH_HAA>,
+        </anymal/Physics/LH_HIP_LH_hip_fixed>,
+        </anymal/Physics/LH_hip_fixed_LH_HFE>,
+        </anymal/Physics/LH_HFE>,
+        </anymal/Physics/LH_THIGH_LH_thigh_fixed>,
+        </anymal/Physics/LH_thigh_fixed_LH_KFE>,
+        </anymal/Physics/LH_KFE>,
+        </anymal/Physics/LH_shank_LH_shank_fixed>,
+        </anymal/Physics/LH_shank_fixed_LH_FOOT>,
+        </anymal/Physics/RH_HAA>,
+        </anymal/Physics/RH_HIP_RH_hip_fixed>,
+        </anymal/Physics/RH_hip_fixed_RH_HFE>,
+        </anymal/Physics/RH_HFE>,
+        </anymal/Physics/RH_THIGH_RH_thigh_fixed>,
+        </anymal/Physics/RH_thigh_fixed_RH_KFE>,
+        </anymal/Physics/RH_KFE>,
+        </anymal/Physics/RH_shank_RH_shank_fixed>,
+        </anymal/Physics/RH_shank_fixed_RH_FOOT>,
+    ]
+    prepend rel isaac:physics:robotLinks = [
+        </anymal/Geometry/base>,
+        </anymal/Geometry/base/base_inertia>,
+        </anymal/Geometry/base/top_shell>,
+        </anymal/Geometry/base/bottom_shell>,
+        </anymal/Geometry/base/remote>,
+        </anymal/Geometry/base/handle>,
+        </anymal/Geometry/base/face_front>,
+        </anymal/Geometry/base/face_front/depth_camera_front_camera>,
+        </anymal/Geometry/base/face_front/wide_angle_camera_front_camera>,
+        </anymal/Geometry/base/face_rear>,
+        </anymal/Geometry/base/face_rear/depth_camera_rear_camera>,
+        </anymal/Geometry/base/face_rear/wide_angle_camera_rear_camera>,
+        </anymal/Geometry/base/battery>,
+        </anymal/Geometry/base/docking_hatch_cover>,
+        </anymal/Geometry/base/imu_link>,
+        </anymal/Geometry/base/depth_camera_left_camera>,
+        </anymal/Geometry/base/depth_camera_right_camera>,
+        </anymal/Geometry/base/lidar_cage>,
+        </anymal/Geometry/base/lidar_cage/lidar>,
+        </anymal/Geometry/base/LF_HAA>,
+        </anymal/Geometry/base/LF_HAA/LF_HIP>,
+        </anymal/Geometry/base/LF_HAA/LF_HIP/LF_hip_fixed>,
+        </anymal/Geometry/base/LF_HAA/LF_HIP/LF_hip_fixed/LF_HFE>,
+        </anymal/Geometry/base/LF_HAA/LF_HIP/LF_hip_fixed/LF_HFE/LF_THIGH>,
+        </anymal/Geometry/base/LF_HAA/LF_HIP/LF_hip_fixed/LF_HFE/LF_THIGH/LF_thigh_fixed>,
+        </anymal/Geometry/base/LF_HAA/LF_HIP/LF_hip_fixed/LF_HFE/LF_THIGH/LF_thigh_fixed/LF_KFE>,
+        </anymal/Geometry/base/LF_HAA/LF_HIP/LF_hip_fixed/LF_HFE/LF_THIGH/LF_thigh_fixed/LF_KFE/LF_SHANK>,
+        </anymal/Geometry/base/LF_HAA/LF_HIP/LF_hip_fixed/LF_HFE/LF_THIGH/LF_thigh_fixed/LF_KFE/LF_SHANK/LF_shank_fixed>,
+        </anymal/Geometry/base/LF_HAA/LF_HIP/LF_hip_fixed/LF_HFE/LF_THIGH/LF_thigh_fixed/LF_KFE/LF_SHANK/LF_shank_fixed/LF_FOOT>,
+        </anymal/Geometry/base/RF_HAA>,
+        </anymal/Geometry/base/RF_HAA/RF_HIP>,
+        </anymal/Geometry/base/RF_HAA/RF_HIP/RF_hip_fixed>,
+        </anymal/Geometry/base/RF_HAA/RF_HIP/RF_hip_fixed/RF_HFE>,
+        </anymal/Geometry/base/RF_HAA/RF_HIP/RF_hip_fixed/RF_HFE/RF_THIGH>,
+        </anymal/Geometry/base/RF_HAA/RF_HIP/RF_hip_fixed/RF_HFE/RF_THIGH/RF_thigh_fixed>,
+        </anymal/Geometry/base/RF_HAA/RF_HIP/RF_hip_fixed/RF_HFE/RF_THIGH/RF_thigh_fixed/RF_KFE>,
+        </anymal/Geometry/base/RF_HAA/RF_HIP/RF_hip_fixed/RF_HFE/RF_THIGH/RF_thigh_fixed/RF_KFE/RF_SHANK>,
+        </anymal/Geometry/base/RF_HAA/RF_HIP/RF_hip_fixed/RF_HFE/RF_THIGH/RF_thigh_fixed/RF_KFE/RF_SHANK/RF_shank_fixed>,
+        </anymal/Geometry/base/RF_HAA/RF_HIP/RF_hip_fixed/RF_HFE/RF_THIGH/RF_thigh_fixed/RF_KFE/RF_SHANK/RF_shank_fixed/RF_FOOT>,
+        </anymal/Geometry/base/LH_HAA>,
+        </anymal/Geometry/base/LH_HAA/LH_HIP>,
+        </anymal/Geometry/base/LH_HAA/LH_HIP/LH_hip_fixed>,
+        </anymal/Geometry/base/LH_HAA/LH_HIP/LH_hip_fixed/LH_HFE>,
+        </anymal/Geometry/base/LH_HAA/LH_HIP/LH_hip_fixed/LH_HFE/LH_THIGH>,
+        </anymal/Geometry/base/LH_HAA/LH_HIP/LH_hip_fixed/LH_HFE/LH_THIGH/LH_thigh_fixed>,
+        </anymal/Geometry/base/LH_HAA/LH_HIP/LH_hip_fixed/LH_HFE/LH_THIGH/LH_thigh_fixed/LH_KFE>,
+        </anymal/Geometry/base/LH_HAA/LH_HIP/LH_hip_fixed/LH_HFE/LH_THIGH/LH_thigh_fixed/LH_KFE/LH_SHANK>,
+        </anymal/Geometry/base/LH_HAA/LH_HIP/LH_hip_fixed/LH_HFE/LH_THIGH/LH_thigh_fixed/LH_KFE/LH_SHANK/LH_shank_fixed>,
+        </anymal/Geometry/base/LH_HAA/LH_HIP/LH_hip_fixed/LH_HFE/LH_THIGH/LH_thigh_fixed/LH_KFE/LH_SHANK/LH_shank_fixed/LH_FOOT>,
+        </anymal/Geometry/base/RH_HAA>,
+        </anymal/Geometry/base/RH_HAA/RH_HIP>,
+        </anymal/Geometry/base/RH_HAA/RH_HIP/RH_hip_fixed>,
+        </anymal/Geometry/base/RH_HAA/RH_HIP/RH_hip_fixed/RH_HFE>,
+        </anymal/Geometry/base/RH_HAA/RH_HIP/RH_hip_fixed/RH_HFE/RH_THIGH>,
+        </anymal/Geometry/base/RH_HAA/RH_HIP/RH_hip_fixed/RH_HFE/RH_THIGH/RH_thigh_fixed>,
+        </anymal/Geometry/base/RH_HAA/RH_HIP/RH_hip_fixed/RH_HFE/RH_THIGH/RH_thigh_fixed/RH_KFE>,
+        </anymal/Geometry/base/RH_HAA/RH_HIP/RH_hip_fixed/RH_HFE/RH_THIGH/RH_thigh_fixed/RH_KFE/RH_SHANK>,
+        </anymal/Geometry/base/RH_HAA/RH_HIP/RH_hip_fixed/RH_HFE/RH_THIGH/RH_thigh_fixed/RH_KFE/RH_SHANK/RH_shank_fixed>,
+        </anymal/Geometry/base/RH_HAA/RH_HIP/RH_hip_fixed/RH_HFE/RH_THIGH/RH_thigh_fixed/RH_KFE/RH_SHANK/RH_shank_fixed/RH_FOOT>,
+        </anymal/Geometry/base/hatch>,
+    ]
+    token isaac:robotType = "Quadruped"
+
+    over "Geometry"
+    {
+        over "base" (
+            prepend apiSchemas = ["IsaacLinkAPI"]
+        )
+        {
+            over "top_shell" (
+                prepend apiSchemas = ["IsaacLinkAPI"]
+            )
+            {
+            }
+
+            over "bottom_shell" (
+                prepend apiSchemas = ["IsaacLinkAPI"]
+            )
+            {
+            }
+
+            over "remote" (
+                prepend apiSchemas = ["IsaacLinkAPI"]
+            )
+            {
+            }
+
+            over "handle" (
+                prepend apiSchemas = ["IsaacLinkAPI"]
+            )
+            {
+            }
+
+            over "face_front" (
+                prepend apiSchemas = ["IsaacLinkAPI"]
+            )
+            {
+                over "depth_camera_front_camera" (
+                    prepend apiSchemas = ["IsaacLinkAPI"]
+                )
+                {
+                }
+
+                over "wide_angle_camera_front_camera" (
+                    prepend apiSchemas = ["IsaacLinkAPI"]
+                )
+                {
+                    over "wide_angle_camera_front_camera_parent" (
+                        prepend apiSchemas = ["IsaacSiteAPI"]
+                    )
+                    {
+                    }
+                }
+            }
+
+            over "face_rear" (
+                prepend apiSchemas = ["IsaacLinkAPI"]
+            )
+            {
+                over "depth_camera_rear_camera" (
+                    prepend apiSchemas = ["IsaacLinkAPI"]
+                )
+                {
+                }
+
+                over "wide_angle_camera_rear_camera" (
+                    prepend apiSchemas = ["IsaacLinkAPI"]
+                )
+                {
+                    over "wide_angle_camera_rear_camera_parent" (
+                        prepend apiSchemas = ["IsaacSiteAPI"]
+                    )
+                    {
+                    }
+                }
+            }
+
+            over "battery" (
+                prepend apiSchemas = ["IsaacLinkAPI"]
+            )
+            {
+            }
+
+            over "imu_link" (
+                prepend apiSchemas = ["IsaacLinkAPI"]
+            )
+            {
+            }
+
+            over "depth_camera_left_camera" (
+                prepend apiSchemas = ["IsaacLinkAPI"]
+            )
+            {
+            }
+
+            over "depth_camera_right_camera" (
+                prepend apiSchemas = ["IsaacLinkAPI"]
+            )
+            {
+            }
+
+            over "lidar_cage" (
+                prepend apiSchemas = ["IsaacLinkAPI"]
+            )
+            {
+                over "lidar" (
+                    prepend apiSchemas = ["IsaacLinkAPI"]
+                )
+                {
+                }
+            }
+
+            over "LF_HAA" (
+                prepend apiSchemas = ["IsaacLinkAPI"]
+            )
+            {
+                over "LF_HIP" (
+                    prepend apiSchemas = ["IsaacLinkAPI"]
+                )
+                {
+                    over "LF_hip_fixed" (
+                        prepend apiSchemas = ["IsaacLinkAPI"]
+                    )
+                    {
+                        over "LF_HFE" (
+                            prepend apiSchemas = ["IsaacLinkAPI"]
+                        )
+                        {
+                            over "LF_THIGH" (
+                                prepend apiSchemas = ["IsaacLinkAPI"]
+                            )
+                            {
+                                over "LF_thigh_fixed" (
+                                    prepend apiSchemas = ["IsaacLinkAPI"]
+                                )
+                                {
+                                    over "LF_KFE" (
+                                        prepend apiSchemas = ["IsaacLinkAPI"]
+                                    )
+                                    {
+                                        over "LF_SHANK" (
+                                            prepend apiSchemas = ["IsaacLinkAPI"]
+                                        )
+                                        {
+                                            over "LF_shank_fixed" (
+                                                prepend apiSchemas = ["IsaacLinkAPI"]
+                                            )
+                                            {
+                                                over "LF_FOOT" (
+                                                    prepend apiSchemas = ["IsaacLinkAPI"]
+                                                )
+                                                {
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            over "RF_HAA" (
+                prepend apiSchemas = ["IsaacLinkAPI"]
+            )
+            {
+                over "RF_HIP" (
+                    prepend apiSchemas = ["IsaacLinkAPI"]
+                )
+                {
+                    over "RF_hip_fixed" (
+                        prepend apiSchemas = ["IsaacLinkAPI"]
+                    )
+                    {
+                        over "RF_HFE" (
+                            prepend apiSchemas = ["IsaacLinkAPI"]
+                        )
+                        {
+                            over "RF_THIGH" (
+                                prepend apiSchemas = ["IsaacLinkAPI"]
+                            )
+                            {
+                                over "RF_thigh_fixed" (
+                                    prepend apiSchemas = ["IsaacLinkAPI"]
+                                )
+                                {
+                                    over "RF_KFE" (
+                                        prepend apiSchemas = ["IsaacLinkAPI"]
+                                    )
+                                    {
+                                        over "RF_SHANK" (
+                                            prepend apiSchemas = ["IsaacLinkAPI"]
+                                        )
+                                        {
+                                            over "RF_shank_fixed" (
+                                                prepend apiSchemas = ["IsaacLinkAPI"]
+                                            )
+                                            {
+                                                over "RF_FOOT" (
+                                                    prepend apiSchemas = ["IsaacLinkAPI"]
+                                                )
+                                                {
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            over "LH_HAA" (
+                prepend apiSchemas = ["IsaacLinkAPI"]
+            )
+            {
+                over "LH_HIP" (
+                    prepend apiSchemas = ["IsaacLinkAPI"]
+                )
+                {
+                    over "LH_hip_fixed" (
+                        prepend apiSchemas = ["IsaacLinkAPI"]
+                    )
+                    {
+                        over "LH_HFE" (
+                            prepend apiSchemas = ["IsaacLinkAPI"]
+                        )
+                        {
+                            over "LH_THIGH" (
+                                prepend apiSchemas = ["IsaacLinkAPI"]
+                            )
+                            {
+                                over "LH_thigh_fixed" (
+                                    prepend apiSchemas = ["IsaacLinkAPI"]
+                                )
+                                {
+                                    over "LH_KFE" (
+                                        prepend apiSchemas = ["IsaacLinkAPI"]
+                                    )
+                                    {
+                                        over "LH_SHANK" (
+                                            prepend apiSchemas = ["IsaacLinkAPI"]
+                                        )
+                                        {
+                                            over "LH_shank_fixed" (
+                                                prepend apiSchemas = ["IsaacLinkAPI"]
+                                            )
+                                            {
+                                                over "LH_FOOT" (
+                                                    prepend apiSchemas = ["IsaacLinkAPI"]
+                                                )
+                                                {
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            over "RH_HAA" (
+                prepend apiSchemas = ["IsaacLinkAPI"]
+            )
+            {
+                over "RH_HIP" (
+                    prepend apiSchemas = ["IsaacLinkAPI"]
+                )
+                {
+                    over "RH_hip_fixed" (
+                        prepend apiSchemas = ["IsaacLinkAPI"]
+                    )
+                    {
+                        over "RH_HFE" (
+                            prepend apiSchemas = ["IsaacLinkAPI"]
+                        )
+                        {
+                            over "RH_THIGH" (
+                                prepend apiSchemas = ["IsaacLinkAPI"]
+                            )
+                            {
+                                over "RH_thigh_fixed" (
+                                    prepend apiSchemas = ["IsaacLinkAPI"]
+                                )
+                                {
+                                    over "RH_KFE" (
+                                        prepend apiSchemas = ["IsaacLinkAPI"]
+                                    )
+                                    {
+                                        over "RH_SHANK" (
+                                            prepend apiSchemas = ["IsaacLinkAPI"]
+                                        )
+                                        {
+                                            over "RH_shank_fixed" (
+                                                prepend apiSchemas = ["IsaacLinkAPI"]
+                                            )
+                                            {
+                                                over "RH_FOOT" (
+                                                    prepend apiSchemas = ["IsaacLinkAPI"]
+                                                )
+                                                {
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            over "hatch" (
+                prepend apiSchemas = ["IsaacLinkAPI"]
+            )
+            {
+            }
+
+            over "base_inertia" (
+                prepend apiSchemas = ["IsaacLinkAPI"]
+            )
+            {
+            }
+
+            over "docking_hatch_cover" (
+                prepend apiSchemas = ["IsaacLinkAPI"]
+            )
+            {
+            }
+        }
+    }
+
+    over "Physics"
+    {
+        over "base_to_base_inertia" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "base_top_shell" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "base_bottom_shell" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "base_remote" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "base_handle" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "base_face_front" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "face_front_to_depth_camera_front_camera" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "face_front_to_wide_angle_camera_front_camera" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "base_face_rear" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "face_rear_to_depth_camera_rear_camera" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "face_rear_to_wide_angle_camera_rear_camera" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "base_battery" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "base_to_docking_hatch_cover" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "imu_joint" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "base_to_depth_camera_left_camera" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "base_to_depth_camera_right_camera" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "base_to_lidar_cage" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "lidar_cage_to_lidar" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "base_LF_HAA" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "LF_HAA" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "LF_HIP_LF_hip_fixed" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "LF_hip_fixed_LF_HFE" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "LF_HFE" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "LF_THIGH_LF_thigh_fixed" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "LF_thigh_fixed_LF_KFE" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "LF_KFE" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "LF_shank_LF_shank_fixed" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "LF_shank_fixed_LF_FOOT" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "base_RF_HAA" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "RF_HAA" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "RF_HIP_RF_hip_fixed" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "RF_hip_fixed_RF_HFE" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "RF_HFE" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "RF_THIGH_RF_thigh_fixed" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "RF_thigh_fixed_RF_KFE" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "RF_KFE" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "RF_shank_RF_shank_fixed" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "RF_shank_fixed_RF_FOOT" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "base_LH_HAA" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "LH_HAA" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "LH_HIP_LH_hip_fixed" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "LH_hip_fixed_LH_HFE" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "LH_HFE" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "LH_THIGH_LH_thigh_fixed" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "LH_thigh_fixed_LH_KFE" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "LH_KFE" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "LH_shank_LH_shank_fixed" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "LH_shank_fixed_LH_FOOT" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "base_RH_HAA" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "RH_HAA" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "RH_HIP_RH_hip_fixed" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "RH_hip_fixed_RH_HFE" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "RH_HFE" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "RH_THIGH_RH_thigh_fixed" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "RH_thigh_fixed_RH_KFE" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "RH_KFE" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "RH_shank_RH_shank_fixed" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "RH_shank_fixed_RH_FOOT" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+
+        over "base_hatch" (
+            prepend apiSchemas = ["IsaacJointAPI"]
+        )
+        {
+        }
+    }
+}
+

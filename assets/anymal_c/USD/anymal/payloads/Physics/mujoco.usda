@@ -1,0 +1,250 @@
+#usda 1.0
+(
+    customLayerData = {
+        string creator = "URDF USD Converter v0.3.2"
+    }
+    defaultPrim = "anymal"
+    endTimeCode = 1000000
+    kilogramsPerUnit = 1
+    metersPerUnit = 1
+    startTimeCode = 0
+    subLayers = [
+        @./physics.usda@
+    ]
+    upAxis = "Z"
+)
+
+over "anymal"
+{
+    over "Physics"
+    {
+        over "LF_HAA" (
+            delete apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
+            prepend apiSchemas = ["MjcJointAPI"]
+        )
+        {
+        }
+
+        over "LF_HFE" (
+            delete apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
+            prepend apiSchemas = ["MjcJointAPI"]
+        )
+        {
+        }
+
+        over "LF_KFE" (
+            delete apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
+            prepend apiSchemas = ["MjcJointAPI"]
+        )
+        {
+        }
+
+        over "RF_HAA" (
+            delete apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
+            prepend apiSchemas = ["MjcJointAPI"]
+        )
+        {
+        }
+
+        over "RF_HFE" (
+            delete apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
+            prepend apiSchemas = ["MjcJointAPI"]
+        )
+        {
+        }
+
+        over "RF_KFE" (
+            delete apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
+            prepend apiSchemas = ["MjcJointAPI"]
+        )
+        {
+        }
+
+        over "LH_HAA" (
+            delete apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
+            prepend apiSchemas = ["MjcJointAPI"]
+        )
+        {
+        }
+
+        over "LH_HFE" (
+            delete apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
+            prepend apiSchemas = ["MjcJointAPI"]
+        )
+        {
+        }
+
+        over "LH_KFE" (
+            delete apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
+            prepend apiSchemas = ["MjcJointAPI"]
+        )
+        {
+        }
+
+        over "RH_HAA" (
+            delete apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
+            prepend apiSchemas = ["MjcJointAPI"]
+        )
+        {
+        }
+
+        over "RH_HFE" (
+            delete apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
+            prepend apiSchemas = ["MjcJointAPI"]
+        )
+        {
+        }
+
+        over "RH_KFE" (
+            delete apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
+            prepend apiSchemas = ["MjcJointAPI"]
+        )
+        {
+        }
+
+        def MjcActuator "LF_HAA_actuator"
+        {
+            uniform double[] mjc:biasPrm = [0, -1.3962633609771729, -0.03490658476948738, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:biasType = "affine"
+            uniform double mjc:forceRange:max = 80
+            uniform double mjc:forceRange:min = -80
+            uniform double[] mjc:gainPrm = [1.3962633609771729, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:gainType = "fixed"
+            custom rel mjc:target
+            append rel mjc:target = </anymal/Physics/LF_HAA>
+        }
+
+        def MjcActuator "LF_HFE_actuator"
+        {
+            uniform double[] mjc:biasPrm = [0, -1.3962633609771729, -0.03490658476948738, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:biasType = "affine"
+            uniform double mjc:forceRange:max = 80
+            uniform double mjc:forceRange:min = -80
+            uniform double[] mjc:gainPrm = [1.3962633609771729, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:gainType = "fixed"
+            custom rel mjc:target
+            append rel mjc:target = </anymal/Physics/LF_HFE>
+        }
+
+        def MjcActuator "LF_KFE_actuator"
+        {
+            uniform double[] mjc:biasPrm = [0, -1.3962633609771729, -0.03490658476948738, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:biasType = "affine"
+            uniform double mjc:forceRange:max = 80
+            uniform double mjc:forceRange:min = -80
+            uniform double[] mjc:gainPrm = [1.3962633609771729, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:gainType = "fixed"
+            custom rel mjc:target
+            append rel mjc:target = </anymal/Physics/LF_KFE>
+        }
+
+        def MjcActuator "RF_HAA_actuator"
+        {
+            uniform double[] mjc:biasPrm = [0, -1.3962633609771729, -0.03490658476948738, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:biasType = "affine"
+            uniform double mjc:forceRange:max = 80
+            uniform double mjc:forceRange:min = -80
+            uniform double[] mjc:gainPrm = [1.3962633609771729, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:gainType = "fixed"
+            custom rel mjc:target
+            append rel mjc:target = </anymal/Physics/RF_HAA>
+        }
+
+        def MjcActuator "RF_HFE_actuator"
+        {
+            uniform double[] mjc:biasPrm = [0, -1.3962633609771729, -0.03490658476948738, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:biasType = "affine"
+            uniform double mjc:forceRange:max = 80
+            uniform double mjc:forceRange:min = -80
+            uniform double[] mjc:gainPrm = [1.3962633609771729, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:gainType = "fixed"
+            custom rel mjc:target
+            append rel mjc:target = </anymal/Physics/RF_HFE>
+        }
+
+        def MjcActuator "RF_KFE_actuator"
+        {
+            uniform double[] mjc:biasPrm = [0, -1.3962633609771729, -0.03490658476948738, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:biasType = "affine"
+            uniform double mjc:forceRange:max = 80
+            uniform double mjc:forceRange:min = -80
+            uniform double[] mjc:gainPrm = [1.3962633609771729, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:gainType = "fixed"
+            custom rel mjc:target
+            append rel mjc:target = </anymal/Physics/RF_KFE>
+        }
+
+        def MjcActuator "LH_HAA_actuator"
+        {
+            uniform double[] mjc:biasPrm = [0, -1.3962633609771729, -0.03490658476948738, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:biasType = "affine"
+            uniform double mjc:forceRange:max = 80
+            uniform double mjc:forceRange:min = -80
+            uniform double[] mjc:gainPrm = [1.3962633609771729, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:gainType = "fixed"
+            custom rel mjc:target
+            append rel mjc:target = </anymal/Physics/LH_HAA>
+        }
+
+        def MjcActuator "LH_HFE_actuator"
+        {
+            uniform double[] mjc:biasPrm = [0, -1.3962633609771729, -0.03490658476948738, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:biasType = "affine"
+            uniform double mjc:forceRange:max = 80
+            uniform double mjc:forceRange:min = -80
+            uniform double[] mjc:gainPrm = [1.3962633609771729, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:gainType = "fixed"
+            custom rel mjc:target
+            append rel mjc:target = </anymal/Physics/LH_HFE>
+        }
+
+        def MjcActuator "LH_KFE_actuator"
+        {
+            uniform double[] mjc:biasPrm = [0, -1.3962633609771729, -0.03490658476948738, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:biasType = "affine"
+            uniform double mjc:forceRange:max = 80
+            uniform double mjc:forceRange:min = -80
+            uniform double[] mjc:gainPrm = [1.3962633609771729, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:gainType = "fixed"
+            custom rel mjc:target
+            append rel mjc:target = </anymal/Physics/LH_KFE>
+        }
+
+        def MjcActuator "RH_HAA_actuator"
+        {
+            uniform double[] mjc:biasPrm = [0, -1.3962633609771729, -0.03490658476948738, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:biasType = "affine"
+            uniform double mjc:forceRange:max = 80
+            uniform double mjc:forceRange:min = -80
+            uniform double[] mjc:gainPrm = [1.3962633609771729, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:gainType = "fixed"
+            custom rel mjc:target
+            append rel mjc:target = </anymal/Physics/RH_HAA>
+        }
+
+        def MjcActuator "RH_HFE_actuator"
+        {
+            uniform double[] mjc:biasPrm = [0, -1.3962633609771729, -0.03490658476948738, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:biasType = "affine"
+            uniform double mjc:forceRange:max = 80
+            uniform double mjc:forceRange:min = -80
+            uniform double[] mjc:gainPrm = [1.3962633609771729, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:gainType = "fixed"
+            custom rel mjc:target
+            append rel mjc:target = </anymal/Physics/RH_HFE>
+        }
+
+        def MjcActuator "RH_KFE_actuator"
+        {
+            uniform double[] mjc:biasPrm = [0, -1.3962633609771729, -0.03490658476948738, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:biasType = "affine"
+            uniform double mjc:forceRange:max = 80
+            uniform double mjc:forceRange:min = -80
+            uniform double[] mjc:gainPrm = [1.3962633609771729, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            uniform token mjc:gainType = "fixed"
+            custom rel mjc:target
+            append rel mjc:target = </anymal/Physics/RH_KFE>
+        }
+    }
+}
+

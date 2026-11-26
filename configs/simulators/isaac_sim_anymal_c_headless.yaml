@@ -1,0 +1,29 @@
+model_path: ./assets/anymal_c/USD/anymal/anymal.usda
+sim_dt: 0.002
+frame_skip: 10
+robot_prim_path: /Robot
+base_body_prim_path: /Geometry/base
+foot_body_prim_paths:
+  - /Geometry/base/RF_HAA/RF_HIP/RF_hip_fixed/RF_HFE/RF_THIGH/RF_thigh_fixed/RF_KFE/RF_SHANK/RF_shank_fixed/RF_FOOT
+  - /Geometry/base/LF_HAA/LF_HIP/LF_hip_fixed/LF_HFE/LF_THIGH/LF_thigh_fixed/LF_KFE/LF_SHANK/LF_shank_fixed/LF_FOOT
+  - /Geometry/base/RH_HAA/RH_HIP/RH_hip_fixed/RH_HFE/RH_THIGH/RH_thigh_fixed/RH_KFE/RH_SHANK/RH_shank_fixed/RH_FOOT
+  - /Geometry/base/LH_HAA/LH_HIP/LH_hip_fixed/LH_HFE/LH_THIGH/LH_thigh_fixed/LH_KFE/LH_SHANK/LH_shank_fixed/LH_FOOT
+floor_prim_paths: []
+leg_joint_names: [RF_HFE, RF_KFE, LF_HFE, LF_KFE, RH_HFE, RH_KFE, LH_HFE, LH_KFE]
+foot_contact_force_threshold: 15.0
+reset_state:
+  base_position: [0.0, 0.0, 0.56]
+  base_orientation: [1.0, 0.0, 0.0, 0.0]
+  joint_positions:
+    RF_HAA: 0.0
+    RF_HFE: 0.5235987756
+    RF_KFE: -0.7853981634
+    LF_HAA: 0.0
+    LF_HFE: 0.5235987756
+    LF_KFE: -0.7853981634
+    RH_HAA: 0.0
+    RH_HFE: -0.5235987756
+    RH_KFE: 0.7853981634
+    LH_HAA: 0.0
+    LH_HFE: -0.5235987756
+    LH_KFE: 0.7853981634

@@ -16,6 +16,75 @@ def Xform "anymal" (
     append variantSets = "Physics"
 )
 {
+    over "Geometry"
+    {
+        over "base"
+        {
+            def Xform "scan_rf"
+            {
+                double3 xformOp:translate = (0.46, -0.075, -0.096)
+                quatf xformOp:orient = (0.17364818, 0.98480775, 0, 0)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+
+                def Cone "axis"
+                {
+                    uniform token axis = "Z"
+                    double height = 0.056
+                    double radius = 0.014
+                    color3f[] primvars:displayColor = [(0, 1, 1)]
+                    uniform token purpose = "guide"
+                }
+            }
+
+            def Xform "scan_lf"
+            {
+                double3 xformOp:translate = (0.46, 0.075, -0.096)
+                quatf xformOp:orient = (0.17364818, -0.98480775, 0, 0)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+
+                def Cone "axis"
+                {
+                    uniform token axis = "Z"
+                    double height = 0.056
+                    double radius = 0.014
+                    color3f[] primvars:displayColor = [(0, 1, 1)]
+                    uniform token purpose = "guide"
+                }
+            }
+
+            def Xform "scan_rh"
+            {
+                double3 xformOp:translate = (-0.46, -0.075, -0.096)
+                quatf xformOp:orient = (0.17364818, 0.98480775, 0, 0)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+
+                def Cone "axis"
+                {
+                    uniform token axis = "Z"
+                    double height = 0.056
+                    double radius = 0.014
+                    color3f[] primvars:displayColor = [(0, 1, 1)]
+                    uniform token purpose = "guide"
+                }
+            }
+
+            def Xform "scan_lh"
+            {
+                double3 xformOp:translate = (-0.46, 0.075, -0.096)
+                quatf xformOp:orient = (0.17364818, -0.98480775, 0, 0)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+
+                def Cone "axis"
+                {
+                    uniform token axis = "Z"
+                    double height = 0.056
+                    double radius = 0.014
+                    color3f[] primvars:displayColor = [(0, 1, 1)]
+                    uniform token purpose = "guide"
+                }
+            }
+        }
+    }
     variantSet "Physics" = {
         "mujoco" (
             prepend payload = @./payloads/Physics/mujoco.usda@

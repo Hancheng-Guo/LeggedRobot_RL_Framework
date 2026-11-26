@@ -78,6 +78,11 @@
   <worldbody>
     <light name="spotlight" mode="targetbodycom" target="trunk" pos="0 -1 2"/>
     <body name="trunk" pos="0 0 0.445" childclass="go1">
+      <!-- Scan mounts: local +Z points down and outboard. Viewer site group 4. -->
+      <site name="scan_rf" pos="0.1 -0.085 -0.035" quat="0.17364818 0.98480775 0 0" type="ellipsoid" size="0.009 0.009 0.018" rgba="0 1 1 1" group="4"/>
+      <site name="scan_lf" pos="0.1 0.085 -0.035" quat="0.17364818 -0.98480775 0 0" type="ellipsoid" size="0.009 0.009 0.018" rgba="0 1 1 1" group="4"/>
+      <site name="scan_rh" pos="-0.1 -0.085 -0.035" quat="0.17364818 0.98480775 0 0" type="ellipsoid" size="0.009 0.009 0.018" rgba="0 1 1 1" group="4"/>
+      <site name="scan_lh" pos="-0.1 0.085 -0.035" quat="0.17364818 -0.98480775 0 0" type="ellipsoid" size="0.009 0.009 0.018" rgba="0 1 1 1" group="4"/>
       <camera name="tracking" mode="trackcom" pos="0 -1 0.8" xyaxes="1 0 0 0 1 1"/>
       <site name="head" pos="0.3 0 0" rgba="1 0 0 1" size="0.02" group="5"/>
       <inertial pos="0.0223 0.002 -0.0005" quat="-0.00342088 0.705204 0.000106698 0.708996" mass="5.204"

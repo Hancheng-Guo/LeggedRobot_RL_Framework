@@ -1,4 +1,4 @@
-"""Exercise stage 1 with a real simulator via its normal YAML entry point.
+"""Verify the flat-ground state and scan-off baseline with a real simulator via its normal YAML entry point.
 
 Run from the repository root with the corresponding interpreter:
 python -m tests.manual.verify_foot_terrain_scan_plane mujoco
@@ -18,7 +18,6 @@ from unittest.mock import patch
 import torch
 import yaml
 
-from envs.simulators.utils.ground_ray import HorizontalGroundRayQuery
 from envs.vector_env import VectorEnv
 from utils import Component, ComponentInfo, RuntimeContext, load_yaml
 
@@ -35,7 +34,10 @@ def verify(backend: str, enabled: bool) -> None:
     config = load_yaml(ROOT / "configs/simulators" / SIMULATORS[backend])
     config.pop("render_mode", None)
     if enabled:
-        config["simulator_state_manager_config"] = {"terms": {"foot_terrain_scan": {}}}
+        config["simulator_state_manager_config"] = {"terms": {"foot_terrain_scan": {
+            "mount_names": ["scan_rf", "scan_lf", "scan_rh", "scan_lh"],
+            "reference_height": .27, "hit_mode": "ground_only", "max_angle_deg": 180.,
+        }}}
 
     with TemporaryDirectory() as directory:
         simulator_path = Path(directory) / "simulator.yaml"
@@ -47,14 +49,19 @@ def verify(backend: str, enabled: bool) -> None:
         )
         env = VectorEnv(context)
         calls = []
-        original_query = HorizontalGroundRayQuery.__call__
+        if backend == "mujoco":
+            from envs.simulators.mujoco import MujocoSimulator as Simulator
+        else:
+            from envs.simulators.isaac_sim import IsaacSimSimulator as Simulator
+        original_query = Simulator.query_surface_rays
 
-        def track_query(query, origins, directions, max_distance, env_ids):
+        def track_query(simulator, origins, directions, max_distance, env_ids, *, include_robot):
             calls.append(origins.shape[0])
-            return original_query(query, origins, directions, max_distance, env_ids)
+            return original_query(simulator, origins, directions, max_distance, env_ids,
+                                  include_robot=include_robot)
 
         try:
-            with patch.object(HorizontalGroundRayQuery, "__call__", track_query):
+            with patch.object(Simulator, "query_surface_rays", track_query):
                 env.config_update(component, num_envs=3, max_episode_steps=32)
                 obs = env.reset()
                 obs, *_ = env.step(obs.new_zeros((env.num_envs, env.action_dim)))
@@ -74,13 +81,14 @@ def verify(backend: str, enabled: bool) -> None:
 
                 feet_z = state.geom_xpos[:, sim.model_context.foot_geom_ids, 2]
                 torch.testing.assert_close(
-                    state.foot_terrain_scan_heights, -feet_z[..., None].expand(-1, -1, 61),
+                    state.foot_terrain_scan_heights, feet_z[..., None].expand(-1, -1, 61),
                     atol=2e-6, rtol=0.,
                 )
 
                 empty_heights = empty.foot_terrain_scan_heights
                 assert empty_heights is not None and empty_heights.shape == (0, 4, 61)
             else:
+                assert env.observation_dim == 112
                 assert not calls
                 assert not sim.model_context.state_term_output_shapes
                 assert not state.term_values

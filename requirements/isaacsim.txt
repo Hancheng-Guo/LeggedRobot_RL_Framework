@@ -6,5 +6,6 @@
 -c constraints/isaacsim.txt
 
 numpy==2.3.1
+trimesh==4.11.1
 
 isaacsim[all,extscache]==6.1.0.0

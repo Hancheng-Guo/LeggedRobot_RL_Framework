@@ -1,22 +1,37 @@
 from dataclasses import replace
-from math import cos, pi, sin, sqrt
+from math import cos, pi, sin
 from types import SimpleNamespace
 
 import pytest
 import torch
 
 from envs.simulators.state.terms.foot_terrain_scan import FootTerrainScan
-from envs.simulators.utils.ground_ray import GROUND_RAY_QUERY, HorizontalGroundRayQuery
+from envs.simulators.utils.ray_query import GROUND_RAY_QUERY, HorizontalPlaneRayQuery
+from envs.simulators.utils.scan_ray import select_nearest_surface
 from envs.simulators.state.terms import BaseSimulatorStateTerm, register_simulator_state_term
 from envs.simulators.state.terms import registry
 from envs.simulators.state import SimulatorStateManager
 
 
-def _manager(context, model_context, query, **config):
+class _ScanSimulator(SimpleNamespace):
+    def query_surface_rays(self, origins, directions, max_distance, env_ids, *, include_robot):
+        ground = self.query_ground_rays(origins, directions, max_distance, env_ids)
+        robot = self.query_robot_rays(origins, directions, max_distance, env_ids) if include_robot else None
+        return select_nearest_surface(ground, robot)
+
+
+def _mounts(names):
+    return torch.zeros(len(names), 3), torch.tensor([[0., 0., -1.]]).repeat(len(names), 1)
+
+
+def _manager(context, model_context, query, robot_query=None, **config):
+    config.setdefault("mount_names", [str(i) for i in model_context.foot_geom_ids.tolist()])
+    config.setdefault("reference_height", .5)
+    config.setdefault("hit_mode", "ground_only")
     manager = SimulatorStateManager(
         context=context,
         model_context=model_context,
-        simulator=SimpleNamespace(query_ground_rays=query),
+        simulator=_ScanSimulator(query_ground_rays=query, resolve_scan_mounts=_mounts, query_robot_rays=robot_query),
         terms={"foot_terrain_scan": config},
     )
     return manager, manager.model_context
@@ -47,7 +62,7 @@ def _read(manager, position, quaternion, feet, env_ids=None):
 
 
 def test_honeycomb_layout_round_trip(runtime_context, model_context):
-    manager, model = _manager(runtime_context, _model(model_context), HorizontalGroundRayQuery(0.))
+    manager, model = _manager(runtime_context, _model(model_context), HorizontalPlaneRayQuery(0.))
     scan = manager.terms["foot_terrain_scan"]
     assert isinstance(scan, FootTerrainScan)
     coordinates = scan.axial_coordinates
@@ -77,16 +92,18 @@ def test_honeycomb_layout_round_trip(runtime_context, model_context):
 @pytest.mark.parametrize("params", [
     {"spacing": 0}, {"spacing": float("nan")}, {"spacing": True},
     {"layers": -1}, {"layers": 1.5}, {"layers": True}, {"layers": 1000},
+    {"reference_height": 0}, {"hit_mode": "visible"}, {"max_angle_deg": 190},
+    {"mount_names": ["same", "same"]}, {"mount_names": []},
     {"max_distance": float("inf")}, {"max_distance": -1},
 ])
 def test_scan_config_validation(runtime_context, model_context, params):
     with pytest.raises(ValueError, match="foot_terrain_scan"):
-        _manager(runtime_context, model_context, HorizontalGroundRayQuery(0.), **params)
+        _manager(runtime_context, model_context, HorizontalPlaneRayQuery(0.), **params)
 
 
 def test_scan_rejects_unknown_config_parameter(runtime_context, model_context):
     with pytest.raises(TypeError, match="origin_height"):
-        _manager(runtime_context, model_context, HorizontalGroundRayQuery(0.), origin_height=.6)
+        _manager(runtime_context, model_context, HorizontalPlaneRayQuery(0.), origin_height=.6)
 
 
 def test_disabled_manager_preserves_existing_fields(runtime_context, model_context):
@@ -95,7 +112,7 @@ def test_disabled_manager_preserves_existing_fields(runtime_context, model_conte
 
     def query(origins, directions, max_distance, env_ids):
         calls.append(origins.shape)
-        return HorizontalGroundRayQuery(0.)(origins, directions, max_distance, env_ids)
+        return HorizontalPlaneRayQuery(0.)(origins, directions, max_distance, env_ids)
 
     enabled, scan_model = _manager(runtime_context, model, query)
     def unexpected_query(*args):
@@ -112,7 +129,7 @@ def test_disabled_manager_preserves_existing_fields(runtime_context, model_conte
     assert not before.term_values
     assert not calls
     after = _read(enabled, position, quaternion, feet)
-    assert calls == [torch.Size([1, 2, 61, 3])]
+    assert calls == [torch.Size([1, 2, 3])]
     for name, value in before.as_dict().items():
         assert torch.equal(after.as_dict()[name], value)
 
@@ -169,134 +186,127 @@ def test_registered_term_supplies_its_own_state_fields(runtime_context, model_co
         )
 
 
-def test_plane_ray_query_includes_range_endpoints_and_rejects_parallel_rays():
-    origins = torch.zeros((2, 1, 4, 3))
-    origins[0, 0, :, 2] = torch.tensor([.5, 2.5, 2.51, .49])
-    directions = torch.tensor([[0., 0., -1.], [1., 0., 0.]])
-    distance = HorizontalGroundRayQuery(.5)(
-        origins=origins, directions=directions, max_distance=2., env_ids=None,
-    )
-    torch.testing.assert_close(distance[0, 0, :2], torch.tensor([0., 2.]))
-    assert distance[0, 0, 2:].isnan().all()
-    assert distance[1].isnan().all()
+def test_plane_ray_query_includes_endpoints_and_rejects_parallel_rays():
+    origins = torch.tensor([[[0., 0., .5], [0., 0., 2.5], [0., 0., 2.51]]])
+    directions = torch.tensor([[0., 0., -1.], [1., 0., 0.]]).expand(1, 3, 2, 3)
+    distance = HorizontalPlaneRayQuery(.5)(origins, directions, 2., None)
+    torch.testing.assert_close(distance[0, :2, 0], torch.tensor([0., 2.]))
+    assert distance[0, 2, 0].isnan() and distance[..., 1].isnan().all()
 
 
-def test_scan_uses_the_current_simulator_query(runtime_context, model_context):
-    simulator = SimpleNamespace(query_ground_rays=HorizontalGroundRayQuery(0.))
-    manager = SimulatorStateManager(
-        runtime_context, _model(model_context),
-        terms={"foot_terrain_scan": {"layers": 0}}, simulator=simulator,
-    )
-    position = torch.tensor([[0., 0., .5]])
-    quaternion = torch.tensor([[1., 0., 0., 0.]])
-    feet = torch.tensor([[[0., .2, .2], [0., -.2, .2]]])
-
-    before = _read(manager, position, quaternion, feet)
-    simulator.query_ground_rays = HorizontalGroundRayQuery(.1)
-    after = _read(manager, position, quaternion, feet)
-
-    torch.testing.assert_close(before.foot_terrain_scan_heights, torch.full((1, 2, 1), -.2))
-    torch.testing.assert_close(after.foot_terrain_scan_heights, torch.full((1, 2, 1), -.1))
+@pytest.mark.parametrize("mode", ["first_surface", "visible_ground", "ground_only"])
+def test_moving_occluder_keeps_measured_height(runtime_context, model_context, mode):
+    positions = torch.tensor([[0., 0., .62]]).expand(3, -1)
+    feet = torch.tensor([[[0., 0., .1]]]).expand(3, -1, -1)
+    quaternion = torch.tensor([[1., 0., 0., 0.]]).expand(3, -1)
+    def robot(origins, directions, limit, env_ids):
+        return torch.tensor([torch.nan, .28, torch.nan]).reshape(3, 1, 1)
+    manager, _ = _manager(runtime_context, _model(model_context, (0,)), HorizontalPlaneRayQuery(0.),
+                          robot, layers=0, hit_mode=mode)
+    state = _read(manager, positions, quaternion, feet)
+    assert state.foot_terrain_scan_heights is not None and state.foot_terrain_scan_valid is not None
+    centre = .1 if mode == "ground_only" else -.24
+    torch.testing.assert_close(state.foot_terrain_scan_heights.flatten(), torch.tensor([.1, centre, .1]))
+    assert state.foot_terrain_scan_valid.flatten().tolist() == [True, mode != "visible_ground", True]
 
 
-def test_tilted_plane_queries_keep_full_pose_and_gravity_projection(runtime_context, model_context):
-    positions = torch.tensor([[1., 2., .8]]).expand(3, -1)
-    feet = torch.tensor([[[1.1, 2., .2], [1., 2.1, .4]]]).expand(3, -1, -1)
+def test_reference_plane_and_gravity_projection(runtime_context, model_context):
     half = pi / 12
-    quats = torch.tensor([[cos(half), sin(half), 0., 0.],
-                          [cos(half), 0., sin(half), 0.],
-                          [cos(half), 0., 0., sin(half)]])
     c, s = cos(2 * half), sin(2 * half)
-    rotations = torch.tensor([[[1., 0., 0.], [0., c, -s], [0., s, c]],
-                              [[c, 0., s], [0., 1., 0.], [-s, 0., c]],
-                              [[c, -s, 0.], [s, c, 0.], [0., 0., 1.]]])
-    captured = []
-
-    def query(origins, directions, max_distance, env_ids):
-        distance = HorizontalGroundRayQuery(0.)(origins, directions, max_distance, env_ids)
-        captured.append((origins, directions, distance))
-        return distance
-
+    rot = torch.tensor([[1., 0., 0.], [0., c, -s], [0., s, c]])
+    position = torch.tensor([[1., 2., .8]])
+    quat = torch.tensor([[cos(half), sin(half), 0., 0.]])
+    local_feet = torch.tensor([[[.1, .2, -.35], [.1, -.2, -.4]]])
+    feet = position[:, None] + local_feet @ rot.T
+    rays = []
+    def query(origins, directions, limit, ids):
+        rays.append((origins, directions))
+        return HorizontalPlaneRayQuery(0.)(origins, directions, limit, ids)
     manager, _ = _manager(runtime_context, _model(model_context), query, layers=1)
-    state = _read(manager, positions, quats, feet)
     scan = manager.terms["foot_terrain_scan"]
     assert isinstance(scan, FootTerrainScan)
-    local_feet = torch.einsum("nji,nfj->nfi", rotations, feet - positions[:, None])
-    local_origins = local_feet[:, :, None, :2] + scan.offsets
-    local_origins = torch.cat((local_origins, torch.zeros_like(local_origins[..., :1])), dim=-1)
-    expected_origins = positions[:, None, None] + torch.einsum("nij,nfkj->nfki", rotations, local_origins)
-    origins, directions, distance = captured[0]
-    torch.testing.assert_close(origins, expected_origins)
-    torch.testing.assert_close(directions, -rotations[..., 2])
-    torch.testing.assert_close(distance, -expected_origins[..., 2] / directions[:, None, None, 2])
-    valid = state.foot_terrain_scan_valid
-    assert valid is not None and valid.all()
-    torch.testing.assert_close(state.term_values["foot_terrain_scan_heights"], -feet[..., 2, None].expand(-1, -1, 7))
+    state = _read(manager, position, quat, feet)
+    origins, directions = rays[-1]
+    targets = torch.zeros_like(directions)
+    targets[..., :2] = local_feet[:, :, None, :2] + scan.offsets
+    targets[..., 2] = -.5
+    expected = torch.nn.functional.normalize(targets @ rot.T, dim=-1)
+    torch.testing.assert_close(origins, position[:, None].expand(-1, 2, -1))
+    torch.testing.assert_close(directions, expected)
+    torch.testing.assert_close(state.foot_terrain_scan_heights, feet[..., 2, None].expand(-1, -1, 7))
+    assert state.foot_terrain_scan_heights is not None
+    raised = _read(manager, position, quat, feet + .1 * rot[:, 2])
+    torch.testing.assert_close(rays[-1][1], directions)
+    torch.testing.assert_close(raised.foot_terrain_scan_heights, state.foot_terrain_scan_heights + .1*c)
+    hits = origins[:, :, None] - directions * origins[..., 2, None, None] / directions[..., 2:3]
+    local_hits = (hits-position[:, None, None]) @ rot
+    offset = (local_hits-targets)[..., :2].norm(dim=-1)
+    tangent = targets[..., :2].norm(dim=-1) / .5
+    torch.testing.assert_close(offset, (local_hits[..., 2]+.5).abs()*tangent)
 
-    # Set a second plane parallel to each base, one metre below it.
-    def sloped_query(origins, directions, max_distance, env_ids):
-        up = rotations[..., 2]
-        plane = positions - up
-        return (((plane[:, None, None] - origins) * up[:, None, None]).sum(dim=-1)
-                / (directions * up).sum(dim=-1)[:, None, None])
-
-    manager, _ = _manager(runtime_context, _model(model_context), sloped_query, layers=1)
-    state = _read(manager, positions, quats, feet)
-    hit_z = expected_origins[..., 2] - rotations[:, None, None, 2, 2]
-    heights = state.term_values["foot_terrain_scan_heights"]
-    assert heights is not None
-    torch.testing.assert_close(heights, hit_z - feet[..., 2, None])
-    assert heights[0, 0].unique().numel() > 1
+    def slope(origins, directions, limit, ids):
+        return -.5 / (directions @ rot[:, 2])
+    manager, _ = _manager(runtime_context, _model(model_context), slope, layers=1)
+    sloped = _read(manager, position, quat, feet)
+    expected_height = feet[..., 2, None] - (position[:, None, None] + targets @ rot.T)[..., 2]
+    torch.testing.assert_close(sloped.foot_terrain_scan_heights, expected_height)
 
 
-def test_ray_origin_range_validity_and_foot_order(runtime_context, model_context):
-    recorded = []
+def test_mask_invalid_pose_foot_and_view(runtime_context, model_context):
+    manager, _ = _manager(runtime_context, _model(model_context), HorizontalPlaneRayQuery(0.),
+                          layers=0, max_angle_deg=30.)
+    feet = torch.tensor([[[0., 0., .2], [1., 0., .3]]]).repeat(3, 1, 1)
+    feet[1, 0, 0] = torch.nan
+    pos = torch.tensor([[0., 0., .5]]).repeat(3, 1)
+    quat = torch.tensor([[1., 0., 0., 0.]]).repeat(3, 1)
+    quat[-1, 0] = torch.nan
+    state = _read(manager, pos, quat, feet)
+    assert state.foot_terrain_scan_heights is not None and state.foot_terrain_scan_valid is not None
+    assert state.foot_terrain_scan_valid.squeeze(-1).tolist() == [[True,False],[False,False],[False,False]]
+    for ids in [torch.tensor([2,0]), torch.empty(0, dtype=torch.long)]:
+        subset = _read(manager, pos[ids], quat[ids], feet[ids], ids)
+        torch.testing.assert_close(subset.foot_terrain_scan_heights, state.foot_terrain_scan_heights[ids])
 
-    def query(origins, directions, max_distance, env_ids):
-        assert origins.isfinite().all() and directions.isfinite().all()
-        recorded.append((origins, env_ids))
-        return HorizontalGroundRayQuery(0.)(origins, directions, max_distance, env_ids)
+def test_only_moving_foot_redirects_its_beams(runtime_context, model_context):
+    batches = []
+    def query(origins, directions, limit, ids):
+        batches.append((origins.clone(), directions.clone()))
+        return HorizontalPlaneRayQuery(0.)(origins, directions, limit, ids)
 
-    manager, model = _manager(runtime_context, _model(model_context, (2, 0, 1)), query, layers=0, max_distance=2.)
-    assert model.state_term_output_shapes["foot_terrain_scan"]["foot_terrain_scan_heights"] == (3, 1)
-    z = torch.tensor([2., 2.01, -.01, .5, .5])
-    position = torch.stack((torch.zeros_like(z), torch.zeros_like(z), z), dim=-1)
-    quaternion = torch.tensor([[1., 0., 0., 0.]]).repeat(5, 1)
-    quaternion[-1, 0] = torch.nan
-    feet = torch.tensor([[[1., 0., .1], [2., 0., .2], [3., 0., .3]]]).repeat(5, 1, 1)
-    feet[3, 1, 2] = torch.inf
-    state = _read(manager, position, quaternion, feet)
-    expected_valid = torch.tensor([[1,1,1],[0,0,0],[0,0,0],[1,1,0],[0,0,0]], dtype=torch.bool)[..., None]
-    valid = state.foot_terrain_scan_valid
-    heights = state.foot_terrain_scan_heights
-    assert valid is not None and heights is not None
-    assert torch.equal(valid, expected_valid)
-    torch.testing.assert_close(heights[0, :, 0], torch.tensor([-.3, -.1, -.2]))
-    assert torch.all(heights[~expected_valid] == 0.)
-    env_ids = torch.tensor([3, 0])
-    subset = _read(manager, position[env_ids], quaternion[env_ids], feet[env_ids], env_ids)
-    assert recorded[-1][1] is env_ids
-    selected = state.clone().select(env_ids)
-    torch.testing.assert_close(subset.foot_terrain_scan_heights, selected.foot_terrain_scan_heights)
-    subset_valid = subset.foot_terrain_scan_valid
-    assert subset_valid is not None and torch.equal(subset_valid, expected_valid[env_ids])
-    reordered, _ = _manager(runtime_context, _model(model_context, (0, 1, 2)), query, layers=0)
-    other = _read(reordered, position, quaternion, feet)
-    other_heights = other.foot_terrain_scan_heights
-    other_valid = other.foot_terrain_scan_valid
-    assert other_heights is not None and other_valid is not None
-    torch.testing.assert_close(other_heights, heights[:, [1, 2, 0]])
-    assert torch.equal(other_valid, expected_valid[:, [1, 2, 0]])
-    before = recorded[-1][0]
-    feet = torch.where(feet.isfinite(), feet + torch.tensor([0., 0., .25]), feet)
-    after = _read(reordered, position, quaternion, feet)
-    torch.testing.assert_close(recorded[-1][0], before)
+    manager, _ = _manager(runtime_context, _model(model_context), query, layers=1)
+    position = torch.tensor([[0., 0., .6]])
+    quat = torch.tensor([[1., 0., 0., 0.]])
+    feet = torch.tensor([[[.2, .1, .2], [-.1, .2, .1]]])
+    _read(manager, position, quat, feet)
+    feet[:, 0, 0] += .13
+    _read(manager, position, quat, feet)
+    torch.testing.assert_close(batches[0][0], batches[1][0])
+    torch.testing.assert_close(batches[0][1][:, 1], batches[1][1][:, 1])
+    assert not torch.allclose(batches[0][1][:, 0], batches[1][1][:, 0])
 
-    torch.testing.assert_close(
-        after.foot_terrain_scan_heights, torch.where(other_valid, other_heights - .25, 0.),
-    )
-    count = len(recorded)
-    empty = _read(manager, position[:0], quaternion[:0], feet[:0], torch.empty(0, dtype=torch.long))
-    empty_heights = empty.foot_terrain_scan_heights
-    assert empty_heights is not None and empty_heights.shape == (0, 3, 1)
-    assert len(recorded) == count
+
+@pytest.mark.parametrize(("mode", "expected_height", "valid"), [
+    ("first_surface", -.24, True),
+    ("visible_ground", -.24, False),
+    ("ground_only", 0., False),
+])
+def test_occlusion_inside_range_with_ground_outside(runtime_context, model_context, mode, expected_height, valid):
+    def robot(origins, directions, limit, env_ids):
+        return torch.full_like(directions[..., 0], .28)
+
+    manager, _ = _manager(runtime_context, _model(model_context, (0,)), HorizontalPlaneRayQuery(0.),
+                          robot, layers=0, hit_mode=mode, max_distance=.5)
+    state = _read(manager, torch.tensor([[0., 0., .62]]), torch.tensor([[1., 0., 0., 0.]]),
+                  torch.tensor([[[0., 0., .1]]]))
+    assert state.foot_terrain_scan_valid is not None and state.foot_terrain_scan_valid.item() == valid
+    assert state.foot_terrain_scan_heights is not None
+    assert state.foot_terrain_scan_heights.item() == pytest.approx(expected_height)
+
+
+def test_optical_axis_cone_includes_edge(runtime_context, model_context):
+    manager, _ = _manager(runtime_context, _model(model_context), HorizontalPlaneRayQuery(0.),
+                          layers=0, max_angle_deg=45.)
+    state = _read(manager, torch.tensor([[0., 0., .5]]), torch.tensor([[1., 0., 0., 0.]]),
+                  torch.tensor([[[.5, 0., 0.], [.501, 0., 0.]]]))
+    assert state.foot_terrain_scan_valid is not None
+    assert state.foot_terrain_scan_valid.flatten().tolist() == [True, False]

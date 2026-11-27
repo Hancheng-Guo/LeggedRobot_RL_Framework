@@ -31,7 +31,7 @@ def Xform "go1" (
             {
                 def Xform "scan_rf"
                 {
-                    double3 xformOp:translate = (0.1, -0.085, -0.035)
+                    double3 xformOp:translate = (0.1, -0.085, -0.05)
                     quatf xformOp:orient = (0.17364818, 0.98480775, 0, 0)
                     uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
 
@@ -47,7 +47,7 @@ def Xform "go1" (
 
                 def Xform "scan_lf"
                 {
-                    double3 xformOp:translate = (0.1, 0.085, -0.035)
+                    double3 xformOp:translate = (0.1, 0.085, -0.05)
                     quatf xformOp:orient = (0.17364818, -0.98480775, 0, 0)
                     uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
 
@@ -63,7 +63,7 @@ def Xform "go1" (
 
                 def Xform "scan_rh"
                 {
-                    double3 xformOp:translate = (-0.1, -0.085, -0.035)
+                    double3 xformOp:translate = (-0.1, -0.085, -0.05)
                     quatf xformOp:orient = (0.17364818, 0.98480775, 0, 0)
                     uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
 
@@ -79,7 +79,7 @@ def Xform "go1" (
 
                 def Xform "scan_lh"
                 {
-                    double3 xformOp:translate = (-0.1, 0.085, -0.035)
+                    double3 xformOp:translate = (-0.1, 0.085, -0.05)
                     quatf xformOp:orient = (0.17364818, -0.98480775, 0, 0)
                     uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
 

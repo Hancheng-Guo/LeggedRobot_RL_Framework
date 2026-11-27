@@ -1,10 +1,10 @@
 import torch
-from math import isfinite, sqrt
+from math import cos, isfinite, radians, sqrt
 
 from .base import BaseSimulatorStateTerm
 from .registry import register_simulator_state_term
 from ..state import SimulatorState
-from ...utils import ModelContext, GROUND_RAY_QUERY, GroundRayQueryProvider
+from ...utils import ModelContext, GROUND_RAY_QUERY, ScanRayProvider
 from utils import RuntimeContext
 
 
@@ -20,8 +20,12 @@ class FootTerrainScan(BaseSimulatorStateTerm):
         name: str,
         context: RuntimeContext,
         model_context: ModelContext,
-        simulator: GroundRayQueryProvider,
+        simulator: ScanRayProvider,
         *,
+        mount_names: list[str],
+        reference_height: float,
+        hit_mode: str = "first_surface",
+        max_angle_deg: float = 90.,
         spacing: float = 0.12,
         layers: int = 4,
         max_distance: float = 2.0,
@@ -32,12 +36,51 @@ class FootTerrainScan(BaseSimulatorStateTerm):
         self._model_context = model_context
         self._simulator = simulator
 
+        foot_count = model_context.foot_geom_ids.numel()
+        if foot_count == 0:
+            raise ValueError(
+                "foot_terrain_scan requires at least one configured foot."
+            )
+
+        gravity_norm = model_context.gravity.norm()
+        if not bool(gravity_norm.isfinite() & (gravity_norm > 0.)):
+            raise ValueError(
+                "foot_terrain_scan requires finite, nonzero gravity."
+            )
+        self._up = -model_context.gravity / gravity_norm
+
+        self.max_distance = self._positive_number(max_distance, "max_distance")
+        self.ref_height = self._positive_number(reference_height, "reference_height")
+        if hit_mode not in ("first_surface", "visible_ground", "ground_only"):
+            raise ValueError("Unknown foot_terrain_scan.hit_mode.")
+        self.hit_mode = hit_mode
+        angle = self._positive_number(max_angle_deg, "max_angle_deg")
+        if angle > 180.:
+            raise ValueError("foot_terrain_scan.max_angle_deg must be at most 180.")
+        self._min_cos = cos(radians(angle))
+
+        self._build_hex_layout(context, spacing, layers)
+        self._resolve_mounts(mount_names, foot_count)
+
+        shape = (foot_count, self.point_count)
+        self.output_shapes = {
+            "foot_terrain_scan_heights": shape,
+            "foot_terrain_scan_valid": shape,
+        }
+
+
+    def _build_hex_layout(
+        self,
+        context: RuntimeContext,
+        spacing: float,
+        layers: int,
+    ) -> None:
+
         spacing = self._positive_number(spacing, "spacing")
         if type(layers) is not int or layers < 0:
             raise ValueError(
                 "foot_terrain_scan.layers must be a non-negative integer."
             )
-        self.max_distance = self._positive_number(max_distance, "max_distance")
         self.point_count = 1 + 3 * layers * (layers + 1)
         if self.point_count > self.MAX_POINTS_PER_FOOT:
             raise ValueError(
@@ -65,22 +108,32 @@ class FootTerrainScan(BaseSimulatorStateTerm):
                 "foot_terrain_scan.spacing exceeds the simulator dtype range."
             )
 
-        foot_count = model_context.foot_geom_ids.numel()
-        if foot_count == 0:
+
+    def _resolve_mounts(
+        self,
+        mount_names: list[str],
+        foot_count: int,
+    ) -> None:
+
+        if (
+            not isinstance(mount_names, (list, tuple))
+            or len(mount_names) != foot_count
+            or not all(isinstance(name, str) and name for name in mount_names)
+            or len(set(mount_names)) != foot_count
+        ):
             raise ValueError(
-                "foot_terrain_scan requires at least one configured foot."
+                "foot_terrain_scan.mount_names requires one unique mount per foot."
             )
-        gravity_norm = model_context.gravity.norm()
-        if not bool(gravity_norm.isfinite() & (gravity_norm > 0.)):
-            raise ValueError(
-                "foot_terrain_scan requires finite, nonzero gravity."
-            )
-        self._up = -model_context.gravity / gravity_norm
-        shape = (foot_count, self.point_count)
-        self.output_shapes = {
-            "foot_terrain_scan_heights": shape,
-            "foot_terrain_scan_valid": shape,
-        }
+        self._mount_positions, self._mount_axes = self._simulator.resolve_scan_mounts(
+            tuple(mount_names)
+        )
+        for values in (self._mount_positions, self._mount_axes):
+            if values.shape != (foot_count, 3) or not values.isfinite().all():
+                raise ValueError("Invalid foot_terrain_scan mount geometry.")
+        if not torch.allclose(
+            self._mount_axes.norm(dim=-1), torch.ones_like(self._mount_axes[:, 0])
+        ):
+            raise ValueError("Expected unit mount axes.")
 
 
     @staticmethod
@@ -106,78 +159,96 @@ class FootTerrainScan(BaseSimulatorStateTerm):
         return result
 
 
+    def _get_base_pose(
+        self,
+        state: SimulatorState,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        base_pos_world = state.qpos[:, self._model_context.base_pos_qpos_ids]
+        quaternion = state.qpos[:, self._model_context.base_quat_qpos_ids]
+        quaternion_norm = quaternion.norm(dim=-1, keepdim=True)
+        base_pose_valid = (
+            base_pos_world.isfinite().all(dim=-1)
+            & quaternion_norm[:, 0].isfinite()
+            & (quaternion_norm[:, 0] > torch.finfo(quaternion.dtype).eps)
+        )
+        quaternion = torch.where(
+            base_pose_valid[:, None],
+            quaternion / torch.where(base_pose_valid[:, None], quaternion_norm, 1.),
+            0.,
+        )
+        w, x, y, z = quaternion.unbind(dim=-1)
+        # Columns of the base-to-world rotation for a scalar-first quaternion.
+        base_x_world = torch.stack(
+            (1 - 2 * (y*y + z*z), 2 * (x*y + w*z), 2 * (x*z - w*y)), dim=-1,
+        )
+        base_y_world = torch.stack(
+            (2 * (x*y - w*z), 1 - 2 * (x*x + z*z), 2 * (y*z + w*x)), dim=-1,
+        )
+        base_z_world = torch.stack(
+            (2 * (x*z + w*y), 2 * (y*z - w*x), 1 - 2 * (x*x + y*y)), dim=-1,
+        )
+        base_to_world = torch.stack((base_x_world, base_y_world, base_z_world), dim=-1)
+        base_pos_world = torch.where(base_pose_valid[:, None], base_pos_world, 0.)
+        return base_pos_world, base_to_world, base_pose_valid
+
+
     def compute(
         self,
         state: SimulatorState,
         env_ids: torch.Tensor | None,
     ) -> dict[str, torch.Tensor]:
 
-        feet = state.geom_xpos[:, self._model_context.foot_geom_ids]
-        if feet.size(0) == 0:
-            shape = (*feet.shape[:2], self.point_count)
+        foot_pos_world = state.geom_xpos[:, self._model_context.foot_geom_ids]
+        if foot_pos_world.size(0) == 0:
+            shape = (*foot_pos_world.shape[:2], self.point_count)
             return {
-                "foot_terrain_scan_heights": feet.new_empty(shape),
-                "foot_terrain_scan_valid": feet.new_empty(shape, dtype=torch.bool),
+                "foot_terrain_scan_heights": foot_pos_world.new_empty(shape),
+                "foot_terrain_scan_valid": foot_pos_world.new_empty(shape, dtype=torch.bool),
             }
 
-        base_position = state.qpos[:, self._model_context.base_pos_qpos_ids]
-        quaternion = state.qpos[:, self._model_context.base_quat_qpos_ids]
-        norm = quaternion.norm(dim=-1, keepdim=True)
-        valid_pose = (
-            base_position.isfinite().all(dim=-1)
-            & norm[:, 0].isfinite()
-            & (norm[:, 0] > torch.finfo(quaternion.dtype).eps)
-        )
-        quaternion = torch.where(
-            valid_pose[:, None],
-            quaternion / torch.where(valid_pose[:, None], norm, 1.),
-            0.,
-        )
-        w, x, y, z = quaternion.unbind(dim=-1)
-        # Columns of the base-to-world rotation for a scalar-first quaternion.
-        base_x = torch.stack(
-            (1 - 2 * (y*y + z*z), 2 * (x*y + w*z), 2 * (x*z - w*y)), dim=-1,
-        )
-        base_y = torch.stack(
-            (2 * (x*y - w*z), 1 - 2 * (x*x + z*z), 2 * (y*z + w*x)), dim=-1,
-        )
-        base_up = torch.stack(
-            (2 * (x*z + w*y), 2 * (y*z - w*x), 1 - 2 * (x*x + y*y)), dim=-1,
-        )
-        base_up = torch.where(valid_pose[:, None], base_up, 0.)
+        base_pos_world, base_to_world, base_pose_valid = self._get_base_pose(state)
+        foot_pose_valid = foot_pos_world.isfinite().all(dim=-1) & base_pose_valid[:, None]
+        foot_pos_world = torch.where(foot_pose_valid[..., None], foot_pos_world, 0.)
 
-        valid_foot = feet.isfinite().all(dim=-1) & valid_pose[:, None]
-        feet = torch.where(valid_foot[..., None], feet, 0.)
-        base_position = torch.where(valid_pose[:, None], base_position, 0.)
-        # Project each foot onto base z=0 before adding the in-plane offsets.
-        foot_base_z = (
-            (feet - base_position[:, None]) * base_up[:, None]
-        ).sum(dim=-1)
-        feet_on_base_plane = feet - foot_base_z[..., None] * base_up[:, None]
-        dx, dy = self.offsets.unbind(dim=-1)
-        offsets = (
-            dx[None, :, None] * base_x[:, None]
-            + dy[None, :, None] * base_y[:, None]
+        # Project the foot onto base z = -reference_height, then aim from the mount.
+        foot_pos_base = (foot_pos_world - base_pos_world[:, None]) @ base_to_world
+        target_xy_base = foot_pos_base[:, :, None, :2] + self.offsets
+        target_z_base = torch.full_like(target_xy_base[..., :1], -self.ref_height)
+        target_points_base = torch.cat((target_xy_base, target_z_base), -1)
+
+        mount_to_target = target_points_base - self._mount_positions[:, None]
+        mount_to_target_norm = mount_to_target.norm(dim=-1, keepdim=True)
+        ray_directions_base = mount_to_target / mount_to_target_norm.clamp_min(
+            torch.finfo(mount_to_target.dtype).tiny
         )
-        origins = feet_on_base_plane[:, :, None] + offsets[:, None]
-        distance = self._simulator.query_ground_rays(
-            origins, -base_up, self.max_distance, env_ids
+        within_fov = (
+            ray_directions_base * self._mount_axes[:, None]
+        ).sum(-1) >= (self._min_cos - 1e-7)
+        ray_enabled = foot_pose_valid[..., None] & (mount_to_target_norm[..., 0] > 0) & within_fov
+
+        ray_directions_world = torch.einsum("nij,nfkj->nfki", base_to_world, ray_directions_base)
+        ray_directions_world = torch.where(ray_enabled[..., None], ray_directions_world, 0.)
+        ray_origins_world = base_pos_world[:, None] + self._mount_positions @ base_to_world.transpose(1, 2)
+        hit_distance, ground_hit = self._simulator.query_surface_rays(
+            origins=ray_origins_world,
+            directions=ray_directions_world,
+            max_distance=self.max_distance,
+            env_ids=env_ids,
+            include_robot=self.hit_mode != "ground_only",
         )
-        if distance.shape != origins.shape[:-1]:
-            raise ValueError(
-                "Ground ray query returned an unexpected distance shape."
-            )
-        valid = (
-            valid_foot[..., None] & distance.isfinite()
-            & (distance >= 0.) & (distance <= self.max_distance)
+        valid_hit = ray_enabled & (
+            hit_distance.isfinite() & (hit_distance >= 0.) & (hit_distance <= self.max_distance)
         )
-        dz = -torch.where(valid, distance, 0.) - foot_base_z[..., None]
-        height = (
-            (offsets * self._up).sum(dim=-1)[:, None]
-            + dz * (base_up * self._up).sum(dim=-1)[:, None, None]
+        hit_points_world = ray_origins_world[:, :, None] + (
+            torch.where(valid_hit, hit_distance, 0.)[..., None] * ray_directions_world
         )
-        valid = valid & height.isfinite()
+        height_difference = ((foot_pos_world[:, :, None] - hit_points_world) * self._up).sum(-1)
+        valid_measurement = valid_hit & height_difference.isfinite()
+
         return {
-            "foot_terrain_scan_heights": torch.where(valid, height, 0.),
-            "foot_terrain_scan_valid": valid,
+            "foot_terrain_scan_heights": torch.where(valid_measurement, height_difference, 0.),
+            "foot_terrain_scan_valid": (
+                valid_measurement & ground_hit if self.hit_mode == "visible_ground"
+                else valid_measurement
+            ),
         }

@@ -7,7 +7,7 @@ from typing import Protocol
 GROUND_RAY_QUERY = "ground_ray_query"
 
 
-class GroundRayQuery(Protocol):
+class RayQuery(Protocol):
 
     def __call__(
         self,
@@ -18,24 +18,13 @@ class GroundRayQuery(Protocol):
     ) -> torch.Tensor:
         """Return [env, group, point] distances for the supplied rays.
 
-        Origins are [env, group, point, xyz], directions are [env, xyz],
+        Origins are [env, group, xyz], unit directions are [env, group, point, xyz],
         and misses are non-finite. Zero directions represent invalid poses.
         """
         ...
 
 
-class GroundRayQueryProvider(Protocol):
-
-    def query_ground_rays(
-        self,
-        origins: torch.Tensor,
-        directions: torch.Tensor,
-        max_distance: float,
-        env_ids: torch.Tensor | None,
-    ) -> torch.Tensor: ...
-
-
-class HorizontalGroundRayQuery:
+class HorizontalPlaneRayQuery:
 
     def __init__(
         self,
@@ -52,9 +41,9 @@ class HorizontalGroundRayQuery:
         env_ids: torch.Tensor | None,
     ) -> torch.Tensor:
 
-        vertical = directions[:, None, None, 2]
+        vertical = directions[..., 2]
         crosses_plane = vertical.abs() > torch.finfo(origins.dtype).eps
-        distance = (self.height - origins[..., 2]) / torch.where(
+        distance = (self.height - origins[..., 2, None]) / torch.where(
             crosses_plane, vertical, 1.,
         )
         return torch.where(

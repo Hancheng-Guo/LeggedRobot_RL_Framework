@@ -109,6 +109,7 @@ class IsaacSimRuntime:
         self._app: Any = None
         self._world: Any = None
         self._articulation: Any = None
+        self._robot_rays = None
         self._body_view: Any = None
         self._camera: Any = None
         self.render_mode: str | None = None
@@ -950,6 +951,63 @@ class IsaacSimRuntime:
         return self._terrain
 
 
+    def resolve_scan_mounts(
+        self,
+        names: tuple[str, ...],
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+
+        from pxr import Gf, UsdGeom
+
+        stage = self._world.stage
+        base_path = self._source_robot_path + self.base_body_prim_path
+        base = stage.GetPrimAtPath(base_path)
+        cache: Any = UsdGeom.XformCache()
+        positions, axes = [], []
+        for name in names:
+            path = (
+                self._source_robot_path + name if name.startswith("/")
+                else base_path + "/" + name
+            )
+            mount = stage.GetPrimAtPath(path)
+            if not mount or mount.GetParent() != base or not mount.IsA(UsdGeom.Xform):
+                raise ValueError(f"Scan mount {name!r} must be an Xform attached to the base.")
+            transform, _ = cache.ComputeRelativeTransform(mount, base)
+            positions.append(tuple(transform.ExtractTranslation()))
+            axes.append(tuple(transform.TransformDir(Gf.Vec3d(0, 0, 1)).GetNormalized()))
+        return self._tensor(np.asarray(positions)), self._tensor(np.asarray(axes))
+
+
+    def query_robot_rays(
+        self,
+        origins: torch.Tensor,
+        directions: torch.Tensor,
+        max_distance: float,
+        env_ids: torch.Tensor | None,
+    ) -> torch.Tensor:
+
+        from .isaac_sim_robot_rays import IsaacRobotRayQuery
+
+        if self._robot_rays is None:
+            self._robot_rays = IsaacRobotRayQuery(
+                stage=self._world.stage,
+                root=self._source_robot_path,
+                paths=self._body_prim_paths,
+                device=origins.device,
+            )
+        positions, orientations = self._body_view.get_world_poses()
+        positions = self._tensor(positions).reshape(self.num_envs, -1, 3)
+        orientations = self._tensor(orientations).reshape(self.num_envs, -1, 4)
+        if env_ids is not None:
+            positions, orientations = positions[env_ids], orientations[env_ids]
+        return self._robot_rays(
+            origins=origins,
+            directions=directions,
+            limit=max_distance,
+            positions=positions,
+            orientations=orientations,
+        )
+
+
     def _measure_spawn_geometry(self) -> TerrainSpawnGeometry:
         positions, orientations = self._body_view.get_world_poses()
         return measure_spawn_geometry(
@@ -1171,7 +1229,8 @@ class IsaacSimRuntime:
         self._ctrl[indices] = self._default_joint_positions[indices]
         if self._terrain is not None:
             self._contact_stale[indices] = True
-            self._update_articulation_kinematics()
+        # Reset readers may query link poses before the next physics step.
+        self._update_articulation_kinematics()
         if env_ids is None:
             self._previous_qvel = None
         elif self._previous_qvel is not None:
@@ -1460,6 +1519,7 @@ class IsaacSimRuntime:
 
         if self._closed:
             return
+        self._robot_rays = None
         failures: list[Exception] = []
 
         def attempt(operation: Any) -> None:

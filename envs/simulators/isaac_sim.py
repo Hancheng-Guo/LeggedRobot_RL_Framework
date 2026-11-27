@@ -15,7 +15,9 @@ from .terrain import (
 )
 from .isaac_sim_backend import DEFAULT_TERRAIN_LAYOUT, IsaacSimBackend, IsaacSimResetState
 from .state import SimulatorState, SimulatorStateManager
-from .utils import ModelContext, GROUND_RAY_QUERY, HorizontalGroundRayQuery
+from .utils import (
+    ModelContext, GROUND_RAY_QUERY, HorizontalPlaneRayQuery, select_nearest_surface
+)
 from utils import Component, RuntimeContext, update_attributes
 
 
@@ -328,7 +330,8 @@ class IsaacSimSimulator(BaseSimulator):
         )
         self._build_model_context()
         self._ground_ray_query = (
-            None if GROUND_RAY_QUERY in unavailable_capabilities else HorizontalGroundRayQuery(0.)
+            None if GROUND_RAY_QUERY in unavailable_capabilities
+            else HorizontalPlaneRayQuery(0.)
         )
         self._build_simulator_state_manager(state_manager_config)
 
@@ -541,6 +544,46 @@ class IsaacSimSimulator(BaseSimulator):
                 dtype=torch.long,
                 device=self.context.device,
             ),
+        )
+
+
+    def resolve_scan_mounts(
+        self,
+        names: tuple[str, ...],
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        return self._require_backend().resolve_scan_mounts(names)
+
+
+    def query_surface_rays(
+        self,
+        origins: torch.Tensor,
+        directions: torch.Tensor,
+        max_distance: float,
+        env_ids: torch.Tensor | None,
+        *,
+        include_robot: bool,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+
+        ground = self.query_ground_rays(origins, directions, max_distance, env_ids)
+        if ground.shape != directions.shape[:-1]:
+            raise ValueError("Unexpected ground ray distance shape.")
+        robot = (
+            self.query_robot_rays(origins, directions, max_distance, env_ids)
+            if include_robot
+            else None
+        )
+        return select_nearest_surface(ground, robot)
+
+
+    def query_robot_rays(
+        self,
+        origins: torch.Tensor,
+        directions: torch.Tensor,
+        max_distance: float,
+        env_ids: torch.Tensor | None,
+    ) -> torch.Tensor:
+        return self._require_backend().query_robot_rays(
+            origins, directions, max_distance, env_ids
         )
 
 

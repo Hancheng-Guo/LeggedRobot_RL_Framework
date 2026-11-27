@@ -31,6 +31,12 @@ class FakeIsaacBackend:
         self.activated_mode: str | None = None
         self.render_mode: str | None = None
 
+    def resolve_scan_mounts(self, names):
+        return torch.zeros(len(names), 3), torch.tensor([[0., 0., -1.]]).repeat(len(names), 1)
+
+    def query_robot_rays(self, origins, directions, max_distance, env_ids):
+        return torch.full_like(directions[..., 0], torch.nan)
+
     def activate_playback(self, render_mode: str) -> None:
         self.activated_mode = render_mode
         self.render_mode = render_mode
@@ -164,7 +170,7 @@ def test_isaac_state_manager_configuration_can_change_without_restarting_backend
         assert not simulator.model_context.state_term_output_shapes
         simulator.config_update(
             component=_component(),
-            simulator_state_manager_config={"terms": {"foot_terrain_scan": {"layers": 0}}},
+            simulator_state_manager_config={"terms": {"foot_terrain_scan": {"layers": 0, "mount_names": ["right", "left"], "reference_height": .5}}},
         )
         enabled_manager = simulator.simulator_state_manager
         assert enabled_manager is not initial_manager

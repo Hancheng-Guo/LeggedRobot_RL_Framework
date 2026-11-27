@@ -8,7 +8,7 @@ from collections.abc import Mapping, Sequence
 
 from .terrain import TerrainPatch, TerrainSpawnGeometry
 from .state import SimulatorState, SimulatorStateManager
-from .utils import ModelContext, GroundRayQuery
+from .utils import ModelContext, RayQuery
 from utils import RuntimeContext
 
 
@@ -32,7 +32,7 @@ class BaseSimulator(ABC):
         self.model_context: ModelContext
         self.simulator_state_manager: SimulatorStateManager
         self._simulator_state_manager_config: dict[str, Any] = {}
-        self._ground_ray_query: GroundRayQuery | None = None
+        self._ground_ray_query: RayQuery | None = None
 
 
     def _get_simulator_state_manager_config(
@@ -79,6 +79,16 @@ class BaseSimulator(ABC):
                 "ground ray queries for the current scene."
             )
         return query(origins, directions, max_distance, env_ids)
+
+
+    def query_robot_rays(
+        self,
+        origins: torch.Tensor,
+        directions: torch.Tensor,
+        max_distance: float,
+        env_ids: torch.Tensor | None,
+    ) -> torch.Tensor:
+        raise NotImplementedError("This backend does not provide robot ray queries.")
 
 
     @abstractmethod

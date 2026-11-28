@@ -29,12 +29,32 @@ def _manager(context, model_context, query, robot_query=None, **config):
     config.setdefault("reference_height", .5)
     config.setdefault("hit_mode", "ground_only")
     manager = SimulatorStateManager(
+        num_envs=2,
         context=context,
         model_context=model_context,
         simulator=_ScanSimulator(query_ground_rays=query, resolve_scan_mounts=_mounts, query_robot_rays=robot_query),
         terms={"foot_terrain_scan": config},
     )
     return manager, manager.model_context
+
+
+def test_scan_checkpoint_checks_measurement_contract(runtime_context, model_context):
+    model = _model(model_context)
+    query = HorizontalPlaneRayQuery(0.)
+    manager, _ = _manager(runtime_context, model, query)
+    changed, _ = _manager(runtime_context, model, query, spacing=.14)
+    saved = manager.checkpoint_state_dict()
+
+    assert saved["terms"]["foot_terrain_scan"]["scan"]["spacing"] == .12
+    assert manager.playback_state_dict(1) == saved
+    manager.load_checkpoint_state_dict(saved)
+    with pytest.raises(ValueError, match=r"FootTerrainScan\.scan\.spacing"):
+        changed.load_checkpoint_state_dict(saved)
+
+    tilted_model = replace(model, gravity=model.gravity.new_tensor([0., -1., -9.81]))
+    tilted, _ = _manager(runtime_context, tilted_model, query)
+    with pytest.raises(ValueError, match=r"FootTerrainScan\.scan\.up_world"):
+        tilted.load_checkpoint_state_dict(saved)
 
 
 def _model(model_context, foot_ids=(0, 1)):
@@ -119,7 +139,8 @@ def test_disabled_manager_preserves_existing_fields(runtime_context, model_conte
         pytest.fail("A disabled scan must not query ground rays.")
 
     disabled = SimulatorStateManager(
-        runtime_context, scan_model, simulator=SimpleNamespace(query_ground_rays=unexpected_query),
+        1, runtime_context, scan_model,
+        simulator=SimpleNamespace(query_ground_rays=unexpected_query),
     )
     assert not disabled.model_context.state_term_output_shapes
     position = torch.tensor([[0., 0., .5]])
@@ -157,7 +178,7 @@ def test_registered_term_supplies_its_own_state_fields(runtime_context, model_co
         terms={"base_height_probe": {}},
     )
     manager = SimulatorStateManager(
-        runtime_context, _model(model_context),
+        2, runtime_context, _model(model_context),
         terms={"base_height_probe": {}}, simulator=simulator,
     )
     term = manager.terms["base_height_probe"]
@@ -181,7 +202,7 @@ def test_registered_term_supplies_its_own_state_fields(runtime_context, model_co
 
     with pytest.raises(ValueError, match="other_height_probe.*duplicate fields.*height"):
         SimulatorStateManager(
-            runtime_context, _model(model_context),
+            2, runtime_context, _model(model_context),
             terms={"base_height_probe": {}, "other_height_probe": {}}, simulator=simulator,
         )
 

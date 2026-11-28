@@ -6,10 +6,10 @@ from typing import Any
 from . import SimulatorState
 from .terms import BaseSimulatorStateTerm, get_simulator_state_term_class
 from ..utils import ModelContext
-from utils import RuntimeContext
+from utils import CheckpointStateManager, RuntimeContext
 
 
-class SimulatorStateManager:
+class SimulatorStateManager(CheckpointStateManager):
 
     @classmethod
     def validate_config(
@@ -44,12 +44,14 @@ class SimulatorStateManager:
 
     def __init__(
         self,
+        num_envs: int,
         context: RuntimeContext,
         model_context: ModelContext,
         terms: Mapping[str, object] | None = None,
         **term_dependencies: Any,
     ) -> None:
 
+        self.num_envs = num_envs
         self.terms: dict[str, BaseSimulatorStateTerm] = {}
         self._build_terms(context, model_context, terms, **term_dependencies)
         self.model_context = replace(

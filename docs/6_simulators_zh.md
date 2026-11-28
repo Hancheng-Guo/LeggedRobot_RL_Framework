@@ -2,7 +2,7 @@
 
 [开发者手册目录](guide.md) · [项目首页](../README.md)
 
-以下配置路径和命令均以项目根目录为基准。两端均可通过 `simulator_state_manager_config.terms.foot_terrain_scan` 启用平地足端扫描。安装点按足序填写，三种测距模式与完整示例见[足端扫描配置](plans/terrain_sensor_development_plan_zh.md#三职责分配与配置)。
+以下配置路径和命令均以项目根目录为基准。两端均可通过 `simulator_state_manager_config.terms.foot_terrain_scan` 启用平地和随机地形上的足端扫描。安装点按足序填写，三种测距模式与完整示例见[足端扫描配置](plans/terrain_sensor_development_plan_zh.md#三职责分配与配置)。
 
 ## 6.1 MuJoCo 基础配置
 

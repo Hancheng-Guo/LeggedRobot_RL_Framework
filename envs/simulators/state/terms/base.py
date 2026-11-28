@@ -3,12 +3,12 @@ from __future__ import annotations
 import torch
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
-from typing import Any
 
 from ..state import SimulatorState
+from utils import CheckpointStateOwner
 
 
-class BaseSimulatorStateTerm(ABC):
+class BaseSimulatorStateTerm(CheckpointStateOwner, ABC):
 
     required_capabilities: frozenset[str] = frozenset()
     output_shapes: dict[str, tuple[int, ...]]

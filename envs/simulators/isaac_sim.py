@@ -15,9 +15,7 @@ from .terrain import (
 )
 from .isaac_sim_backend import DEFAULT_TERRAIN_LAYOUT, IsaacSimBackend, IsaacSimResetState
 from .state import SimulatorState, SimulatorStateManager
-from .utils import (
-    ModelContext, GROUND_RAY_QUERY, HorizontalPlaneRayQuery, select_nearest_surface
-)
+from .utils import ModelContext, GROUND_RAY_QUERY
 from utils import Component, RuntimeContext, update_attributes
 
 
@@ -118,9 +116,10 @@ class IsaacSimSimulator(BaseSimulator):
             self.floor_prim_paths if floor_prim_paths is None
             else floor_prim_paths
         )
-        if terrain_geometry is not None or effective_floor_paths:
+        if effective_floor_paths and terrain_geometry is None:
             unavailable_capabilities[GROUND_RAY_QUERY] = (
-                "Isaac ground ray queries currently require the default ground plane."
+                "Isaac ground ray queries support the default ground plane and "
+                "the shared terrain atlas. Custom floor_prim_paths are unsupported."
             )
         SimulatorStateManager.validate_config(
             unavailable_capabilities=unavailable_capabilities,
@@ -329,10 +328,6 @@ class IsaacSimSimulator(BaseSimulator):
             **({"friction_enabled": True} if self._friction_enabled else {}),
         )
         self._build_model_context()
-        self._ground_ray_query = (
-            None if GROUND_RAY_QUERY in unavailable_capabilities
-            else HorizontalPlaneRayQuery(0.)
-        )
         self._build_simulator_state_manager(state_manager_config)
 
 
@@ -564,15 +559,26 @@ class IsaacSimSimulator(BaseSimulator):
         include_robot: bool,
     ) -> tuple[torch.Tensor, torch.Tensor]:
 
-        ground = self.query_ground_rays(origins, directions, max_distance, env_ids)
-        if ground.shape != directions.shape[:-1]:
-            raise ValueError("Unexpected ground ray distance shape.")
-        robot = (
-            self.query_robot_rays(origins, directions, max_distance, env_ids)
-            if include_robot
-            else None
+        return self._require_backend().query_scene_rays(
+            origins, directions, max_distance, env_ids,
+            include_ground=True, include_robot=include_robot,
         )
-        return select_nearest_surface(ground, robot)
+
+
+    def query_ground_rays(
+        self,
+        origins: torch.Tensor,
+        directions: torch.Tensor,
+        max_distance: float,
+        env_ids: torch.Tensor | None,
+    ) -> torch.Tensor:
+
+        query = self._require_backend().query_scene_rays
+        ground, _ = query(
+            origins, directions, max_distance, env_ids,
+            include_ground=True, include_robot=False,
+        )
+        return ground
 
 
     def query_robot_rays(
@@ -582,16 +588,17 @@ class IsaacSimSimulator(BaseSimulator):
         max_distance: float,
         env_ids: torch.Tensor | None,
     ) -> torch.Tensor:
-        return self._require_backend().query_robot_rays(
-            origins, directions, max_distance, env_ids
+        distances, _ = self._require_backend().query_scene_rays(
+            origins, directions, max_distance, env_ids,
+            include_ground=False, include_robot=True,
         )
+        return distances
 
 
     def reset(
         self,
         env_ids: torch.Tensor | None = None
     ) -> None:
-
         self._require_backend().reset(env_ids)
 
 
@@ -760,7 +767,6 @@ class IsaacSimSimulator(BaseSimulator):
 
 
     def close(self) -> None:
-        self._ground_ray_query = None
         if self._backend is not None:
             self._backend.close()
             self._backend = None

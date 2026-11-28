@@ -1,3 +1,4 @@
+from .checkpoint import CheckpointStateOwner, CheckpointStateManager
 from .component import (
     COMPONENT_CONFIG_DIR_MAP,
     Component,
@@ -25,6 +26,9 @@ from .tensorboard import launch_tensorboard
 
 
 __all__ = (
+    "CheckpointStateOwner",
+    "CheckpointStateManager",
+
     "COMPONENT_CONFIG_DIR_MAP",
     "Component",
     "ComponentInfo",

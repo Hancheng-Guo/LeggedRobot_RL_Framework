@@ -1,5 +1,7 @@
 import math
 import torch
+from collections.abc import Sequence
+from typing import Any
 
 from .base import BaseObservationTerm
 from .registry import register_observation
@@ -179,3 +181,97 @@ class FootDurationTanh(BaseObservationTerm):
             self.last_foot_state[env_ids] = False
             self.initialized[env_ids] = False
             self.duration[env_ids] = 0.0
+
+
+class _FootTerrainObservation(BaseObservationTerm):
+
+    field: str
+
+    def __init__(
+        self,
+        model_context: ModelContext,
+        *args, **kwargs,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        shapes = model_context.state_term_output_shapes.get(
+            "foot_terrain_scan", {}
+        )
+        if self.field not in shapes:
+            raise ValueError(
+                f"{self.name} requires simulator_state_manager_config."
+                "terms.foot_terrain_scan."
+            )
+        self.output_dim = math.prod(shapes[self.field])
+
+
+    def _checkpoint_metadata(self) -> dict[str, Any]:
+        return {
+            "scale": self.scale,
+            "field": self.field,
+        }
+
+
+    def playback_state_dict(
+        self,
+        env_index: int,
+    ) -> dict[str, Any]:
+        return self.checkpoint_state_dict()
+
+
+@register_observation
+class FootTerrainScanHeights(_FootTerrainObservation):
+
+    field = "foot_terrain_scan_heights"
+
+    def __init__(
+        self,
+        clip_range: Sequence[float] | None = None,
+        *args, **kwargs,
+    ) -> None:
+        super().__init__(*args, **kwargs)
+        self.clip_range = None
+        if clip_range is not None:
+            lower, upper = clip_range
+            if not (
+                math.isfinite(lower)
+                and math.isfinite(upper)
+                and lower <= 0 <= upper
+            ):
+                raise ValueError(
+                    "foot_terrain_scan_heights.clip_range must be "
+                    "finite and contain zero."
+                )
+            self.clip_range = (float(lower), float(upper))
+
+
+    def _checkpoint_metadata(self) -> dict[str, Any]:
+        return {
+            "clip_range": self.clip_range,
+            **super()._checkpoint_metadata(),
+        }
+
+
+    def compute(
+        self,
+        task_context: TaskContext,
+    ) -> torch.Tensor:
+        heights = task_context.state.foot_terrain_scan_heights
+        assert heights is not None
+        heights = heights.flatten(1)
+        if self.clip_range is not None:
+            heights = heights.clamp(*self.clip_range)
+        return heights
+
+
+@register_observation
+class FootTerrainScanValid(_FootTerrainObservation):
+
+    field = "foot_terrain_scan_valid"
+
+    def compute(
+        self,
+        task_context: TaskContext,
+    ) -> torch.Tensor:
+        valid = task_context.state.foot_terrain_scan_valid
+        assert valid is not None
+        return valid.flatten(1).to(self.context.dtype)

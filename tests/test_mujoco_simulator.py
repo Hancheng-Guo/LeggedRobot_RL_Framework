@@ -7,6 +7,7 @@ from contextlib import nullcontext
 from pathlib import Path
 
 from envs.simulators.mujoco import MujocoSimulator
+from envs.simulators.mujoco_rays import MujocoRayQuery
 from envs.simulators.state import SimulatorState
 from utils import Component, load_yaml
 from envs.simulators.terrain import TerrainGeometry
@@ -658,3 +659,21 @@ def test_mujoco_reuses_fixed_state_buffers(runtime_context):
         )
     finally:
         simulator.close()
+
+def test_native_floor_rays_filter_shared_groups_and_preserve_scene():
+    xml = """<mujoco><worldbody>
+        <geom name="floor" type="plane" size="0 0 .1" group="0"/>
+        <geom name="step" type="box" size=".2 .2 .1" pos="1 0 .1" group="0" rgba="1 1 1 0"/>
+        <geom name="decoy" type="sphere" size=".1" pos="0 0 .5" group="0"/>
+    </worldbody></mujoco>"""
+    model = mujoco.MjModel.from_xml_string(xml)  # pyright: ignore[reportAttributeAccessIssue]
+    data = mujoco.MjData(model)  # pyright: ignore[reportAttributeAccessIssue]
+    mujoco.mj_forward(model, data)  # pyright: ignore[reportAttributeAccessIssue]
+    groups = model.geom_group.copy()
+    query = MujocoRayQuery([model], [data], [0, 1], base_id=0)
+    origins = torch.tensor([[[0., 0., 1.], [1., 0., 1.], [0., 0., -.1], [0., 0., 0.]]])
+    directions = torch.tensor([[[[0., 0., -1.]], [[0., 0., -1.]], [[0., 0., 1.]], [[0., 0., -1.]]]])
+    distance, ground = query(origins, directions, 1., None, include_ground=True, include_robot=False)
+    torch.testing.assert_close(distance.flatten(), torch.tensor([1., .8, torch.nan, 0.]), equal_nan=True)
+    assert ground.flatten().tolist() == [True, True, False, True]
+    np.testing.assert_array_equal(model.geom_group, groups)

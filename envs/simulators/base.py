@@ -8,7 +8,7 @@ from collections.abc import Mapping, Sequence
 
 from .terrain import TerrainPatch, TerrainSpawnGeometry
 from .state import SimulatorState, SimulatorStateManager
-from .utils import ModelContext, RayQuery
+from .utils import ModelContext
 from utils import RuntimeContext
 
 
@@ -32,7 +32,6 @@ class BaseSimulator(ABC):
         self.model_context: ModelContext
         self.simulator_state_manager: SimulatorStateManager
         self._simulator_state_manager_config: dict[str, Any] = {}
-        self._ground_ray_query: RayQuery | None = None
 
 
     def _get_simulator_state_manager_config(
@@ -55,6 +54,7 @@ class BaseSimulator(ABC):
     ) -> None:
 
         self.simulator_state_manager = SimulatorStateManager(
+            num_envs=self.num_envs,
             context=self.context,
             model_context=self.model_context,
             simulator=self,
@@ -64,6 +64,31 @@ class BaseSimulator(ABC):
         self._simulator_state_manager_config = simulator_state_manager_config
 
 
+    def checkpoint_state_dict(self) -> dict[str, Any]:
+        return self.simulator_state_manager.checkpoint_state_dict()
+
+
+    def validate_checkpoint_state_dict(
+        self,
+        state: Mapping[str, Any],
+    ) -> None:
+        self.simulator_state_manager.validate_checkpoint_state_dict(state)
+
+
+    def load_checkpoint_state_dict(
+        self,
+        state: Mapping[str, Any],
+    ) -> None:
+        self.simulator_state_manager.load_checkpoint_state_dict(state)
+
+
+    def playback_state_dict(
+        self,
+        env_index: int,
+    ) -> dict[str, Any]:
+        return self.simulator_state_manager.playback_state_dict(env_index)
+
+
     def query_ground_rays(
         self,
         origins: torch.Tensor,
@@ -71,14 +96,7 @@ class BaseSimulator(ABC):
         max_distance: float,
         env_ids: torch.Tensor | None,
     ) -> torch.Tensor:
-
-        query = self._ground_ray_query
-        if query is None:
-            raise ValueError(
-                "This simulator does not provide "
-                "ground ray queries for the current scene."
-            )
-        return query(origins, directions, max_distance, env_ids)
+        raise NotImplementedError("This backend does not provide ground ray queries.")
 
 
     def query_robot_rays(

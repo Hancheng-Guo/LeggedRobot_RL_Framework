@@ -5,9 +5,10 @@ import pytest
 import torch
 
 from envs.tasks.utils import (
-    CheckpointStateOwner, CheckpointStateManager, ResetStateOwner, StateOwner, StateManager,
+    ResetStateOwner, StateOwner, StateManager,
     ResetSnapshot, capture_task_reset_state,
 )
+from utils import CheckpointStateOwner, CheckpointStateManager
 from test_terrain_curriculum import make_task, reset
 
 

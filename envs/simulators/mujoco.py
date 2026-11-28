@@ -20,11 +20,10 @@ from copy import copy
 
 from .base import BaseSimulator
 from .terrain import TerrainGeometry, TerrainPatch, TerrainSpawnGeometry
+from .mujoco_rays import MujocoRayQuery
 from .mujoco_terrain import MujocoTerrain
 from .state import SimulatorState, SimulatorStateManager
-from .utils import (
-    ModelContext, GROUND_RAY_QUERY, HorizontalPlaneRayQuery, select_nearest_surface
-)
+from .utils import ModelContext
 from utils import Component, RuntimeContext, update_attributes
 
 
@@ -207,7 +206,7 @@ class MujocoSimulator(BaseSimulator):
             self._render_camera = None
 
         self._terrain_render_dirty = False
-        self._ground_ray_query = None
+        self._ray_query = None
         if self.terrain_geometry is None:
             self._terrain = None
             self.models = [
@@ -243,17 +242,6 @@ class MujocoSimulator(BaseSimulator):
             self.reset_keyframe_id = reset_keyframe_id
 
         self._build_model_context()
-        self._ground_ray_query = self._build_ground_ray_query()
-        unavailable_capabilities = {}
-        if self._ground_ray_query is None:
-            unavailable_capabilities[GROUND_RAY_QUERY] = (
-                "MuJoCo ground ray queries currently require "
-                "one static horizontal floor plane."
-            )
-        SimulatorStateManager.validate_config(
-            unavailable_capabilities=unavailable_capabilities,
-            **state_manager_config,
-        )
         self._build_simulator_state_manager(state_manager_config)
         self._initialize_state_buffers()
 
@@ -282,6 +270,17 @@ class MujocoSimulator(BaseSimulator):
         return tensor(positions), tensor(axes)
 
 
+    def _get_ray_query(self) -> MujocoRayQuery:
+        if self._ray_query is None:
+            self._ray_query = MujocoRayQuery(
+                models=self.models,
+                datas=self.datas,
+                floor_ids=self.model_context.floor_geom_ids.tolist(),
+                base_id=self.model_context.base_id,
+            )
+        return self._ray_query
+
+
     def query_surface_rays(
         self,
         origins: torch.Tensor,
@@ -292,22 +291,27 @@ class MujocoSimulator(BaseSimulator):
         include_robot: bool,
     ) -> tuple[torch.Tensor, torch.Tensor]:
 
-        if include_robot and self._scan_floor_id is not None:
-            # The native plane is one-sided. Preserve the analytical contract at/below it.
-            height = self.models[0].geom_pos[self._scan_floor_id, 2]
-            if torch.all(origins[..., 2] > height):
-                return self._cast_visual_rays(
-                    origins, directions, max_distance, env_ids, self._scan_floor_id
-                )
-
-        ground = self.query_ground_rays(origins, directions, max_distance, env_ids)
-        if ground.shape != directions.shape[:-1]:
-            raise ValueError("Unexpected ground ray distance shape.")
-        robot = (
-            self.query_robot_rays(origins, directions, max_distance, env_ids) if include_robot
-            else None
+        query = self._get_ray_query()
+        return query(
+            origins, directions, max_distance, env_ids,
+            include_ground=True, include_robot=include_robot,
         )
-        return select_nearest_surface(ground, robot)
+
+
+    def query_ground_rays(
+        self,
+        origins: torch.Tensor,
+        directions: torch.Tensor,
+        max_distance: float,
+        env_ids: torch.Tensor | None,
+    ) -> torch.Tensor:
+
+        query = self._get_ray_query()
+        ground, _ = query(
+            origins, directions, max_distance, env_ids,
+            include_ground=True, include_robot=False,
+        )
+        return ground
 
 
     def query_robot_rays(
@@ -318,83 +322,12 @@ class MujocoSimulator(BaseSimulator):
         env_ids: torch.Tensor | None,
     ) -> torch.Tensor:
 
-        distances, _ = self._cast_visual_rays(
-            origins, directions, max_distance, env_ids, None
+        query = self._get_ray_query()
+        distances, _ = query(
+            origins, directions, max_distance, env_ids,
+            include_ground=False, include_robot=True,
         )
         return distances
-
-
-    def _cast_visual_rays(
-        self,
-        origins: torch.Tensor,
-        directions: torch.Tensor,
-        max_distance: float,
-        env_ids: torch.Tensor | None,
-        floor_id: int | None,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-
-        groups = np.array([0, 0, 1, 0, 0, 0], dtype=np.uint8)
-        if floor_id is not None:
-            groups[self.models[0].geom_group[floor_id]] = 1
-        starts = origins.detach().to("cpu", torch.float64).numpy()
-        vectors = directions.detach().to("cpu", torch.float64).contiguous().numpy()
-        distances = np.full(vectors.shape[:-1], np.nan)
-        ground_hits = np.zeros(distances.shape, dtype=bool)
-        selected = range(self.num_envs) if env_ids is None else env_ids.tolist()
-        for row, env_id in enumerate(selected):
-            for origin, rays, result, ground in zip(
-                starts[row], vectors[row], distances[row], ground_hits[row], strict=True,
-            ):
-                active = rays.any(axis=1)
-                count = int(active.sum())
-                if not count:
-                    continue
-                ids = np.empty(count, dtype=np.int32)
-                hits = np.empty(count)
-                mujoco.mj_multiRay(  # pyright: ignore[reportAttributeAccessIssue]
-                    self.models[env_id], self.datas[env_id], origin, rays[active].ravel(),
-                    groups, floor_id is not None, -1, ids, hits, None, count, max_distance,
-                )
-                measured = (hits >= 0.) & (hits <= max_distance)
-                result[active] = np.where(measured, hits, np.nan)
-                if floor_id is not None:
-                    ground[active] = measured & (ids == floor_id)
-        return (
-            torch.as_tensor(distances, device=origins.device, dtype=origins.dtype),
-            torch.as_tensor(ground_hits, device=origins.device),
-        )
-
-
-    def _build_ground_ray_query(self) -> HorizontalPlaneRayQuery | None:
-        self._scan_floor_id: int | None = None
-        floor_ids = self.model_context.floor_geom_ids.tolist()
-        if self._terrain is None and len(floor_ids) == 1:
-            geom_id = floor_ids[0]
-            model = self.models[0]
-            plane_type = mujoco.mjtGeom.mjGEOM_PLANE  # pyright: ignore[reportAttributeAccessIssue]
-            if (
-                model.geom_type[geom_id] == plane_type
-                and model.geom_bodyid[geom_id] == 0
-                and np.all(model.geom_quat[geom_id, 1:3] == 0.)
-            ):
-                # Include the plane only when enabling its group cannot introduce extra hits.
-                group = model.geom_group[geom_id]
-                static_visuals = (
-                    (model.geom_group == 2) & (model.body_weldid[model.geom_bodyid] == 0)
-                )
-                material = model.geom_matid[geom_id]
-                visible = (
-                    model.geom_rgba[geom_id, 3] > 0
-                    and (material < 0 or model.mat_rgba[material, 3] > 0)
-                )
-                isolated = (
-                    np.count_nonzero(model.geom_group == group) == 1
-                    and not static_visuals.any()
-                )
-                if isolated and visible and np.all(model.geom_size[geom_id, :2] == 0):
-                    self._scan_floor_id = geom_id
-                return HorizontalPlaneRayQuery(float(model.geom_pos[geom_id, 2]))
-        return None
 
 
     def _build_model_context(self) -> None:
@@ -1059,7 +992,7 @@ class MujocoSimulator(BaseSimulator):
 
     def close(self) -> None:
 
-        self._ground_ray_query = None
+        self._ray_query = None
         self._shutdown_step_executor()
 
         if self.viewer is not None:

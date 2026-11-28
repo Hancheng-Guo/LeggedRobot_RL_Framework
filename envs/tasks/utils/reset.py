@@ -6,7 +6,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, ClassVar
 
-from .checkpoint import state_field_paths
+from utils.checkpoint import state_field_paths
 
 
 @dataclass

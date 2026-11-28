@@ -1,7 +1,7 @@
-"""Ray queries against rigid, visible USD surfaces in their link frames."""
+"""Batched Warp queries against shared terrain and the selected robot links."""
 
-import numpy as np
 import torch
+import numpy as np
 import warp as wp
 from typing import Any
 from numpy.typing import NDArray
@@ -34,6 +34,32 @@ def _intersect_link(
         hit = wp.mesh_query_ray(mesh, start, local_direction, limit + 1.e-6)  # pyright: ignore[reportCallIssue]
         if hit.result and hit.t <= limit:
             distances[ray] = wp.min(distances[ray], hit.t)
+
+
+@wp.kernel
+def _intersect_ground(
+    mesh: wp.uint64,
+    points: int,
+    plane: bool,
+    limit: float,
+    origins: wp.array(dtype=wp.vec3),  # pyright: ignore[reportInvalidTypeForm]
+    directions: wp.array(dtype=wp.vec3),  # pyright: ignore[reportInvalidTypeForm]
+    distances: wp.array(dtype=float),  # pyright: ignore[reportInvalidTypeForm]
+) -> None:
+
+    ray = wp.tid()
+    origin = origins[ray // points]  # pyright: ignore[reportOperatorIssue]
+    direction = directions[ray]
+    scale = float(1.0)
+    if plane:
+        # An infinite horizontal collision plane is translation invariant in XY.
+        # A local unit quad covers the full ray after scaling by its range.
+        origin = wp.vec3(0.0, 0.0, origin[2] / limit)
+        scale = limit
+    if wp.length_sq(direction) > 0.0:
+        hit = wp.mesh_query_ray(mesh, origin, direction, limit / scale + 1.e-6)  # pyright: ignore[reportCallIssue]
+        if hit.result and hit.t * scale <= limit:
+            distances[ray] = hit.t * scale
 
 
 def _triangles(
@@ -71,7 +97,7 @@ def _triangles(
     return np.asarray(surface.vertices), np.asarray(surface.faces)
 
 
-class IsaacRobotRayQuery:
+class IsaacSceneRayQuery:
 
     def __init__(
         self,
@@ -79,8 +105,32 @@ class IsaacRobotRayQuery:
         root: str,
         paths: tuple[str, ...],
         device: torch.device,
+        terrain_mesh: str | None,
     ) -> None:
 
+        self.plane = terrain_mesh is None
+        if terrain_mesh is None:
+            vertices = np.array([[-2,-2,0], [2,-2,0], [2,2,0], [-2,2,0]], dtype=np.float32)
+            faces = np.array([0,1,2,0,2,3], dtype=np.int32)
+        else:
+            terrain_prim = stage.GetPrimAtPath(terrain_mesh)
+            if not terrain_prim:
+                raise ValueError(f"Missing terrain mesh: {terrain_mesh}")
+            vertices, faces = _triangles(terrain_prim)
+        self.ground = wp.Mesh(
+            points=wp.array(vertices, dtype=wp.vec3, device=str(device)),
+            indices=wp.array(faces.ravel(), dtype=wp.int32, device=str(device)),
+        )
+        self.stage = stage
+        self.root = root
+        self.paths = paths
+        self.device = device
+        self.meshes: dict[int, wp.Mesh] | None = None
+        wp.synchronize_device(str(device))
+
+
+    def _build_link_meshes(self) -> dict[int, wp.Mesh]:
+        stage, root, paths, device = self.stage, self.root, self.paths, self.device
         cache: Any = UsdGeom.XformCache()
         bodies = {root + path: index for index, path in enumerate(paths)}
         parts = {}
@@ -104,7 +154,7 @@ class IsaacRobotRayQuery:
             local = vertices @ matrix[:3, :3] + matrix[3, :3]
             parts.setdefault(bodies[str(parent.GetPath())], []).append((local, faces))
 
-        self.meshes: dict[int, wp.Mesh] = {}
+        meshes: dict[int, wp.Mesh] = {}
         for body, pieces in parts.items():
             vertices, indices = [], []
             offset = 0
@@ -112,12 +162,13 @@ class IsaacRobotRayQuery:
                 vertices.append(points)
                 indices.append(faces + offset)
                 offset += len(points)
-            self.meshes[body] = wp.Mesh(
+            meshes[body] = wp.Mesh(
                 points=wp.array(np.concatenate(vertices), dtype=wp.vec3, device=str(device)),
                 indices=wp.array(np.concatenate(indices).ravel(), dtype=wp.int32, device=str(device)),
             )
 
         wp.synchronize_device(str(device))
+        return meshes
 
 
     def __call__(
@@ -125,17 +176,28 @@ class IsaacRobotRayQuery:
         origins: torch.Tensor,
         directions: torch.Tensor,
         limit: float,
-        positions: torch.Tensor,
-        orientations: torch.Tensor,
-    ) -> torch.Tensor:
+        positions: torch.Tensor | None,
+        orientations: torch.Tensor | None,
+        include_ground: bool,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
 
         result = torch.full(directions.shape[:-1], torch.inf, device=origins.device, dtype=torch.float32)
         starts = wp.from_torch(origins.float().reshape(-1, 3).contiguous(), dtype=wp.vec3)
         vectors = wp.from_torch(directions.float().reshape(-1, 3).contiguous(), dtype=wp.vec3)
+        stream = wp.stream_from_torch(torch.cuda.current_stream(origins.device)) if origins.is_cuda else None
+        if include_ground and result.numel():
+            wp.launch(_intersect_ground, dim=result.numel(), device=str(origins.device), stream=stream,
+                      inputs=[self.ground.id, directions.size(2), self.plane, limit, starts, vectors,
+                              wp.from_torch(result.view(-1))])
+        ground = result
+        if positions is None or orientations is None or not result.numel():
+            return torch.where(ground.isfinite(), ground, torch.nan).to(origins.dtype), ground.isfinite()
+        result = torch.full_like(ground, torch.inf)
         poses = wp.from_torch(positions.float().contiguous(), dtype=wp.vec3)
         rotations = wp.from_torch(orientations[..., [1, 2, 3, 0]].float().contiguous(), dtype=wp.quat)
         distances = wp.from_torch(result.view(-1))
-        stream = wp.stream_from_torch(torch.cuda.current_stream(origins.device)) if origins.is_cuda else None
+        if self.meshes is None:
+            self.meshes = self._build_link_meshes()
         for body, mesh in self.meshes.items():
             wp.launch(
                 _intersect_link, dim=result.numel(), device=str(origins.device), stream=stream,
@@ -144,4 +206,5 @@ class IsaacRobotRayQuery:
                     poses, rotations, limit, distances
                 ]
             )
-        return torch.where(result.isfinite(), result, torch.nan).to(origins.dtype)
+        nearest = torch.minimum(ground, result)
+        return torch.where(nearest.isfinite(), nearest, torch.nan).to(origins.dtype), ground < result

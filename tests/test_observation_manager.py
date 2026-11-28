@@ -780,3 +780,28 @@ def test_foot_height_observation_term(
         observation,
         torch.full((2, 1), 0.125),
     )
+
+def test_foot_scan_observations_preserve_occlusion(runtime_context, model_context):
+    terms = {"foot_terrain_scan_heights": {"clip_range": [-.2, .3], "scale": 2.},
+             "foot_terrain_scan_valid": {}}
+
+    def build(model):
+        return ObservationManager(num_envs=2, context=runtime_context, model_context=model,
+                                  action_dim=0, command_dim=0, terms=terms)
+
+    with pytest.raises(ValueError, match="simulator_state_manager_config.terms.foot_terrain_scan"):
+        build(model_context)
+    shapes = {"foot_terrain_scan_heights": (2, 2), "foot_terrain_scan_valid": (2, 2)}
+    model = replace(model_context, state_term_output_shapes={"foot_terrain_scan": shapes})
+    manager = build(model)
+    task = make_task_context()
+    heights = torch.tensor([[[-.4, .15], [.45, 0.]]]).repeat(2, 1, 1)
+    mask = torch.tensor([[[False, True], [True, False]]]).repeat(2, 1, 1)
+    task.state.term_values.update(foot_terrain_scan_heights=heights, foot_terrain_scan_valid=mask)
+    obs, _ = manager.compute(task)
+    expected = torch.tensor([[-.4, .3, .6, 0., 0., 1., 1., 0.]])
+    torch.testing.assert_close(obs, expected.expand(2, -1))
+    saved = manager.checkpoint_state_dict()
+    build(model).load_checkpoint_state_dict(saved)
+    assert "scan" not in saved["terms"]["foot_terrain_scan_heights"]
+    assert "scan" not in saved["terms"]["foot_terrain_scan_valid"]

@@ -1,4 +1,4 @@
-"""Declarative persistent state, separate from in-process reset snapshots."""
+"""Declarative checkpoint state shared by task and simulator managers."""
 import torch
 from collections.abc import Mapping
 from copy import deepcopy

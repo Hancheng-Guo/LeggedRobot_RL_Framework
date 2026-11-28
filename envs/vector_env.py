@@ -143,8 +143,10 @@ class VectorEnv(BaseEnv):
 
 
     def _create_playback_environment(self) -> BaseEnv:
+
         if self._component is None:
             raise RuntimeError("Playback configuration is unavailable.")
+
         temporary = type(self)(context=self.context)
         try:
             temporary.config_update(
@@ -152,7 +154,13 @@ class VectorEnv(BaseEnv):
                 num_envs=1,
                 max_episode_steps=self.max_episode_steps,
             )
-            temporary.task.load_checkpoint_state_dict(self.task.playback_state_dict(self.playback_env_index))
+            state = {
+                "task": self.task.playback_state_dict(self.playback_env_index),
+            }
+            simulator_state = self.simulator.playback_state_dict(self.playback_env_index)
+            if simulator_state:
+                state["simulator"] = simulator_state
+            temporary.load_checkpoint_state_dict(state)
             temporary.set_training_mode(False)
         except BaseException:
             temporary.close()
@@ -272,8 +280,17 @@ class VectorEnv(BaseEnv):
 
 
     def checkpoint_state_dict(self) -> dict[str, Any]:
-        """Save task training state without simulator or unfinished episode state."""
-        return {"task": self.task.checkpoint_state_dict()}
+        """Save task and simulator checkpoint data between episodes."""
+
+        state = {
+            "task": self.task.checkpoint_state_dict()
+        }
+        simulator = getattr(self, "simulator", None)
+        if simulator is not None:
+            simulator_state = simulator.checkpoint_state_dict()
+            if simulator_state:
+                state["simulator"] = simulator_state
+        return state
 
 
     def set_training_mode(self, training: bool) -> None:
@@ -284,11 +301,26 @@ class VectorEnv(BaseEnv):
         self,
         state: Mapping[str, Any],
     ) -> None:
+
         if not isinstance(state, Mapping):
             raise TypeError("Environment checkpoint must be a mapping.")
-        if set(state) != {"task"}:
-            raise ValueError("Vector environment checkpoint must contain task state.")
+        if "task" not in state or set(state) - {"task", "simulator"}:
+            raise ValueError(
+                "Vector environment checkpoint must contain task state."
+            )
+
+        simulator_state = state.get("simulator", {})
+        simulator = getattr(self, "simulator", None)
+        if simulator is not None:
+            simulator.validate_checkpoint_state_dict(simulator_state)
+        elif "simulator" in state:
+            raise ValueError(
+                "A simulator must be configured to restore simulator checkpoint state."
+            )
+
         self.task.load_checkpoint_state_dict(state["task"])
+        if simulator is not None and simulator_state:
+            simulator.load_checkpoint_state_dict(simulator_state)
 
 
     def reset(self) -> torch.Tensor:

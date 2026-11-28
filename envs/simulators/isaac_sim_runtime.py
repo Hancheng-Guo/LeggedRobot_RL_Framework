@@ -109,7 +109,7 @@ class IsaacSimRuntime:
         self._app: Any = None
         self._world: Any = None
         self._articulation: Any = None
-        self._robot_rays = None
+        self._scene_rays = None
         self._body_view: Any = None
         self._camera: Any = None
         self.render_mode: str | None = None
@@ -977,34 +977,47 @@ class IsaacSimRuntime:
         return self._tensor(np.asarray(positions)), self._tensor(np.asarray(axes))
 
 
-    def query_robot_rays(
+    def query_scene_rays(
         self,
         origins: torch.Tensor,
         directions: torch.Tensor,
         max_distance: float,
         env_ids: torch.Tensor | None,
-    ) -> torch.Tensor:
+        *,
+        include_ground: bool,
+        include_robot: bool,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
 
-        from .isaac_sim_robot_rays import IsaacRobotRayQuery
+        from .isaac_sim_scene_rays import IsaacSceneRayQuery
 
-        if self._robot_rays is None:
-            self._robot_rays = IsaacRobotRayQuery(
-                stage=self._world.stage,
-                root=self._source_robot_path,
-                paths=self._body_prim_paths,
-                device=origins.device,
+        if include_ground and self._requested_floor_prim_paths:
+            raise ValueError(
+                "Isaac terrain scans support the default plane and shared terrain atlas."
             )
-        positions, orientations = self._body_view.get_world_poses()
-        positions = self._tensor(positions).reshape(self.num_envs, -1, 3)
-        orientations = self._tensor(orientations).reshape(self.num_envs, -1, 4)
-        if env_ids is not None:
-            positions, orientations = positions[env_ids], orientations[env_ids]
-        return self._robot_rays(
+        if self._scene_rays is None:
+            self._scene_rays = IsaacSceneRayQuery(
+                stage=self._world.stage, root=self._source_robot_path,
+                paths=self._body_prim_paths, device=origins.device,
+                terrain_mesh=self._terrain.prim_path if self._terrain is not None else None,
+            )
+
+        positions = None
+        orientations = None
+        if include_robot:
+            pos, quat = self._body_view.get_world_poses()
+            positions = self._tensor(pos).reshape(self.num_envs, -1, 3)
+            orientations = self._tensor(quat).reshape(self.num_envs, -1, 4)
+            if env_ids is not None:
+                positions = positions[env_ids]
+                orientations = orientations[env_ids]
+
+        return self._scene_rays(
             origins=origins,
             directions=directions,
             limit=max_distance,
             positions=positions,
             orientations=orientations,
+            include_ground=include_ground,
         )
 
 
@@ -1519,7 +1532,7 @@ class IsaacSimRuntime:
 
         if self._closed:
             return
-        self._robot_rays = None
+        self._scene_rays = None
         failures: list[Exception] = []
 
         def attempt(operation: Any) -> None:

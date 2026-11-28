@@ -1,6 +1,7 @@
 """Combined entry points for owners needing both rollback and persistent state."""
-from .checkpoint import CheckpointStateOwner, CheckpointStateManager
 from .reset import ResetStateOwner, ResetStateManager
+
+from utils import CheckpointStateOwner, CheckpointStateManager
 
 
 class StateOwner(ResetStateOwner, CheckpointStateOwner):

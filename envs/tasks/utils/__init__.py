@@ -1,4 +1,3 @@
-from .checkpoint import CheckpointStateOwner, CheckpointStateManager
 from .state import StateOwner, StateManager
 from .context import TaskContext
 from .result import TaskStepResult
@@ -9,9 +8,6 @@ from .height import base_height, foot_heights, mask_ground_signal, validate_heig
 
 
 __all__ = (
-    "CheckpointStateOwner",
-    "CheckpointStateManager",
-
     "StateOwner",
     "StateManager",
 

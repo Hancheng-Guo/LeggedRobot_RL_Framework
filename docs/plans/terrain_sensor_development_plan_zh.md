@@ -1,14 +1,14 @@
 # 足端地形感知阶段开发计划
 
-> 更新时间：2026-11-26（Asia/Shanghai）
+> 更新时间：2026-11-28（Asia/Shanghai）
 >
-> 状态：阶段 1 至 3 已完成。下一项为阶段 4 双后端地形扫描与训练集成。
+> 状态：阶段 1 至 4 已完成。下一项为扩展 A 采集时序与缓存。
 >
 > 实施顺序：状态与平地基线 → 机身传感器安装点资产 → 参考平面蜂窝迁移与平地复验 → 双后端地形扫描与训练集成 → 扩展 A 采集时序与缓存 → 性能与交付。台阶地形按地形计划单独验收。 [随机几何地形阶段开发计划](terrain_development_plan_zh.md)
 
 ## 一、第一版目标
 
-为多种足式机器人提供同一套足端扫描接口。每组射线从机身安装点发射，瞄准以足端投影为中心的参考平面蜂窝，输出足端相对命中点沿重力反方向的高度差。MuJoCo 使用各环境的独立地形，Isaac Sim 使用共享地形图。扫描通过可选的 `foot_terrain_heights` 和 `foot_terrain_heights_valid` 进入策略，覆盖平地、斜坡、粗糙地形、外围平地及 Isaac 跨地块行走。 [公共状态](../../envs/simulators/state/state.py) · [仿真接口](../../envs/simulators/base.py)
+为多种足式机器人提供同一套足端扫描接口。每组射线从机身安装点发射，瞄准以足端投影为中心的参考平面蜂窝，输出足端相对命中点沿重力反方向的高度差。MuJoCo 使用各环境的独立地形，Isaac Sim 使用共享地形图。扫描通过可选的 `foot_terrain_scan_heights` 和 `foot_terrain_scan_valid` 进入策略，覆盖平地、斜坡、粗糙地形、外围平地及 Isaac 跨地块行走。 [公共状态](../../envs/simulators/state/state.py) · [仿真接口](../../envs/simulators/base.py)
 
 ANYmal C 是主训与双后端完整验收机型。Go1 用于验证同一实现能通过资产中的安装点和 simulator 配置换用机型。 [Go1 MuJoCo 配置](../../configs/simulators/mujoco_unitree_go1_rgb_array.yaml) · [Go1 Isaac 配置](../../configs/simulators/isaac_sim_unitree_go1_headless.yaml)
 
@@ -17,7 +17,7 @@ ANYmal C 是主训与双后端完整验收机型。Go1 用于验证同一实现�
 | 1 | 阶段 1 | 状态管理与平地基线：构建 `SimulatorStateManager` 和足端扫描 term，验证采样契约与配置 | 已完成 |
 | 2 | 阶段 2 | 机身传感器安装点资产：ANYmal C 与 Go1 的 MJCF、USD 安装点及窗口验收 | 已完成 |
 | 3 | 阶段 3 | 参考平面蜂窝迁移与平地复验：安装点映射、逐足转向、射线契约与测试迁移 | 已完成 |
-| 4 | 阶段 4 | 双后端地形扫描与训练集成：每个后端统一几何求交、Isaac GPU 批量求交、PPO 短训与吞吐基线 | 待实施 |
+| 4 | 阶段 4 | 双后端地形扫描与训练集成：每个后端统一几何求交、Isaac GPU 批量求交、PPO 短训与吞吐基线 | 已完成 |
 | 5 | 扩展 A | 采集时序与缓存：独立采样频率、延迟、逐环境缓存与重置恢复 | 待实施 |
 | 6 | 阶段 5 | 性能与交付：双后端训练吞吐与资源用量、小规模感知链路性能、示例配置和验收脚本 | 待实施 |
 
@@ -80,7 +80,7 @@ ANYmal C 是主训与双后端完整验收机型。Go1 用于验证同一实现�
 | `ModelContext` | 提供 simulator 解析出的足端索引顺序，以及 `state_term_output_shapes[term 名][输出名]`。足端扫描的两个输出均声明 `(F, K)`，供观测条目确定维数和校验依赖 |
 | `SimulatorState` | 通过 `state.foot_terrain_scan_heights` 和 `state.foot_terrain_scan_valid` 读取启用的扫描输出，两者均为 `[N, F, K]`。动态字段按输出名查找，允许显式返回 `None`。未发布的字段触发 `AttributeError`，不同 term 声明同名输出时在 manager 构建阶段报错。`clone()` 和 `select()` 保留 `None`。`as_dict()` 按字段名导出张量，固定字段优先，值为 `None` 时省略该字段 |
 | `TaskContext` 与 `TaskStateManager` | `TaskContext.state` 传递已组装的状态。task state term 可消费状态并更新步态相位等任务量 |
-| `ObservationManager` | 注册只读的 `foot_terrain_heights` 和 `foot_terrain_heights_valid`，处理缩放、裁剪、缺测填充，并按 simulator 解析出的足序展平为 `[N, F*K]` |
+| `ObservationManager` | 注册只读的 `foot_terrain_scan_heights` 和 `foot_terrain_scan_valid`，处理缩放、裁剪、缺测填充，并按 simulator 解析出的足序展平为 `[N, F*K]` |
 | runner、policy、课程 | 沿用现有命名切片和维数组装，按配置决定 actor、critic 读取哪些条目。课程继续分配地形、摩擦和命令 |
 
 simulator 在模型和足端映射可用后构建 `SimulatorStateManager`，在 task 构建观测前发布已启用条目的输出形状。`get_state()` 先读取后端状态，再由 manager 对本次选中的环境运行状态 term 并组装结果。现有基础与派生物理字段沿用原采集路径。首版的足端扫描同步使用本次读取的物理状态。关闭后，结果与形状映射均省略该条目，射线查询为零。扩展 A 由 simulator 侧的 manager 和 term 管理采样时序与缓存。 [仿真接口](../../envs/simulators/base.py) · [环境 step 与 reset](../../envs/vector_env.py)
@@ -105,17 +105,17 @@ simulator_state_manager_config:
 ```yaml
 observation_manager_config:
   terms:
-    foot_terrain_heights: {clip_range: [-1.0, 0.6], scale: 1.0}
-    foot_terrain_heights_valid: {}
+    foot_terrain_scan_heights: {clip_range: [-1.0, 0.6], scale: 1.0}
+    foot_terrain_scan_valid: {}
 ```
 
 开启扫描后，`spacing`（`d`，单位为米）和 `layers`（`n`，外围层数）默认分别为 `0.12` 和 `4`。各机型可根据腿部工作范围和地形尺度覆盖间距、层数及量程。每项扫描观测的维数是 `F*K`，ANYmal C 和 Go1 在默认布局下均为 244。初始化校验 `spacing` 有限且为正、`layers` 为非负整数，以及量程和总点数预算。
 
 初始化校验安装点的数量、名称和归属，以及 `reference_height` 与 `max_distance` 为有限正数。量程从各安装点沿射线方向计量。圆锥视场由 `max_angle_deg` 指定，范围为 (0, 180]，默认半角为 90°。输出高度按第二章将从命中点指向足端的位移投影到重力反方向。
 
-两个 obs term 直接消费同一份扫描结果。`foot_terrain_heights` 对有测量值的高度执行裁剪、缩放与展平。`visible_ground` 的遮挡高度即使掩码为假也须保留，缺测点输出零。`foot_terrain_heights_valid` 将同一掩码展平为独立的 0/1 观测，供策略按需使用。共用的无状态预处理可由两个 term 复用。配置了任一条目时，构建观测必须校验 simulator 已启用 `foot_terrain_scan`，缺少依赖时报出对应配置路径。
+两个 obs term 直接消费同一份扫描结果。`foot_terrain_scan_heights` 对有测量值的高度执行裁剪、缩放与展平。`visible_ground` 的遮挡高度即使掩码为假也须保留，缺测点输出零。`foot_terrain_scan_valid` 将同一掩码展平为独立的 0/1 观测，供策略按需使用。共用的无状态预处理可由两个 term 复用。配置了任一条目时，构建观测必须校验 simulator 已启用 `foot_terrain_scan`，缺少依赖时报出对应配置路径。
 
-检查点校验覆盖 `hit_mode`、间距、层数、点序、解析后的足端标识及顺序、参考点、安装点映射与外参、`reference_height`、视场、转向限制、输出参考系、量程和观测变换。即使张量尺寸相同，也需校验这些配置。例如改变间距会改变每个采样点对应的物理位置，重排配置中的足端会改变各观测切片对应的脚。跨机型复用扫描实现时，策略的恢复与部署仍按其训练时的模型和观测契约校验。
+训练恢复和单环境播放时，`FootTerrainScan` 校验 simulator 检查点中的测量定义，包括足序、安装点及外参、蜂窝布局、参考平面、视场、量程、命中模式和世界坐标系中的高度投影轴。观测条目在 task 检查点中各自校验缩放和裁剪等观测配置。即使张量尺寸相同，也需校验这些配置。例如改变蜂窝间距会改变各采样点对应的物理位置。
 
 ## 四、阶段 1：状态管理与平地基线
 
@@ -205,7 +205,7 @@ MuJoCo 打开 site group 4 可查看青色安装标记；Isaac 可在 Stage 中�
 ### 实施方案
 
 1. **MuJoCo。** 每个环境按安装点用 `mj_multiRay()` 批量查询场景几何，覆盖平面、高度场、外围平地和自定义静态地面。`ground_only` 只查地面，另外两种模式再纳入本机可视几何，用命中的 geom ID 区分地面与机器人。核对几何组过滤，避免无关几何参与求交。对照场景几何验证从平面上方、贴面和下方发射时的命中行为。 [MuJoCo 批量求交接口](https://mujoco.readthedocs.io/en/3.11.0/APIreference/APIfunctions.html#mj-multiray)
-2. **Isaac Sim。** 将本机可视网格查询扩展为统一的 Warp 场景求交器。共享地形使用与碰撞网格相同的顶点和三角面，平地查询网格的覆盖范围与场景地面一并定义和验收。场景初始化时构建 GPU 加速结构，射线输入、批量查询、最近命中比较和输出均留在 GPU。局部读取只查询选中环境，课程换区时复用共享地形加速结构。需要查询本机时，使用同帧连杆位姿，并在返回最近有效距离时标记命中是否来自地面。地面以 PhysX 场景查询对照，自遮挡以可视网格三角面对照，覆盖邻接块、外围和地图边界。
+2. **Isaac Sim。** 将本机可视网格查询扩展为统一的 Warp 场景求交器。共享地形使用与碰撞网格相同的顶点和三角面，平地查询网格的覆盖范围与场景地面一并定义和验收。首次查询时构建 GPU 加速结构，随后在场景内复用。射线输入、批量查询、最近命中比较和输出均留在 GPU。局部读取只查询选中环境，课程换区时复用共享地形加速结构。需要查询本机时，使用同帧连杆位姿，并在返回最近有效距离时标记命中是否来自地面。地面以 PhysX 场景查询对照，自遮挡以可视网格三角面对照，覆盖邻接块、外围和地图边界。
 3. **观测及状态。** 注册两个足端观测 term，用非零的遮挡高度验证掩码为假时仍正常缩放，另验缺测填零、足序及展平顺序。验证首次与局部 reset、失败回滚、终止帧、检查点续训，以及摩擦随机化和课程换地形。检查点校验第三章的采样契约。
 4. **训练及性能。** ANYmal C 在两端各执行一次真实 PPO 短训，验证评估和播放。Go1 通过配置运行平地和斜坡的 reset 与 step 验收。以相同环境数、地形、采样配置和控制步长测量启闭扫描的预热后吞吐，Isaac 另对照同批射线的 PhysX 与 GPU 求交耗时，并记录峰值显存。
 
@@ -214,6 +214,14 @@ MuJoCo 打开 site group 4 可查看青色安装标记；Isaac 可在 Stage 中�
 - `FootTerrainScan` 通过 `query_surface_rays()` 获得每束的最近命中距离和地面命中掩码。两端运行时均从场景几何获得距离，移除 `BaseSimulator._ground_ray_query` 和解析平面运行路径。解析公式用于独立测试对照。三种模式均验证命中来源、无命中和量程端点。
 - 两端用独立三角面对照斜向射线、接缝、外围、越界和局部 reset。有效掩码与参考结果一致，射线距离和投影高度的绝对误差在 `5e-5 m` 内。Isaac 共享地形的 CUDA 短训默认使用 GPU 求交，同规模求交耗时低于 PhysX 对照。
 - 两个观测条目按配置进入策略。PPO 产生有限的观测、损失和参数更新。恢复后观测可复现，播放窗口可核对采样几何，两端均有可复测的吞吐基线。
+
+### 验收记录
+
+- ANYmal C 在 4 个环境中预热 4 个控制步，再计时 24 个控制步。按每秒完成的单环境步数计，MuJoCo 关闭／启用扫描分别为 428.1／225.8，Isaac 分别为 40.6／38.6。启用时每个控制步共发射 976 束。Isaac 的 PyTorch 分配峰值分别为 9.3／10.4 MiB，预热期间采样的整卡已用显存最高分别为 4101／4105 MiB。以上为单次短测，训练规模的性能预算在阶段 5 验证。
+- ANYmal C 在 MuJoCo 和 Isaac 各用 4 个环境、每足 61 束训练。两项扫描观测共增加 488 维，总计 608 维。两端完成 PPO 更新、评估、GIF 播放、跨进程恢复和再次更新。恢复后首次 reset 的逐束掩码与保存的参考值一致，高度绝对误差在 `5e-5 m` 内。Go1 两端均通过平地和固定坡面 reset、step。
+- 地形与摩擦随机化共同启用时，注入 reset 失败后核对全部环境的扫描高度与掩码。单环境截断时分别核对末帧观测和 reset 后的策略输入。几何复验覆盖斜射三角面、接缝、外围和越界。MuJoCo 的原生水平面从下方朝上发射时返回未命中，贴面朝下的距离为零。自定义静态地面可与无关对象共用几何组。
+- Isaac 使用共享地形的 USD 碰撞顶点和三角面建立 Warp 网格，局部 reset 和课程换区复用该网格。默认无限平地利用水平平移对称性，在每束量程覆盖的局部网格上求交。RTX 4080 上对同批 854 束进行地面查询，预热后 Warp 平均 0.80 ms，PhysX 逐束对照 7.25 ms。两者的有效性一致。
+- 从仓库根目录用对应解释器运行 `python tests/manual/verify_scan_training.py <backend> <phase> --output temp/scan_acceptance`。后端为 `mujoco` 或 `isaac_sim`。先执行 `source` 再执行 `resume` 验证训练恢复，分别执行 `baseline` 和 `benchmark` 测启闭吞吐。`plane`、`slope` 验证 Go1，`geometry` 输出几何对照与投影图，附加 `--play-scan` 可以在窗口逐帧查看射线。Windows 上如出现 OpenMP 库冲突，在验收进程设置 `MKL_THREADING_LAYER=SEQUENTIAL`。 [原生验收脚本](../../tests/manual/verify_scan_training.py)
 
 ## 八、扩展 A：采集时序与缓存
 

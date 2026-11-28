@@ -121,6 +121,8 @@ term 顺序决定最终 observation 的拼接顺序。所有 observation term �
 | `joint_position_diff` | 关节位置相对默认位置的偏差 |
 | `actuator_force` | 执行器力 |
 | `foot_height` | 各足 geom 中心离地高度；`height_reference=ground`，可设为 `world` |
+| `foot_terrain_scan_heights` | 读取 `foot_terrain_scan`，按足序和蜂窝点序展平高度差。可配置含零的 `clip_range` 和 `scale`。遮挡高度参与裁剪和缩放，缺测为零 |
+| `foot_terrain_scan_valid` | 将同一帧的有效掩码按相同顺序展平，默认输出 0 或 1 |
 | `foot_contact_normal_force` | 足端法向接触力 |
 | `foot_contact_state` | 足端接触状态 |
 | `foot_duration_tanh` | 每只足的触地状态保持时间经 `tanh(alpha × 时间)` 压缩；触地为正、离地为负，默认 `alpha=1.0` |

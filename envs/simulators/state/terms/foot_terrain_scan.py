@@ -1,5 +1,6 @@
 import torch
 from math import cos, isfinite, radians, sqrt
+from typing import Any
 
 from .base import BaseSimulatorStateTerm
 from .registry import register_simulator_state_term
@@ -62,11 +63,43 @@ class FootTerrainScan(BaseSimulatorStateTerm):
         self._build_hex_layout(context, spacing, layers)
         self._resolve_mounts(mount_names, foot_count)
 
+        self._measurement_contract = {
+            "geometry": "base_reference_plane_v1",
+            "projection": "gravity_up",
+            "up_world": self._up.tolist(),
+            "feet": tuple(
+                model_context.geom_names[i]
+                for i in model_context.foot_geom_ids.tolist()
+            ),
+            "mount_names": tuple(mount_names),
+            "mount_positions": self._mount_positions.tolist(),
+            "mount_axes": self._mount_axes.tolist(),
+            "axial_coordinates": self.axial_coordinates,
+            "spacing": spacing,
+            "layers": layers,
+            "reference_height": self.ref_height,
+            "max_angle_deg": angle,
+            "hit_mode": hit_mode,
+            "max_distance": self.max_distance,
+        }
         shape = (foot_count, self.point_count)
         self.output_shapes = {
             "foot_terrain_scan_heights": shape,
             "foot_terrain_scan_valid": shape,
         }
+
+
+    def _checkpoint_metadata(self) -> dict[str, Any]:
+        return {
+            "scan": self._measurement_contract,
+        }
+
+
+    def playback_state_dict(
+        self,
+        env_index: int,
+    ) -> dict[str, Any]:
+        return self.checkpoint_state_dict()
 
 
     def _build_hex_layout(

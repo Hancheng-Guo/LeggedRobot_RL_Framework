@@ -20,6 +20,38 @@ from utils import Component
 pytestmark = pytest.mark.isaacsim
 
 
+def test_warp_scan_compares_a_transformed_link_triangle_with_the_ground():
+    pytest.importorskip("pxr")
+    pytest.importorskip("warp")
+    from pxr import Usd, UsdGeom
+
+    from envs.simulators.isaac_sim_scene_rays import IsaacSceneRayQuery
+
+    stage = Usd.Stage.CreateInMemory()
+    assert stage is not None
+    UsdGeom.Xform.Define(stage, "/Robot")
+    UsdGeom.Xform.Define(stage, "/Robot/Link")
+    triangle: Any = UsdGeom.Mesh.Define(stage, "/Robot/Link/Visual")
+    triangle.CreatePointsAttr([(0., 0., 0.), (1., 0., 0.), (0., 1., 0.)])
+    triangle.CreateFaceVertexCountsAttr([3])
+    triangle.CreateFaceVertexIndicesAttr([0, 1, 2])
+
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    query = IsaacSceneRayQuery(stage, "/Robot", ("/Link",), device, terrain_mesh=None)
+    origins = torch.tensor([[[-.25, -.25, 1.]]] * 2, device=device)
+    directions = torch.tensor([[[[0., 0., -1.], [0., 0., 0.]]]] * 2, device=device)
+    positions = torch.tensor([[[0., 0., .5]], [[2., 0., .5]]], device=device)
+    # A half turn around z covers (-.25, -.25) only in the first environment.
+    orientations = torch.tensor([[[0., 0., 0., 1.]]] * 2, device=device)
+    distances, ground = query(
+        origins, directions, limit=1., positions=positions, orientations=orientations,
+        include_ground=True,
+    )
+    expected = distances.new_tensor([[[.5, torch.nan]], [[1., torch.nan]]])
+    torch.testing.assert_close(distances, expected, equal_nan=True)
+    assert ground.tolist() == [[[False, False]], [[True, False]]]
+
+
 class FakeIsaacBackend:
     def __init__(self, context) -> None:
         self.context = context
@@ -34,8 +66,8 @@ class FakeIsaacBackend:
     def resolve_scan_mounts(self, names):
         return torch.zeros(len(names), 3), torch.tensor([[0., 0., -1.]]).repeat(len(names), 1)
 
-    def query_robot_rays(self, origins, directions, max_distance, env_ids):
-        return torch.full_like(directions[..., 0], torch.nan)
+    def query_scene_rays(self, origins, directions, max_distance, env_ids, *, include_ground, include_robot):
+        return torch.full_like(directions[..., 0], torch.nan), torch.zeros_like(directions[..., 0], dtype=torch.bool)
 
     def activate_playback(self, render_mode: str) -> None:
         self.activated_mode = render_mode
@@ -165,8 +197,6 @@ def test_isaac_state_manager_configuration_can_change_without_restarting_backend
     simulator, backend = _configure(tmp_path, runtime_context)
     try:
         initial_manager = simulator.simulator_state_manager
-        ground_query = simulator._ground_ray_query
-        assert ground_query is not None
         assert not simulator.model_context.state_term_output_shapes
         simulator.config_update(
             component=_component(),
@@ -181,10 +211,8 @@ def test_isaac_state_manager_configuration_can_change_without_restarting_backend
         assert not simulator.model_context.state_term_output_shapes
         assert not simulator.get_state().term_values
         assert simulator._require_backend() is backend and not backend.closed
-        assert simulator._ground_ray_query is ground_query
     finally:
         simulator.close()
-    assert simulator._ground_ray_query is None
 
 
 def test_isaac_checks_ground_ray_requirement_before_starting_backend(runtime_context):

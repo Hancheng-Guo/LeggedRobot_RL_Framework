@@ -49,10 +49,13 @@ python -m pip install -r requirements-mujoco.txt
 
 # Isaac Sim
 python -m pip install -r requirements-isaacsim.txt
+python -m tools.configure_isaac_environment
 
 # 开发与测试依赖（可选）
 python -m pip install -r requirements/dev.txt -c requirements/constraints/dev.txt
 ```
+
+请用安装 Isaac Sim 的解释器执行配置命令。它在 Windows 上为该解释器设置默认的 `MKL_THREADING_LAYER=SEQUENTIAL`，避免 PyTorch 和 NumPy 同进程使用时发生 OpenMP 冲突。直接启动解释器运行 VS Code 检查、训练和续训都会读取这项设置。
 
 ### 首次试跑
 
